@@ -77,3 +77,35 @@ class DeliveryBatchTests(TestCase):
         Batch.objects.create(delivery=delivery, product=self.product,
                              qty_received=Decimal("5"), qty_remaining=Decimal("5"))
         self.assertEqual(self.product.on_hand_from_batches, Decimal("8"))
+
+    def test_has_supplier_price_false_when_no_matching_price(self):
+        delivery = Delivery.objects.create(department=self.dept, supplier=self.sup,
+                                           date=datetime.date.today())
+        batch = Batch.objects.create(delivery=delivery, product=self.product,
+                                     qty_received=Decimal("3"), qty_remaining=Decimal("3"))
+        self.assertFalse(batch.has_supplier_price)
+
+    def test_has_supplier_price_true_when_matching_price_exists(self):
+        SupplierPrice.objects.create(product=self.product, supplier=self.sup,
+                                     pack_weight=Decimal("1"), pack_price=Decimal("10"))
+        delivery = Delivery.objects.create(department=self.dept, supplier=self.sup,
+                                           date=datetime.date.today())
+        batch = Batch.objects.create(delivery=delivery, product=self.product,
+                                     qty_received=Decimal("3"), qty_remaining=Decimal("3"))
+        self.assertTrue(batch.has_supplier_price)
+
+    def test_form_save_still_succeeds_when_supplier_has_no_price_for_product(self):
+        c = Client(); assert c.login(username="alice", password="pw")
+        c.get(f"/switch/{self.dept.pk}/")
+        r = c.post("/deliveries/new/", {
+            "supplier": str(self.sup.pk),
+            "date": datetime.date.today().isoformat(),
+            "product": [str(self.product.pk)],
+            "batch_code": ["X1"],
+            "use_by": [""],
+            "qty": ["8"],
+        })
+        self.assertEqual(r.status_code, 302)
+        b = Batch.objects.get()
+        self.assertEqual(b.qty_remaining, Decimal("8"))
+        self.assertFalse(b.has_supplier_price)

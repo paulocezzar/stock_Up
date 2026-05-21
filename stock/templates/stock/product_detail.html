@@ -10,7 +10,7 @@
   <thead><tr><th>Batch</th><th>Delivery</th><th>Use-by</th><th class="num">Received</th><th class="num">Remaining</th></tr></thead>
   <tbody>
   {% for b in batches %}<tr>
-    <td>{{ b.batch_code|default:"—" }}</td>
+    <td>{{ b.batch_code|default:"—" }}{% if not b.has_supplier_price %} <span class="tag prov" title="No supplier price set for this ingredient with the delivery's supplier">no price</span>{% endif %}</td>
     <td>{% if b.delivery %}{{ b.delivery.supplier.name }} · {{ b.delivery.date|date:"d M Y" }}{% else %}<span class="muted">manual</span>{% endif %}</td>
     <td>{% if b.use_by %}{{ b.use_by|date:"d M Y" }}{% else %}<span class="muted">—</span>{% endif %}</td>
     <td class="num">{{ b.qty_received|floatformat:0 }}</td>

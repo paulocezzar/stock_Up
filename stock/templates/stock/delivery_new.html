@@ -6,13 +6,16 @@
 <div class="card"><h3>Header</h3>
 <div class="row">
   <div class="field"><label>Supplier *</label>
-    <select name="supplier" required>
+    <select name="supplier" id="supplier-select" required>
       <option value="">— pick supplier —</option>
       {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
     </select></div>
   <div class="field"><label>Date</label><input type="date" name="date" value="{{ today }}"></div>
   <div class="field" style="flex:1"><label>Note <span class="muted">(optional)</span></label><input type="text" name="note" placeholder="docket #, driver, anything"></div>
 </div>
+<p class="muted" style="margin:10px 0 0;font-size:12px">
+  <label><input type="checkbox" id="show-all-ingredients" style="vertical-align:middle"> show all ingredients (not just what this supplier stocks)</label>
+</p>
 </div>
 
 <div class="card"><h3>Lines</h3>
@@ -20,7 +23,7 @@
   <thead><tr><th style="width:38%">Ingredient</th><th>Batch code</th><th>Use-by</th><th class="num">Packs received</th><th></th></tr></thead>
   <tbody>
   {% for i in "012345" %}<tr>
-    <td><select name="product"><option value="">—</option>{% for p in products %}<option value="{{ p.pk }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</select></td>
+    <td><select name="product"><option value="">—</option></select></td>
     <td><input type="text" name="batch_code" placeholder="optional"></td>
     <td><input type="date" name="use_by"></td>
     <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0"></td>
@@ -35,9 +38,11 @@
 &nbsp;<a href="{% url 'deliveries' %}" class="muted">cancel</a></p>
 </form>
 
+<template id="product-options">{% for p in products %}<option value="{{ p.pk }}" data-suppliers="{{ p.supplier_ids|join:',' }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</template>
+
 <template id="row-template">
 <tr>
-  <td><select name="product"><option value="">—</option>{% for p in products %}<option value="{{ p.pk }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</select></td>
+  <td><select name="product"><option value="">—</option></select></td>
   <td><input type="text" name="batch_code" placeholder="optional"></td>
   <td><input type="date" name="use_by"></td>
   <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0"></td>
@@ -46,10 +51,28 @@
 </template>
 
 <script>
+function refillProductSelects(){
+  var sid = document.getElementById("supplier-select").value;
+  var all = document.getElementById("show-all-ingredients").checked;
+  var tpl = document.getElementById("product-options").content;
+  document.querySelectorAll('select[name="product"]').forEach(function(sel){
+    var keep = sel.value;
+    sel.innerHTML = '<option value="">—</option>';
+    Array.prototype.forEach.call(tpl.querySelectorAll("option"), function(o){
+      var suppliers = (o.dataset.suppliers || "").split(",").filter(Boolean);
+      var match = !sid || all || suppliers.indexOf(sid) >= 0;
+      if(match){ sel.appendChild(o.cloneNode(true)); }
+    });
+    if(keep){ sel.value = keep; }
+  });
+}
 function addRow(){
   var tpl = document.getElementById("row-template");
-  var tbody = document.querySelector("#delivery-lines tbody");
-  tbody.appendChild(tpl.content.cloneNode(true));
+  document.querySelector("#delivery-lines tbody").appendChild(tpl.content.cloneNode(true));
+  refillProductSelects();
 }
+document.getElementById("supplier-select").addEventListener("change", refillProductSelects);
+document.getElementById("show-all-ingredients").addEventListener("change", refillProductSelects);
+refillProductSelects();
 </script>
 {% endblock %}

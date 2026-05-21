@@ -369,11 +369,21 @@ def delivery_new(request):
                   use_by=ub, qty_received=q, qty_remaining=q)
             for (p, code, ub, q) in rows
         ])
-        messages.success(request,
-            f"Logged delivery from {supplier.name} ({len(rows)} line{'s' if len(rows) != 1 else ''}).")
+        priced_ids = set(SupplierPrice.objects
+            .filter(supplier=supplier, product_id__in=[p.id for p, *_ in rows])
+            .values_list("product_id", flat=True))
+        no_price = sum(1 for (p, *_) in rows if p.id not in priced_ids)
+        msg = f"Logged delivery from {supplier.name} ({len(rows)} line{'s' if len(rows) != 1 else ''})."
+        if no_price:
+            msg += (f" Note: {no_price} batch{'es' if no_price != 1 else ''} "
+                    f"need{'' if no_price != 1 else 's'} a supplier price set.")
+        messages.success(request, msg)
         return redirect("deliveries")
+    products = list(dept.products.prefetch_related("prices").order_by("name"))
+    for p in products:
+        p.supplier_ids = sorted({sp.supplier_id for sp in p.prices.all()})
     return render(request, "stock/delivery_new.html", {
-        "products": dept.products.order_by("name"),
+        "products": products,
         "suppliers": Supplier.objects.order_by("name"),
         "today": datetime.date.today().isoformat(),
     })

@@ -173,3 +173,12 @@ class Batch(models.Model):
 
     def __str__(self):
         return f"{self.product.name} {self.batch_code}".strip()
+
+    @property
+    def has_supplier_price(self):
+        if not self.delivery_id:
+            return True
+        return SupplierPrice.objects.filter(
+            product_id=self.product_id,
+            supplier_id=self.delivery.supplier_id,
+        ).exists()
