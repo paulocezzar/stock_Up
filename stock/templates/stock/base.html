@@ -63,6 +63,52 @@
   .filter{display:flex;gap:10px;align-items:center;margin-bottom:14px}
   .filter input{width:280px;max-width:100%}
   .filter .count-out{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .hdr-right{margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+
+  /* ---- responsive ---- */
+  /* tablet landscape and smaller: trim outer chrome a touch */
+  @media (max-width:1024px){
+    main{padding:18px}
+    header{padding:14px 18px;gap:16px}
+  }
+  /* tablet portrait: tighter spacing; let wide tables scroll inside their card rather than breaking the page */
+  @media (max-width:768px){
+    main{padding:16px}
+    header{gap:12px;padding:12px 16px}
+    header h1{font-size:16px}
+    nav a{margin-right:12px;font-size:11px}
+    h2{font-size:17px;margin-bottom:14px}
+    .stat{min-width:110px;padding:12px 14px}
+    .stat .v{font-size:21px}
+    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%;max-width:100%}
+  }
+  /* phone: stack header, full-width fields, finger-sized targets (16px font keeps iOS from auto-zooming on focus) */
+  @media (max-width:480px){
+    body{font-size:13px}
+    main{padding:12px}
+    header{padding:10px 12px;gap:8px}
+    header h1{width:100%;font-size:15px;margin:0}
+    nav{width:100%;order:2}
+    nav a{margin-right:10px;font-size:11px;letter-spacing:.5px}
+    .hdr-right{margin-left:0;width:100%;order:3;gap:10px}
+    .hdr-right select{flex:1 1 140px}
+    h2{font-size:16px;margin-bottom:12px}
+    .stats{gap:8px}
+    .stat{flex:1 1 calc(50% - 4px);min-width:0;padding:11px 12px;border-left-width:2px}
+    .stat .v{font-size:19px}
+    th,td{padding:9px 9px}
+    input,select,textarea{font-size:16px;padding:10px 11px;min-height:42px}
+    input.count{width:96px;min-height:44px}
+    .btn{padding:12px 18px;min-height:44px}
+    .btn.ghost{padding:11px 16px}
+    .row{flex-direction:column;align-items:stretch;gap:10px}
+    .row .field{width:100%}
+    .row .field input,.row .field select{width:100%}
+    .filter{flex-direction:column;align-items:stretch;gap:6px}
+    .filter input{width:100%}
+    .card{padding:14px;margin-bottom:16px}
+    .card h3{margin-bottom:10px}
+  }
 </style>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
@@ -77,7 +123,7 @@
     <a href="{% url 'suppliers' %}" class="{% block n_sup %}{% endblock %}">Suppliers</a>
     {% if user.is_superuser %}<a href="/admin/">Admin</a>{% endif %}
   </nav>
-  <div style="margin-left:auto;display:flex;gap:14px;align-items:center">
+  <div class="hdr-right">
     {% if departments %}
     <select onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"
       style="background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);padding:6px 8px">

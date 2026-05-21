@@ -7,7 +7,12 @@
   html[data-theme="light"]{--bg:#f4f2ec;--panel:#ffffff;--panel2:#f0ede4;--line:#ddd8cc;--ink:#23211c;--muted:#7a7568;--amber:#b87400;--red:#c2412b;--dot-grid:#e8e4d8;}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--ink);
     font-family:var(--mono);background-image:radial-gradient(circle at 1px 1px,var(--dot-grid) 1px,transparent 0);background-size:22px 22px}
-  .box{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--amber);padding:32px;width:320px}
+  .box{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--amber);padding:32px;width:320px;max-width:calc(100vw - 28px)}
+  @media (max-width:480px){
+    .box{padding:22px}
+    input{font-size:16px;padding:11px;min-height:42px}
+    .btn{padding:13px;min-height:44px}
+  }
   h1{font-family:var(--disp);text-transform:uppercase;letter-spacing:1px;font-size:18px;margin:0 0 22px}
   h1 .dot{color:var(--amber)}
   label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:14px 0 5px}
