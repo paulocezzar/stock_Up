@@ -1,4 +1,4 @@
-{% extends "stock/base.html" %}
+{% extends "stock/base.html" %}{% load humanize %}
 {% block n_st %}on{% endblock %}
 {% block body %}
 <h2>Count — {{ st.date|date:"d M Y" }}</h2>
@@ -24,5 +24,10 @@
   </tr>{% endfor %}
   </tbody>
 </table>
+<p style="margin:-14px 0 18px;font-family:var(--disp);font-size:15px">
+  <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Total stock value</span>
+  &nbsp;<b>£{{ total_value|floatformat:2|intcomma }}</b>
+  <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">(counted lines only)</span>
+</p>
 <p><a href="{% url 'stocktakes' %}">← all stocktakes</a> &nbsp;·&nbsp; <a href="{% url 'dashboard' %}">dashboard →</a></p>
 {% endblock %}

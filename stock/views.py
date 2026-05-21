@@ -263,7 +263,9 @@ def count(request, pk):
             current=prev, carried_over=prev is not None))
     StockLine.objects.bulk_create(extra_lines)
     lines = list(st.lines.select_related("product").order_by("product__name"))
-    return render(request, "stock/count.html", {"st": st, "lines": lines})
+    return render(request, "stock/count.html", {
+        "st": st, "lines": lines, "total_value": st.total_value,
+    })
 
 
 @login_required
@@ -289,6 +291,7 @@ def stocktake_csv(request, pk):
             line.needed if line.needed is not None else "",
             line.value if line.value is not None else "",
         ])
+    w.writerow(["TOTAL", "", "", "", "", st.total_value])
     return resp
 
 

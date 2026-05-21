@@ -404,6 +404,56 @@ class StocktakeCSVTests(TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn("/login/", r.headers["Location"])
 
+    def test_total_value_shown_on_count_page_and_csv(self):
+        # Two ingredients, two counts. Total = 3*30 + 4*5 = 90 + 20 = 110.
+        sugar = Product.objects.create(
+            name="Sugar", code="SUG1", department=self.dept,
+            unit="g", minimum=Decimal("2"))
+        SupplierPrice.objects.create(
+            product=sugar, supplier=self.sup,
+            pack_weight=Decimal("1000"), pack_price=Decimal("5.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 3, 1))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("3"), carried_over=False)
+        StockLine.objects.create(stocktake=st, product=sugar,
+                                 current=Decimal("4"), carried_over=False)
+
+        # Page shows the total
+        r = self.client.get(f"/stocktakes/{st.pk}/count/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("Total stock value", body)
+        self.assertIn("£110.00", body)
+
+        # CSV has per-line rows AND a TOTAL row
+        r = self.client.get(f"/stocktakes/{st.pk}/csv/")
+        body = r.content.decode()
+        self.assertIn("Flour,FLR1,5.00,3.00,2.00,90.00", body)
+        self.assertIn("Sugar,SUG1,2.00,4.00,0,20.00", body)
+        # TOTAL row last, with the summed value
+        lines = body.strip().splitlines()
+        self.assertEqual(lines[-1], "TOTAL,,,,,110.00")
+
+    def test_total_value_skips_uncounted_lines(self):
+        # One counted, one blank — total reflects only the counted one.
+        sugar = Product.objects.create(
+            name="Sugar", code="SUG1", department=self.dept,
+            unit="g", minimum=0)
+        SupplierPrice.objects.create(
+            product=sugar, supplier=self.sup,
+            pack_weight=Decimal("1000"), pack_price=Decimal("5.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 3, 8))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("3"), carried_over=False)
+        StockLine.objects.create(stocktake=st, product=sugar, current=None)
+
+        r = self.client.get(f"/stocktakes/{st.pk}/count/")
+        self.assertIn("£90.00", r.content.decode())
+        r = self.client.get(f"/stocktakes/{st.pk}/csv/")
+        self.assertIn("TOTAL,,,,,90.00", r.content.decode())
+
     def test_count_page_links_to_csv(self):
         st = Stocktake.objects.create(department=self.dept,
                                       date=datetime.date(2026, 1, 15))
