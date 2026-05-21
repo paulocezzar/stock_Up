@@ -382,6 +382,22 @@ def deliveries(request):
 
 
 @login_required
+def delivery_detail(request, pk):
+    delivery = get_object_or_404(Delivery.objects.select_related("supplier", "department"), pk=pk)
+    if not delivery.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    batches = list(delivery.batches.select_related("product")
+                   .order_by("product__name"))
+    total_packs = sum((b.qty_received for b in batches), Decimal("0"))
+    return render(request, "stock/delivery_detail.html", {
+        "delivery": delivery,
+        "batches": batches,
+        "n_lines": len(batches),
+        "total_packs": total_packs,
+    })
+
+
+@login_required
 def delivery_new(request):
     dept = current_department(request)
     if dept is None:

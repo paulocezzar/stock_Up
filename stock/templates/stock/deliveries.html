@@ -10,8 +10,8 @@
   <thead><tr><th>Date</th><th>Supplier</th><th class="num">Lines</th><th class="num">Packs in</th><th>Note</th></tr></thead>
   <tbody>
   {% for d in deliveries %}<tr>
-    <td>{{ d.date|date:"d M Y" }}</td>
-    <td>{{ d.supplier.name }}</td>
+    <td><a href="{% url 'delivery_detail' d.pk %}">{{ d.date|date:"d M Y" }}</a></td>
+    <td><a href="{% url 'delivery_detail' d.pk %}" style="color:var(--ink)">{{ d.supplier.name }}</a></td>
     <td class="num">{{ d.n_lines|default:0 }}</td>
     <td class="num">{{ d.packs_in|default_if_none:0|floatformat:0 }}</td>
     <td class="muted">{{ d.note|default:"" }}</td>

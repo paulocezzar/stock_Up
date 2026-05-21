@@ -347,6 +347,100 @@ class UsageHistoryTests(TestCase):
         self.assertEqual(self.flour.usage_history(), [])
 
 
+class DeliveryDetailTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Acme Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="g", minimum=0)
+        self.sugar = Product.objects.create(
+            name="Sugar", code="SUG1", department=self.dept,
+            unit="g", minimum=0)
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25000"), pack_price=Decimal("30"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_delivery_detail_renders_with_lines(self):
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=self.sup,
+            date=datetime.date(2026, 5, 22), note="docket 99")
+        Batch.objects.create(
+            delivery=delivery, product=self.flour, batch_code="A123",
+            use_by=datetime.date(2026, 12, 31),
+            qty_received=Decimal("8"), qty_remaining=Decimal("8"))
+        Batch.objects.create(
+            delivery=delivery, product=self.sugar, batch_code="B7",
+            qty_received=Decimal("4"), qty_remaining=Decimal("4"))
+
+        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+
+        # Header bits
+        self.assertIn("Acme Mill", body)
+        self.assertIn("22 May 2026", body)
+        self.assertIn("docket 99", body)
+
+        # Header stats: 2 lines, 12 packs in
+        self.assertRegex(body, r"Lines</div><div class=\"v\">2<")
+        self.assertRegex(body, r"Packs in</div><div class=\"v\">12<")
+
+        # Both batches present with qty and batch code
+        self.assertIn("Flour", body)
+        self.assertIn("FLR1", body)
+        self.assertIn("A123", body)
+        self.assertIn("Sugar", body)
+        self.assertIn("B7", body)
+        self.assertIn("31 Dec 2026", body)
+
+        # Ingredient links through to product detail
+        self.assertIn(f'href="/products/{self.flour.pk}/"', body)
+        self.assertIn(f'href="/products/{self.sugar.pk}/"', body)
+
+        # Back link
+        self.assertIn('href="/deliveries/"', body)
+
+        # has_supplier_price flag: flour has a price, sugar does not
+        # The "no price" tag should appear once (sugar row).
+        self.assertEqual(body.count("no price"), 1)
+
+    def test_delivery_detail_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        delivery = Delivery.objects.create(
+            department=other, supplier=self.sup, date=datetime.date(2026, 5, 22))
+        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        self.assertEqual(r.status_code, 403)
+
+    def test_delivery_detail_requires_login(self):
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
+        c = Client()
+        r = c.get(f"/deliveries/{delivery.pk}/")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/login/", r.headers["Location"])
+
+    def test_deliveries_list_rows_link_to_detail(self):
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
+        r = self.client.get("/deliveries/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(f'href="/deliveries/{delivery.pk}/"', r.content.decode())
+
+    def test_delivery_with_no_batches_still_renders(self):
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
+        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("No batches on this delivery.", r.content.decode())
+
+
 class StocktakeCSVTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
