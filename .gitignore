@@ -6,3 +6,5 @@ staticfiles/
 *.xlsx
 .DS_Store
 venv/
+
+.claude/
