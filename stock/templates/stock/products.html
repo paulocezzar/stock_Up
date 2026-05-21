@@ -9,8 +9,8 @@
     <datalist id="suplist">{% for s in suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist></div>
   <div class="field"><label>Code <span class="muted">(optional)</span></label><input type="text" name="code" placeholder="BAKE00123" style="width:120px"></div>
   <div class="field"><label>Name *</label><input type="text" name="name" required placeholder="Caster Sugar" style="width:190px"></div>
-  <div class="field"><label>Pack size</label><input type="number" step="any" name="quantity" class="count" placeholder="25000"></div>
-  <div class="field"><label>Pack unit</label><select name="unit"><option value="g">g</option><option value="ml">ml</option><option value="ea">each</option></select></div>
+  <div class="field"><label>Pack size</label><input type="number" step="any" name="quantity" class="count" placeholder="25"></div>
+  <div class="field"><label>Pack unit</label><select name="unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="ea">each</option></select></div>
   <div class="field"><label>Cost / pack (£)</label><input type="number" step="any" name="cost" class="count" placeholder="34.91"></div>
   <div class="field"><label>Minimum</label><input type="number" step="any" name="minimum" class="count" value="0"></div>
   <button class="btn" type="submit">Add</button>

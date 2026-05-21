@@ -347,6 +347,107 @@ class UsageHistoryTests(TestCase):
         self.assertEqual(self.flour.usage_history(), [])
 
 
+class PackUnitConversionTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_add_ingredient_in_kg_stores_grams(self):
+        r = self.client.post("/products/", {
+            "name": "Flour", "code": "FLR1",
+            "quantity": "23", "unit": "kg",
+            "supplier": "Mill", "cost": "30",
+            "minimum": "5",
+        })
+        self.assertEqual(r.status_code, 302)
+        p = Product.objects.get(code="FLR1")
+        self.assertEqual(p.unit, "g")
+        sp = SupplierPrice.objects.get(product=p)
+        self.assertEqual(sp.pack_weight, Decimal("23000"))
+
+    def test_add_ingredient_in_litres_stores_millilitres(self):
+        r = self.client.post("/products/", {
+            "name": "Oil", "code": "OIL1",
+            "quantity": "2", "unit": "L",
+            "supplier": "Mill", "cost": "10",
+            "minimum": "1",
+        })
+        self.assertEqual(r.status_code, 302)
+        p = Product.objects.get(code="OIL1")
+        self.assertEqual(p.unit, "ml")
+        sp = SupplierPrice.objects.get(product=p)
+        self.assertEqual(sp.pack_weight, Decimal("2000"))
+
+    def test_add_ingredient_in_grams_unchanged(self):
+        r = self.client.post("/products/", {
+            "name": "Salt", "code": "SLT1",
+            "quantity": "500", "unit": "g",
+            "supplier": "Mill", "cost": "1.50",
+        })
+        self.assertEqual(r.status_code, 302)
+        p = Product.objects.get(code="SLT1")
+        self.assertEqual(p.unit, "g")
+        sp = SupplierPrice.objects.get(product=p)
+        self.assertEqual(sp.pack_weight, Decimal("500"))
+
+    def test_add_ingredient_in_kg_without_supplier_price_still_normalises_unit(self):
+        # No supplier/cost - just creating the ingredient. The unit picker
+        # should still produce a "g"-unit product.
+        r = self.client.post("/products/", {"name": "Sugar", "code": "SUG1", "unit": "kg"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(Product.objects.get(code="SUG1").unit, "g")
+
+    def test_supplier_price_entry_in_kg_stores_grams(self):
+        # Existing g-unit product; add a supplier price in kg.
+        product = Product.objects.create(
+            name="Flour", department=self.dept, unit="g", minimum=0)
+        r = self.client.post(f"/products/{product.pk}/", {
+            "supplier": "Mill",
+            "pack_weight": "23",
+            "pack_unit": "kg",
+            "pack_price": "30",
+        })
+        self.assertEqual(r.status_code, 302)
+        sp = SupplierPrice.objects.get(product=product)
+        self.assertEqual(sp.pack_weight, Decimal("23000"))
+
+    def test_supplier_price_entry_in_litres_stores_millilitres(self):
+        product = Product.objects.create(
+            name="Oil", department=self.dept, unit="ml", minimum=0)
+        r = self.client.post(f"/products/{product.pk}/", {
+            "supplier": "Mill",
+            "pack_weight": "2",
+            "pack_unit": "L",
+            "pack_price": "10",
+        })
+        self.assertEqual(r.status_code, 302)
+        sp = SupplierPrice.objects.get(product=product)
+        self.assertEqual(sp.pack_weight, Decimal("2000"))
+
+    def test_re_adding_same_code_with_kg_updates_product_unit_and_pack(self):
+        # First add as grams
+        self.client.post("/products/", {
+            "name": "Flour", "code": "FLR9",
+            "quantity": "500", "unit": "g",
+            "supplier": "Mill", "cost": "1",
+        })
+        # Re-add same code with kg - update_or_create path
+        self.client.post("/products/", {
+            "name": "Flour", "code": "FLR9",
+            "quantity": "25", "unit": "kg",
+            "supplier": "Mill", "cost": "30",
+        })
+        p = Product.objects.get(code="FLR9")
+        self.assertEqual(p.unit, "g")
+        sp = SupplierPrice.objects.get(product=p, supplier__name="Mill")
+        self.assertEqual(sp.pack_weight, Decimal("25000"))
+
+
 class PackSizeFilterTests(SimpleTestCase):
     def test_grams_promoted_to_kg_at_threshold(self):
         self.assertEqual(pack_size(25000, "g"), "25 kg")

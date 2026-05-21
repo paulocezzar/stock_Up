@@ -31,6 +31,20 @@ def _dec(raw):
         return None
 
 
+def _normalize_pack(input_unit, qty):
+    """Map a user-facing pack unit to (stored_unit, stored_qty).
+
+    Pack sizes are always stored in the base unit (g, ml or ea) so existing
+    maths and the £/1000 comparison stay consistent. kg / L are convenience
+    inputs that we multiply by 1000 and store as g / ml.
+    """
+    if input_unit == "kg":
+        return "g", (qty * 1000 if qty is not None else None)
+    if input_unit == "L":
+        return "ml", (qty * 1000 if qty is not None else None)
+    return input_unit, qty
+
+
 def user_departments(user):
     if user.is_superuser:
         return Department.objects.all()
@@ -121,7 +135,9 @@ def products(request):
         if not name:
             messages.error(request, "Name is required.")
             return redirect("products")
-        defaults = {"name": name, "unit": request.POST.get("unit") or "g",
+        stored_unit, stored_qty = _normalize_pack(
+            request.POST.get("unit") or "g", _dec(request.POST.get("quantity")))
+        defaults = {"name": name, "unit": stored_unit,
                     "minimum": _dec(request.POST.get("minimum")) or 0,
                     "department": dept}
         if code:
@@ -130,13 +146,12 @@ def products(request):
         else:
             product = Product.objects.create(**defaults)
         sup = (request.POST.get("supplier") or "").strip()
-        qty = _dec(request.POST.get("quantity"))
         cost = _dec(request.POST.get("cost"))
-        if sup and qty and cost is not None:
+        if sup and stored_qty and cost is not None:
             supplier, _ = Supplier.objects.get_or_create(name=sup)
             SupplierPrice.objects.update_or_create(
                 product=product, supplier=supplier,
-                defaults={"pack_weight": qty, "pack_price": cost})
+                defaults={"pack_weight": stored_qty, "pack_price": cost})
             messages.success(request, f"Saved '{name}' with {sup} price.")
         else:
             messages.success(request, f"Saved '{name}'.")
@@ -161,7 +176,9 @@ def product_detail(request, pk):
         return HttpResponseForbidden("Not your department.")
     if request.method == "POST":
         sup = (request.POST.get("supplier") or "").strip()
-        wt = _dec(request.POST.get("pack_weight"))
+        _, wt = _normalize_pack(
+            request.POST.get("pack_unit") or product.unit,
+            _dec(request.POST.get("pack_weight")))
         pr = _dec(request.POST.get("pack_price"))
         if sup and wt and pr is not None:
             supplier, _ = Supplier.objects.get_or_create(name=sup)
