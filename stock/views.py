@@ -53,21 +53,39 @@ def suppliers(request):
 # ---- products ----
 def products(request):
     if request.method == "POST":
-        code = (request.POST.get("code") or "").strip()
+        code = (request.POST.get("code") or "").strip() or None
         name = (request.POST.get("name") or "").strip()
-        if code and name:
-            Product.objects.update_or_create(code=code, defaults={
-                "name": name,
-                "unit": request.POST.get("unit") or "g",
-                "minimum": _dec(request.POST.get("minimum")) or 0,
-                "weekly_usage": _dec(request.POST.get("weekly_usage")),
-            })
-            messages.success(request, f"Saved '{name}'.")
+        if not name:
+            messages.error(request, "Name is required.")
+            return redirect("products")
+        unit = request.POST.get("unit") or "g"
+        defaults = {"name": name, "unit": unit,
+                    "minimum": _dec(request.POST.get("minimum")) or 0}
+        if code:
+            product, _ = Product.objects.update_or_create(code=code, defaults=defaults)
         else:
-            messages.error(request, "Code and name are required.")
+            product, created = Product.objects.get_or_create(name=name, code__isnull=True,
+                                                             defaults=defaults)
+            if not created:
+                for k, v in defaults.items():
+                    setattr(product, k, v)
+                product.save()
+        # optional inline supplier price
+        sup = (request.POST.get("supplier") or "").strip()
+        qty = _dec(request.POST.get("quantity"))
+        cost = _dec(request.POST.get("cost"))
+        if sup and qty and cost is not None:
+            supplier, _ = Supplier.objects.get_or_create(name=sup)
+            SupplierPrice.objects.update_or_create(
+                product=product, supplier=supplier,
+                defaults={"pack_weight": qty, "pack_price": cost})
+            messages.success(request, f"Saved '{name}' with {sup} price.")
+        else:
+            messages.success(request, f"Saved '{name}'.")
         return redirect("products")
     return render(request, "stock/products.html", {
         "products": Product.objects.prefetch_related("prices__supplier"),
+        "suppliers": Supplier.objects.all(),
     })
 
 

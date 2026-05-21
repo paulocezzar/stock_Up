@@ -20,7 +20,7 @@ class Supplier(models.Model):
 
 class Product(models.Model):
     UNIT_CHOICES = [("g", "grams"), ("ml", "millilitres"), ("ea", "each")]
-    code = models.CharField(max_length=20, unique=True)
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     name = models.CharField(max_length=200)
     unit = models.CharField(max_length=8, choices=UNIT_CHOICES, default="g")
     minimum = models.DecimalField("minimum (par level)", max_digits=10, decimal_places=2, default=0)
@@ -30,7 +30,7 @@ class Product(models.Model):
         ordering = ["name"]
 
     def __str__(self):
-        return f"{self.name} ({self.code})"
+        return f"{self.name} ({self.code})" if self.code else self.name
 
     @property
     def cheapest_price(self):

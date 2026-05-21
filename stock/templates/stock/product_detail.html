@@ -1,7 +1,7 @@
 {% extends "stock/base.html" %}
 {% block n_prod %}on{% endblock %}
 {% block body %}
-<h2>{{ product.name }} <span class="muted" style="font-size:14px">{{ product.code }} · min {{ product.minimum|floatformat:0 }} {{ product.unit }}</span></h2>
+<h2>{{ product.name }} <span class="muted" style="font-size:14px">{% if product.code %}{{ product.code }} · {% endif %}min {{ product.minimum|floatformat:0 }} {{ product.unit }}</span></h2>
 
 <div class="card"><h3>Supplier prices</h3>
 <table>
