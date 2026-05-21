@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Stock Ops{% endblock %}</title>
+<title>{% block title %}Stock Up{% endblock %}</title>
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <script>/*pre-paint theme*/(function(){try{var t=localStorage.getItem("stockops-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -67,7 +67,7 @@
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 <header>
-  <h1>STOCK<span class="dot">.</span>OPS</h1>
+  <h1>STOCK<span class="dot">.</span>UP</h1>
   <nav>
     <a href="{% url 'dashboard' %}" class="{% block n_dash %}{% endblock %}">Dashboard</a>
     <a href="{% url 'stocktakes' %}" class="{% block n_st %}{% endblock %}">Stocktakes</a>

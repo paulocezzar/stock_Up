@@ -1,4 +1,4 @@
-# Stock Ops — bakery stock & supplier price tool
+# Stock Up — bakery stock & supplier price tool
 
 A small Django app that replaces the price-comparison + stocktake spreadsheets.
 Everything is relational, so "cheapest supplier" is a live query (no #REF! rot),

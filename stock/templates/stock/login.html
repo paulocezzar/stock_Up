@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Stock Ops</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Stock Up</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{--bg:#0e0f12;--panel:#16181d;--panel2:#1d2027;--line:#2a2e37;--ink:#e7e3d8;--muted:#8b8f9a;--amber:#f0a500;--red:#e0573e;
@@ -22,7 +22,7 @@
 function toggleTheme(){var c=document.documentElement.getAttribute("data-theme")==="light"?"dark":"light";try{localStorage.setItem("stockops-theme",c);}catch(e){}document.documentElement.setAttribute("data-theme",c);}
 </script></head><body>
 <form class="box" method="post">{% csrf_token %}
-  <h1>STOCK<span class="dot">.</span>OPS</h1>
+  <h1>STOCK<span class="dot">.</span>UP</h1>
   {% if form.errors %}<div class="err">Wrong username or password.</div>{% endif %}
   <label>Username</label><input name="username" autofocus>
   <label>Password</label><input name="password" type="password">
