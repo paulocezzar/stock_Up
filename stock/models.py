@@ -1,6 +1,7 @@
+import datetime
 from decimal import Decimal
 from django.db import models
-from django.db.models import F, ExpressionWrapper, DecimalField
+from django.db.models import F, ExpressionWrapper, DecimalField, Sum
 
 PER_1000 = ExpressionWrapper(
     F("pack_price") / F("pack_weight") * 1000,
@@ -64,6 +65,10 @@ class Product(models.Model):
     def history(self, limit=8):
         return list(StockLine.objects.filter(product=self, current__isnull=False)
                     .select_related("stocktake").order_by("-stocktake__date")[:limit])
+
+    @property
+    def on_hand_from_batches(self):
+        return self.batches.aggregate(total=Sum("qty_remaining"))["total"] or Decimal("0")
 
 
 class SupplierPrice(models.Model):
@@ -138,3 +143,33 @@ class StockLine(models.Model):
         if self.current is None or cheapest is None:
             return None
         return (self.current * cheapest.pack_price).quantize(Decimal("0.01"))
+
+
+class Delivery(models.Model):
+    department = models.ForeignKey(Department, related_name="deliveries", on_delete=models.CASCADE)
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT)
+    date = models.DateField(default=datetime.date.today)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+
+    def __str__(self):
+        return f"{self.supplier.name} - {self.date:%d %b %Y}"
+
+
+class Batch(models.Model):
+    delivery = models.ForeignKey(Delivery, related_name="batches",
+                                 null=True, blank=True, on_delete=models.SET_NULL)
+    product = models.ForeignKey(Product, related_name="batches", on_delete=models.PROTECT)
+    batch_code = models.CharField(max_length=50, blank=True)
+    use_by = models.DateField(null=True, blank=True)
+    qty_received = models.DecimalField(max_digits=12, decimal_places=2)
+    qty_remaining = models.DecimalField(max_digits=12, decimal_places=2)
+    created = models.DateField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["use_by", "-created"]
+
+    def __str__(self):
+        return f"{self.product.name} {self.batch_code}".strip()

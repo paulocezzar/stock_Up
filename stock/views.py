@@ -4,9 +4,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.db.models import Count
+from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch
 
 
 def _carry_over_value(dept, product_id, exclude_stocktake_id=None):
@@ -173,6 +173,7 @@ def product_detail(request, pk):
         "prices": product.prices.select_related("supplier").all(),
         "suppliers": Supplier.objects.all(),
         "history": product.history(),
+        "batches": product.batches.select_related("delivery__supplier").order_by("use_by", "-created"),
     })
 
 
@@ -310,3 +311,69 @@ def reorder_csv(request):
                     r["pack_price"] if r["pack_price"] is not None else "",
                     r["est_cost"] if r["est_cost"] is not None else ""])
     return resp
+
+
+# ---- deliveries / goods-in (per department) ----
+@login_required
+def deliveries(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    deliv = (dept.deliveries.select_related("supplier")
+             .annotate(n_lines=Count("batches"), packs_in=Sum("batches__qty_received"))
+             .order_by("-date", "-id"))
+    return render(request, "stock/deliveries.html", {"deliveries": deliv})
+
+
+@login_required
+def delivery_new(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    if request.method == "POST":
+        supplier_id = request.POST.get("supplier")
+        supplier = Supplier.objects.filter(pk=supplier_id).first() if supplier_id else None
+        if not supplier:
+            messages.error(request, "Pick a supplier.")
+            return redirect("delivery_new")
+        date_str = (request.POST.get("date") or "").strip()
+        try:
+            d = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
+        except ValueError:
+            d = datetime.date.today()
+        product_ids = request.POST.getlist("product")
+        batch_codes = request.POST.getlist("batch_code")
+        use_by_strs = request.POST.getlist("use_by")
+        qty_strs = request.POST.getlist("qty")
+        rows = []
+        for pid, code, ub, q in zip(product_ids, batch_codes, use_by_strs, qty_strs):
+            qty = _dec(q)
+            if not pid or qty is None or qty <= 0:
+                continue
+            product = dept.products.filter(pk=pid).first()
+            if not product:
+                continue
+            try:
+                ub_date = datetime.date.fromisoformat(ub) if ub.strip() else None
+            except ValueError:
+                ub_date = None
+            rows.append((product, code.strip(), ub_date, qty))
+        if not rows:
+            messages.error(request, "Add at least one line with a quantity.")
+            return redirect("delivery_new")
+        delivery = Delivery.objects.create(
+            department=dept, supplier=supplier, date=d,
+            note=(request.POST.get("note") or "").strip())
+        Batch.objects.bulk_create([
+            Batch(delivery=delivery, product=p, batch_code=code,
+                  use_by=ub, qty_received=q, qty_remaining=q)
+            for (p, code, ub, q) in rows
+        ])
+        messages.success(request,
+            f"Logged delivery from {supplier.name} ({len(rows)} line{'s' if len(rows) != 1 else ''}).")
+        return redirect("deliveries")
+    return render(request, "stock/delivery_new.html", {
+        "products": dept.products.order_by("name"),
+        "suppliers": Supplier.objects.order_by("name"),
+        "today": datetime.date.today().isoformat(),
+    })

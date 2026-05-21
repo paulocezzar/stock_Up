@@ -18,4 +18,6 @@ urlpatterns = [
     path("stocktakes/", views.stocktakes, name="stocktakes"),
     path("stocktakes/<int:pk>/count/", views.count, name="count"),
     path("count/line/<int:line_id>/", views.save_count, name="save_count"),
+    path("deliveries/", views.deliveries, name="deliveries"),
+    path("deliveries/new/", views.delivery_new, name="delivery_new"),
 ]

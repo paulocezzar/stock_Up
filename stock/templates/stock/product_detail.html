@@ -3,6 +3,24 @@
 {% block body %}
 <h2>{{ product.name }} <span class="muted" style="font-size:14px">{% if product.code %}{{ product.code }} · {% endif %}min {{ product.minimum|floatformat:0 }} {{ product.unit }}</span></h2>
 
+<div class="card"><h3>On hand (from batches)</h3>
+<p style="font-family:var(--disp);font-size:24px;font-weight:600;margin:0 0 12px">{{ product.on_hand_from_batches|floatformat:0 }} <span class="muted" style="font-size:13px;font-weight:400">packs across {{ batches|length }} batch{{ batches|length|pluralize:"es" }}</span></p>
+{% if batches %}
+<table>
+  <thead><tr><th>Batch</th><th>Delivery</th><th>Use-by</th><th class="num">Received</th><th class="num">Remaining</th></tr></thead>
+  <tbody>
+  {% for b in batches %}<tr>
+    <td>{{ b.batch_code|default:"—" }}</td>
+    <td>{% if b.delivery %}{{ b.delivery.supplier.name }} · {{ b.delivery.date|date:"d M Y" }}{% else %}<span class="muted">manual</span>{% endif %}</td>
+    <td>{% if b.use_by %}{{ b.use_by|date:"d M Y" }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{{ b.qty_received|floatformat:0 }}</td>
+    <td class="num">{{ b.qty_remaining|floatformat:0 }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No batches recorded — log a delivery to start tracking.</p>{% endif %}
+</div>
+
 <div class="card"><h3>Supplier prices</h3>
 <table>
   <thead><tr><th>Supplier</th><th class="num">Pack weight</th><th class="num">Pack price</th><th class="num">£/1000</th><th></th></tr></thead>

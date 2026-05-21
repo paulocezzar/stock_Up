@@ -1,0 +1,55 @@
+{% extends "stock/base.html" %}
+{% block n_deliv %}on{% endblock %}
+{% block body %}
+<h2>New delivery</h2>
+<form method="post">{% csrf_token %}
+<div class="card"><h3>Header</h3>
+<div class="row">
+  <div class="field"><label>Supplier *</label>
+    <select name="supplier" required>
+      <option value="">— pick supplier —</option>
+      {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+    </select></div>
+  <div class="field"><label>Date</label><input type="date" name="date" value="{{ today }}"></div>
+  <div class="field" style="flex:1"><label>Note <span class="muted">(optional)</span></label><input type="text" name="note" placeholder="docket #, driver, anything"></div>
+</div>
+</div>
+
+<div class="card"><h3>Lines</h3>
+<table id="delivery-lines">
+  <thead><tr><th style="width:38%">Ingredient</th><th>Batch code</th><th>Use-by</th><th class="num">Packs received</th><th></th></tr></thead>
+  <tbody>
+  {% for i in "012345" %}<tr>
+    <td><select name="product"><option value="">—</option>{% for p in products %}<option value="{{ p.pk }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</select></td>
+    <td><input type="text" name="batch_code" placeholder="optional"></td>
+    <td><input type="date" name="use_by"></td>
+    <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0"></td>
+    <td><button type="button" class="btn ghost" style="padding:4px 10px" onclick="this.closest('tr').remove()">×</button></td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+<p><button type="button" class="btn ghost" onclick="addRow()">+ add row</button></p>
+</div>
+
+<p><button class="btn" type="submit">Log delivery</button>
+&nbsp;<a href="{% url 'deliveries' %}" class="muted">cancel</a></p>
+</form>
+
+<template id="row-template">
+<tr>
+  <td><select name="product"><option value="">—</option>{% for p in products %}<option value="{{ p.pk }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</select></td>
+  <td><input type="text" name="batch_code" placeholder="optional"></td>
+  <td><input type="date" name="use_by"></td>
+  <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0"></td>
+  <td><button type="button" class="btn ghost" style="padding:4px 10px" onclick="this.closest('tr').remove()">×</button></td>
+</tr>
+</template>
+
+<script>
+function addRow(){
+  var tpl = document.getElementById("row-template");
+  var tbody = document.querySelector("#delivery-lines tbody");
+  tbody.appendChild(tpl.content.cloneNode(true));
+}
+</script>
+{% endblock %}
