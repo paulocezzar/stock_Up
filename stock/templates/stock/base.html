@@ -54,7 +54,7 @@
   .spark span{width:7px;background:var(--amber-dim,#5a4410);background:linear-gradient(var(--amber),#5a4410)}
 </style>
 </head>
-<body>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 <header>
   <h1>STOCK<span class="dot">.</span>OPS</h1>
   <nav>
