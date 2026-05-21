@@ -4,7 +4,7 @@
 <div class="stats">
   <div class="stat"><div class="k">Ingredients</div><div class="v">{{ n_products }}</div></div>
   <div class="stat {% if below %}warn{% endif %}"><div class="k">Below minimum</div><div class="v">{{ below }}</div></div>
-  <div class="stat"><div class="k">Stock value</div><div class="v">£{{ value|floatformat:0|intcomma }}</div></div>
+  <div class="stat"><div class="k">Stock value</div><div class="v">£{{ value|floatformat:2|intcomma }}</div></div>
   <div class="stat"><div class="k">Last count</div><div class="v" style="font-size:15px">{% if latest %}{{ latest.date|date:"d M Y" }}{% else %}—{% endif %}</div></div>
 </div>
 {% if rows %}
