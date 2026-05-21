@@ -71,9 +71,12 @@ def dashboard(request):
         low = cur is not None and cur < p.minimum
         if low:
             below += 1
+        days_cover = p.days_of_cover(cur) if cur is not None else None
+        low_by_usage = (not low and days_cover is not None and days_cover < 14)
         rows.append({"p": p, "cheap": p.cheapest_price, "current": cur,
-                     "low": low, "needed": (p.minimum - cur) if low else None})
-    rows.sort(key=lambda r: (not r["low"], r["p"].name.lower()))
+                     "low": low, "needed": (p.minimum - cur) if low else None,
+                     "days_cover": days_cover, "low_by_usage": low_by_usage})
+    rows.sort(key=lambda r: (not r["low"], not r["low_by_usage"], r["p"].name.lower()))
     latest = dept.stocktakes.first()
     return render(request, "stock/dashboard.html", {
         "rows": rows, "below": below, "latest": latest,
@@ -169,12 +172,17 @@ def product_detail(request, pk):
         else:
             messages.error(request, "Supplier, pack weight and price are all required.")
         return redirect("product_detail", pk=pk)
+    on_hand = product.on_hand_from_batches
     return render(request, "stock/product_detail.html", {
         "product": product,
         "prices": product.prices.select_related("supplier").all(),
         "suppliers": Supplier.objects.all(),
         "history": product.history(),
         "batches": product.batches.select_related("delivery__supplier").order_by("use_by", "-created"),
+        "usage_rows": product.usage_history(),
+        "avg_weekly_usage": product.average_weekly_usage(),
+        "days_of_cover": product.days_of_cover(on_hand),
+        "on_hand": on_hand,
     })
 
 

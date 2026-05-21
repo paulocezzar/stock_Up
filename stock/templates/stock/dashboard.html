@@ -20,7 +20,7 @@
       <td class="num">{% if r.current is not None %}{{ r.current|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{{ r.p.minimum|floatformat:0 }}{% if r.cheap %} <span class="muted" style="font-size:11px">(×{{ r.cheap.pack_weight|pack_size:r.p.unit }})</span>{% endif %}</td>
       <td class="num">{% if r.needed %}{{ r.needed|floatformat:0 }}{% endif %}</td>
-      <td>{% if r.low %}<span class="tag low">reorder</span>{% elif r.current is not None %}<span class="tag ok">ok</span>{% endif %}</td>
+      <td>{% if r.low %}<span class="tag low">reorder</span>{% elif r.low_by_usage %}<span class="tag prov" title="At current usage rate, ~{{ r.days_cover }} days of cover left">~{{ r.days_cover }}d cover</span>{% elif r.current is not None %}<span class="tag ok">ok</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

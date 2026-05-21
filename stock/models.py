@@ -70,6 +70,59 @@ class Product(models.Model):
     def on_hand_from_batches(self):
         return self.batches.aggregate(total=Sum("qty_remaining"))["total"] or Decimal("0")
 
+    def usage_history(self, limit=8):
+        """Per-count usage records, most recent first.
+
+        usage = previous count's current + packs delivered strictly after the
+        previous stocktake date and on/before this stocktake's date - this
+        count's current. Only actually-counted lines (carried_over=False) are
+        used; the first-ever count has no predecessor and is omitted.
+        Negative usage is clamped to 0 and flagged.
+        """
+        if not self.department_id:
+            return []
+        lines = list(StockLine.objects
+            .filter(product=self, stocktake__department_id=self.department_id,
+                    carried_over=False, current__isnull=False)
+            .select_related("stocktake")
+            .order_by("-stocktake__date", "-id")[:limit + 1])
+        rows = []
+        for i in range(len(lines) - 1):
+            line, prev = lines[i], lines[i + 1]
+            cur_date, prev_date = line.stocktake.date, prev.stocktake.date
+            delivered = Batch.objects.filter(
+                product=self,
+                delivery__department_id=self.department_id,
+                delivery__date__gt=prev_date,
+                delivery__date__lte=cur_date,
+            ).aggregate(t=Sum("qty_received"))["t"] or Decimal("0")
+            raw = prev.current + delivered - line.current
+            clamped = raw < 0
+            rows.append({
+                "stocktake": line.stocktake,
+                "previous": prev.stocktake,
+                "previous_current": prev.current,
+                "current": line.current,
+                "delivered": delivered,
+                "usage": Decimal("0") if clamped else raw,
+                "clamped": clamped,
+                "days": (cur_date - prev_date).days,
+            })
+        return rows
+
+    def average_weekly_usage(self, n=4):
+        rows = self.usage_history(limit=n)
+        if not rows:
+            return None
+        total = sum((r["usage"] for r in rows), Decimal("0"))
+        return (total / len(rows)).quantize(Decimal("0.01"))
+
+    def days_of_cover(self, on_hand, n=4):
+        avg = self.average_weekly_usage(n=n)
+        if avg is None or avg <= 0 or on_hand is None:
+            return None
+        return int((Decimal(on_hand) / avg * Decimal(7)).quantize(Decimal("1")))
+
 
 class SupplierPrice(models.Model):
     product = models.ForeignKey(Product, related_name="prices", on_delete=models.CASCADE)

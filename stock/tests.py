@@ -258,6 +258,95 @@ class DeliveryScanFlowTests(TestCase):
         self.assertIn('name="file"', body)
 
 
+class UsageHistoryTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Mill")
+        self.flour = Product.objects.create(
+            name="Flour", department=self.dept, unit="ea", minimum=0)
+
+    def _count(self, date, current):
+        st = Stocktake.objects.create(department=self.dept, date=date)
+        StockLine.objects.create(
+            stocktake=st, product=self.flour,
+            current=Decimal(current), carried_over=False)
+        return st
+
+    def _delivery(self, date, qty):
+        d = Delivery.objects.create(department=self.dept, supplier=self.sup, date=date)
+        return Batch.objects.create(
+            delivery=d, product=self.flour,
+            qty_received=Decimal(qty), qty_remaining=Decimal(qty))
+
+    def test_delivery_between_counts_is_included_in_usage(self):
+        # 10 on Jan 1, delivery of 8 on Jan 5, 12 on Jan 8 → usage 10 + 8 - 12 = 6
+        self._count(datetime.date(2026, 1, 1), 10)
+        self._delivery(datetime.date(2026, 1, 5), 8)
+        self._count(datetime.date(2026, 1, 8), 12)
+        rows = self.flour.usage_history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["delivered"], Decimal("8"))
+        self.assertEqual(rows[0]["usage"], Decimal("6"))
+        self.assertFalse(rows[0]["clamped"])
+        self.assertEqual(rows[0]["days"], 7)
+
+    def test_delivery_on_previous_count_date_is_excluded(self):
+        # "Strictly between" - delivery on the same day as the previous count
+        # is part of that count's snapshot and must not be double-counted.
+        self._count(datetime.date(2026, 1, 1), 10)
+        self._delivery(datetime.date(2026, 1, 1), 5)
+        self._count(datetime.date(2026, 1, 8), 8)
+        rows = self.flour.usage_history()
+        self.assertEqual(rows[0]["delivered"], Decimal("0"))
+        self.assertEqual(rows[0]["usage"], Decimal("2"))
+
+    def test_delivery_on_current_count_date_is_included(self):
+        # "On/before this stocktake's date" - delivery on the day we counted
+        # is part of the inflow for that period.
+        self._count(datetime.date(2026, 1, 1), 10)
+        self._delivery(datetime.date(2026, 1, 8), 5)
+        self._count(datetime.date(2026, 1, 8), 12)
+        rows = self.flour.usage_history()
+        self.assertEqual(rows[0]["delivered"], Decimal("5"))
+        self.assertEqual(rows[0]["usage"], Decimal("3"))
+
+    def test_first_ever_count_has_no_usage_data(self):
+        self._count(datetime.date(2026, 1, 8), 10)
+        self.assertEqual(self.flour.usage_history(), [])
+        self.assertIsNone(self.flour.average_weekly_usage())
+        self.assertIsNone(self.flour.days_of_cover(on_hand=Decimal("10")))
+
+    def test_negative_usage_clamps_to_zero(self):
+        # 5 on hand, no delivery, then 12 on hand - impossible without an
+        # unlogged delivery or miscount. Clamp at 0 and flag it.
+        self._count(datetime.date(2026, 1, 1), 5)
+        self._count(datetime.date(2026, 1, 8), 12)
+        rows = self.flour.usage_history()
+        self.assertEqual(rows[0]["usage"], Decimal("0"))
+        self.assertTrue(rows[0]["clamped"])
+
+    def test_average_over_multiple_counts(self):
+        self._count(datetime.date(2026, 1, 1), 20)
+        self._count(datetime.date(2026, 1, 8), 15)   # usage 5
+        self._count(datetime.date(2026, 1, 15), 5)   # usage 10
+        self.assertEqual(self.flour.average_weekly_usage(n=4), Decimal("7.50"))
+
+    def test_days_of_cover_from_average(self):
+        # avg 5 packs/week, 10 on hand → 10 / 5 * 7 = 14 days
+        self._count(datetime.date(2026, 1, 1), 15)
+        self._count(datetime.date(2026, 1, 8), 10)
+        self.assertEqual(self.flour.days_of_cover(on_hand=Decimal("10")), 14)
+
+    def test_carried_over_lines_are_not_data_points(self):
+        # A carried-over line is just a copy of the prior count - it must not
+        # appear in usage history (would produce a spurious 0-usage row).
+        self._count(datetime.date(2026, 1, 1), 10)
+        st = Stocktake.objects.create(department=self.dept, date=datetime.date(2026, 1, 8))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("10"), carried_over=True)
+        self.assertEqual(self.flour.usage_history(), [])
+
+
 class PackSizeFilterTests(SimpleTestCase):
     def test_grams_promoted_to_kg_at_threshold(self):
         self.assertEqual(pack_size(25000, "g"), "25 kg")
