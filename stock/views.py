@@ -224,3 +224,66 @@ def save_count(request, line_id):
     line.current = _dec(request.POST.get("current"))
     line.save()
     return render(request, "stock/_line_status.html", {"line": line})
+
+
+# ---- reorder / shopping list ----
+def _reorder_rows(dept):
+    """Ingredients in this dept currently below minimum, with order qty + cheapest supplier."""
+    rows = []
+    for p in dept.products.prefetch_related("prices__supplier"):
+        line = p.latest_line
+        cur = line.current if line else None
+        if cur is None or cur >= p.minimum:
+            continue
+        cheap = p.cheapest_price
+        order_qty = p.minimum - cur
+        cost = (order_qty * cheap.pack_price).quantize(Decimal("0.01")) if cheap else None
+        rows.append({
+            "product": p, "current": cur, "minimum": p.minimum,
+            "order_qty": order_qty,
+            "supplier": cheap.supplier.name if cheap else "(no price set)",
+            "pack_price": cheap.pack_price if cheap else None,
+            "est_cost": cost,
+        })
+    rows.sort(key=lambda r: (r["supplier"].lower(), r["product"].name.lower()))
+    return rows
+
+
+@login_required
+def reorder(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    rows = _reorder_rows(dept)
+    # group by supplier for display
+    groups = {}
+    total = Decimal("0")
+    for r in rows:
+        groups.setdefault(r["supplier"], []).append(r)
+        if r["est_cost"]:
+            total += r["est_cost"]
+    return render(request, "stock/reorder.html", {
+        "groups": groups, "rows": rows, "total": total, "dept": dept,
+    })
+
+
+@login_required
+def reorder_csv(request):
+    import csv
+    from django.http import HttpResponse
+    dept = current_department(request)
+    if dept is None:
+        return redirect("dashboard")
+    rows = _reorder_rows(dept)
+    resp = HttpResponse(content_type="text/csv")
+    fname = f"reorder-{dept.name.lower()}-{datetime.date.today():%Y-%m-%d}.csv"
+    resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+    w = csv.writer(resp)
+    w.writerow(["Supplier", "Ingredient", "Code", "On hand", "Minimum",
+                "Order qty", "Pack price", "Est. cost"])
+    for r in rows:
+        w.writerow([r["supplier"], r["product"].name, r["product"].code or "",
+                    r["current"], r["minimum"], r["order_qty"],
+                    r["pack_price"] if r["pack_price"] is not None else "",
+                    r["est_cost"] if r["est_cost"] is not None else ""])
+    return resp

@@ -1,0 +1,36 @@
+{% extends "stock/base.html" %}{% load humanize %}
+{% block n_reorder %}on{% endblock %}
+{% block body %}
+<h2>Reorder list <span class="muted" style="font-size:14px">{{ dept.name }}</span></h2>
+{% if rows %}
+<p style="margin:-6px 0 18px">
+  <a class="btn" href="{% url 'reorder_csv' %}">Download CSV</a>
+  <span class="muted" style="margin-left:14px">Estimated total: <b style="color:var(--ink)">£{{ total|floatformat:2|intcomma }}</b></span>
+</p>
+{% for supplier, items in groups.items %}
+<div class="card">
+  <h3>{{ supplier }}</h3>
+  <table style="margin:0">
+    <thead><tr><th>Ingredient</th><th class="num">On hand</th><th class="num">Min</th>
+      <th class="num">Order</th><th class="num">Pack £</th><th class="num">Est. cost</th></tr></thead>
+    <tbody>
+    {% for r in items %}
+      <tr>
+        <td><a href="{% url 'product_detail' r.product.pk %}">{{ r.product.name }}</a> <span class="muted">{{ r.product.code|default:"" }}</span></td>
+        <td class="num">{{ r.current|floatformat:0 }}</td>
+        <td class="num">{{ r.minimum|floatformat:0 }}</td>
+        <td class="num"><b>{{ r.order_qty|floatformat:0 }}</b></td>
+        <td class="num">{% if r.pack_price %}£{{ r.pack_price|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td class="num">{% if r.est_cost %}£{{ r.est_cost|floatformat:2 }}{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% else %}
+<div class="card"><h3>Nothing to reorder</h3>
+<p class="muted">Every counted ingredient is at or above its minimum. Run a
+<a href="{% url 'stocktakes' %}">stocktake</a> to update what's on hand.</p></div>
+{% endif %}
+{% endblock %}

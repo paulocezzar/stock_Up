@@ -134,6 +134,7 @@ class StockLine(models.Model):
     @property
     def value(self):
         cheapest = self.product.cheapest_price
-        if self.current is None or cheapest is None:
+        if self.current is None or cheapest is None or not cheapest.pack_weight:
             return None
-        return (self.current * cheapest.pack_price).quantize(Decimal("0.01"))
+        per_unit = cheapest.pack_price / cheapest.pack_weight
+        return (self.current * per_unit).quantize(Decimal("0.01"))
