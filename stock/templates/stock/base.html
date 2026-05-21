@@ -60,6 +60,9 @@
   .msg.error{border-left-color:var(--red)}
   .spark{display:inline-flex;gap:3px;align-items:flex-end;height:28px}
   .spark span{width:7px;background:var(--amber-dim,#5a4410);background:linear-gradient(var(--amber),#5a4410)}
+  .filter{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+  .filter input{width:280px;max-width:100%}
+  .filter .count-out{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
 </style>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
@@ -96,6 +99,22 @@
     applyTheme(cur);
   }
   (function(){try{var t=localStorage.getItem("stockops-theme");if(t)applyTheme(t);}catch(e){}})();
+  document.addEventListener("input",function(e){
+    var t=e.target;
+    if(!t.dataset||!t.dataset.filter) return;
+    var tbl=document.getElementById(t.dataset.filter);
+    if(!tbl) return;
+    var q=t.value.trim().toLowerCase();
+    var shown=0;
+    tbl.querySelectorAll("tbody tr").forEach(function(r){
+      if(r.dataset.search===undefined) return;
+      var match=!q||r.dataset.search.indexOf(q)>=0;
+      r.style.display=match?"":"none";
+      if(match) shown++;
+    });
+    var out=t.parentNode.querySelector(".count-out");
+    if(out) out.textContent=shown+" shown";
+  });
 </script>
 </body>
 </html>

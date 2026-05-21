@@ -3,10 +3,14 @@
 {% block body %}
 <h2>Count — {{ st.date|date:"d M Y" }}</h2>
 <p class="muted">Type a number and tab out; each line saves itself.</p>
-<table>
+<div class="filter">
+  <input type="search" placeholder="filter by name or code…" data-filter="count-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="count-tbl">
   <thead><tr><th>Ingredient</th><th class="num">Min</th><th class="num">Count</th><th></th></tr></thead>
   <tbody>
-  {% for line in lines %}<tr>
+  {% for line in lines %}<tr data-search="{{ line.product.name|lower }} {{ line.product.code|default:''|lower }}">
     <td>{{ line.product.name }} <span class="muted">{{ line.product.code|default:"" }}</span></td>
     <td class="num">{{ line.product.minimum|floatformat:0 }}</td>
     <td class="num"><input type="number" step="any" inputmode="decimal" name="current"

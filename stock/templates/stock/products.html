@@ -16,11 +16,15 @@
   <button class="btn" type="submit">Add</button>
 </form>
 <p class="muted" style="margin:10px 0 0;font-size:12px">Supplier, quantity and cost are optional here — add or compare more suppliers later from the ingredient's page. £/1000 is worked out for you.</p></div>
-<table>
+<div class="filter">
+  <input type="search" placeholder="filter by name or code…" data-filter="ingredients-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="ingredients-tbl">
   <thead><tr><th>Ingredient</th><th>Cheapest</th><th class="num">£/1000</th><th class="num">Min</th><th></th><th></th></tr></thead>
   <tbody>
   {% for p in products %}
-    <tr>
+    <tr data-search="{{ p.name|lower }} {{ p.code|default:''|lower }}">
       <td><a href="{% url 'product_detail' p.pk %}">{{ p.name }}</a> <span class="muted">{{ p.code|default:"" }}</span></td>
       <td>{% with c=p.cheapest_price %}{% if c %}{{ c.supplier.name }}{% else %}<span class="muted">no price</span>{% endif %}{% endwith %}</td>
       <td class="num">{% with c=p.cheapest_price %}{% if c %}{{ c.per_1000|floatformat:2 }}{% else %}—{% endif %}{% endwith %}</td>
