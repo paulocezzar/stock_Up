@@ -17,7 +17,7 @@
     <td>{{ st.date|date:"d M Y" }}</td>
     <td>{{ st.completed_by|default:"—" }}</td>
     <td class="num">{{ st.counted }}</td>
-    <td class="num">£{{ st.total_value|floatformat:0|intcomma }}</td>
+    <td class="num">£{{ st.total_value|floatformat:2|intcomma }}</td>
     <td><a href="{% url 'count' st.pk %}">open →</a></td>
   </tr>{% empty %}<tr><td colspan="5" class="muted">No stocktakes yet.</td></tr>{% endfor %}
   </tbody>
