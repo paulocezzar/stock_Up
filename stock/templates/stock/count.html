@@ -9,7 +9,7 @@
   {% for line in lines %}<tr>
     <td>{{ line.product.name }} <span class="muted">{{ line.product.code|default:"" }}</span></td>
     <td class="num">{{ line.product.minimum|floatformat:0 }}</td>
-    <td class="num"><input type="number" step="any" name="current" class="count"
+    <td class="num"><input type="number" step="any" inputmode="decimal" name="current" class="count"
         value="{{ line.current|default_if_none:'' }}"
         hx-post="{% url 'save_count' line.id %}" hx-trigger="change"
         hx-target="#s-{{ line.id }}" hx-swap="innerHTML"></td>
