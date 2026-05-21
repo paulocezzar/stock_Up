@@ -1,0 +1,25 @@
+{% extends "stock/base.html" %}
+{% block n_deliv %}on{% endblock %}
+{% block body %}
+<h2>Scan delivery note</h2>
+<p class="muted">Pick the supplier and upload a photo or PDF of their delivery note. We'll pull out the lines so you only need to review them and add batch codes.</p>
+<form method="post" enctype="multipart/form-data"
+      onsubmit="var b=document.getElementById('scanBtn'); b.disabled=true; b.textContent='scanning…';">{% csrf_token %}
+<div class="card">
+<div class="row">
+  <div class="field"><label>Supplier *</label>
+    <select name="supplier" required>
+      <option value="">— pick supplier —</option>
+      {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+    </select></div>
+  <div class="field" style="flex:1"><label>Delivery note (image or PDF) *</label>
+    <input type="file" name="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" required></div>
+</div>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Files are processed in memory and discarded — nothing is stored.</p>
+</div>
+<p>
+  <button id="scanBtn" class="btn" type="submit">Scan and continue</button>
+  &nbsp;<a href="{% url 'delivery_new' %}" class="muted">enter manually instead</a>
+</p>
+</form>
+{% endblock %}

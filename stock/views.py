@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
 from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch
+from .ai_extract import extract_lines, auto_match, ExtractError
 
 
 def _carry_over_value(dept, product_id, exclude_stocktake_id=None):
@@ -386,4 +387,59 @@ def delivery_new(request):
         "products": products,
         "suppliers": Supplier.objects.order_by("name"),
         "today": datetime.date.today().isoformat(),
+        "lines": [{} for _ in range(6)],
+    })
+
+
+@login_required
+def delivery_scan(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    if request.method != "POST":
+        return render(request, "stock/delivery_scan.html", {
+            "suppliers": Supplier.objects.order_by("name"),
+        })
+    supplier_id = request.POST.get("supplier")
+    supplier = Supplier.objects.filter(pk=supplier_id).first() if supplier_id else None
+    if not supplier:
+        messages.error(request, "Pick a supplier first.")
+        return redirect("delivery_scan")
+    upload = request.FILES.get("file")
+    if not upload:
+        messages.error(request, "Pick a delivery-note image or PDF to scan.")
+        return redirect("delivery_scan")
+    if upload.size > 20 * 1024 * 1024:
+        messages.error(request, "That file is over 20 MB. Try a smaller photo or PDF.")
+        return redirect("delivery_scan")
+    extracted = []
+    try:
+        extracted = extract_lines(upload.read(), upload.content_type or "")
+    except ExtractError as e:
+        messages.warning(request, f"Couldn't scan the delivery note: {e}. Add the lines below by hand.")
+    except Exception:
+        messages.warning(request, "Couldn't scan the delivery note. Add the lines below by hand.")
+    if not extracted:
+        messages.warning(request,
+            "No line items came back from the scan. Enter the delivery manually below.")
+    prefilled = []
+    for item in extracted:
+        product, confident = auto_match(item["description"], supplier, dept)
+        prefilled.append({
+            "product_id": product.pk if (product and confident) else None,
+            "qty": item["qty"],
+            "hint": item["description"],
+        })
+    while len(prefilled) < 3:
+        prefilled.append({})
+    products = list(dept.products.prefetch_related("prices").order_by("name"))
+    for p in products:
+        p.supplier_ids = sorted({sp.supplier_id for sp in p.prices.all()})
+    return render(request, "stock/delivery_new.html", {
+        "products": products,
+        "suppliers": Supplier.objects.order_by("name"),
+        "today": datetime.date.today().isoformat(),
+        "lines": prefilled,
+        "prefilled_supplier_id": supplier.pk,
+        "default_show_all": True,
     })

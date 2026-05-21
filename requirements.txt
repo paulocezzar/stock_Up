@@ -4,3 +4,4 @@ whitenoise>=6.6
 dj-database-url>=2.1
 psycopg[binary]>=3.1
 openpyxl>=3.1
+anthropic>=0.40

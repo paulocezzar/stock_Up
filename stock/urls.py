@@ -20,4 +20,5 @@ urlpatterns = [
     path("count/line/<int:line_id>/", views.save_count, name="save_count"),
     path("deliveries/", views.deliveries, name="deliveries"),
     path("deliveries/new/", views.delivery_new, name="delivery_new"),
+    path("deliveries/scan/", views.delivery_scan, name="delivery_scan"),
 ]

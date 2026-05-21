@@ -2,19 +2,19 @@
 {% block n_deliv %}on{% endblock %}
 {% block body %}
 <h2>New delivery</h2>
-<form method="post">{% csrf_token %}
+<form method="post" action="{% url 'delivery_new' %}">{% csrf_token %}
 <div class="card"><h3>Header</h3>
 <div class="row">
   <div class="field"><label>Supplier *</label>
     <select name="supplier" id="supplier-select" required>
       <option value="">— pick supplier —</option>
-      {% for s in suppliers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+      {% for s in suppliers %}<option value="{{ s.pk }}"{% if prefilled_supplier_id and s.pk == prefilled_supplier_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}
     </select></div>
   <div class="field"><label>Date</label><input type="date" name="date" value="{{ today }}"></div>
   <div class="field" style="flex:1"><label>Note <span class="muted">(optional)</span></label><input type="text" name="note" placeholder="docket #, driver, anything"></div>
 </div>
 <p class="muted" style="margin:10px 0 0;font-size:12px">
-  <label><input type="checkbox" id="show-all-ingredients" style="vertical-align:middle"> show all ingredients (not just what this supplier stocks)</label>
+  <label><input type="checkbox" id="show-all-ingredients"{% if default_show_all %} checked{% endif %} style="vertical-align:middle"> show all ingredients (not just what this supplier stocks)</label>
 </p>
 </div>
 
@@ -22,11 +22,14 @@
 <table id="delivery-lines">
   <thead><tr><th style="width:38%">Ingredient</th><th>Batch code</th><th>Use-by</th><th class="num">Packs received</th><th></th></tr></thead>
   <tbody>
-  {% for i in "012345" %}<tr>
-    <td><select name="product"><option value="">—</option></select></td>
+  {% for line in lines %}<tr>
+    <td>
+      <select name="product"{% if line.product_id %} data-prefill="{{ line.product_id }}"{% endif %}><option value="">—</option></select>
+      {% if line.hint %}<div class="muted" style="font-size:11px;margin-top:3px">from note: "{{ line.hint }}"</div>{% endif %}
+    </td>
     <td><input type="text" name="batch_code" placeholder="optional"></td>
     <td><input type="date" name="use_by"></td>
-    <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0"></td>
+    <td class="num"><input type="number" step="any" inputmode="decimal" name="qty" class="count" placeholder="0" value="{{ line.qty|default_if_none:'' }}"></td>
     <td><button type="button" class="btn ghost" style="padding:4px 10px" onclick="this.closest('tr').remove()">×</button></td>
   </tr>{% endfor %}
   </tbody>
@@ -56,7 +59,7 @@ function refillProductSelects(){
   var all = document.getElementById("show-all-ingredients").checked;
   var tpl = document.getElementById("product-options").content;
   document.querySelectorAll('select[name="product"]').forEach(function(sel){
-    var keep = sel.value;
+    var keep = sel.value || sel.dataset.prefill || "";
     sel.innerHTML = '<option value="">—</option>';
     Array.prototype.forEach.call(tpl.querySelectorAll("option"), function(o){
       var suppliers = (o.dataset.suppliers || "").split(",").filter(Boolean);
