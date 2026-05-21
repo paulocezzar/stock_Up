@@ -2,6 +2,7 @@
 {% block n_st %}on{% endblock %}
 {% block body %}
 <h2>Count — {{ st.date|date:"d M Y" }}</h2>
+<p style="margin:-6px 0 14px"><a class="btn" href="{% url 'stocktake_csv' st.pk %}">Download CSV</a></p>
 <p class="muted">Type a number and tab out; each line saves itself.</p>
 <div class="filter">
   <input type="search" placeholder="filter by name or code…" data-filter="count-tbl" autocomplete="off">

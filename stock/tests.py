@@ -347,6 +347,71 @@ class UsageHistoryTests(TestCase):
         self.assertEqual(self.flour.usage_history(), [])
 
 
+class StocktakeCSVTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="g", minimum=Decimal("5"))
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25000"), pack_price=Decimal("30.00"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_csv_includes_counted_line_with_value(self):
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 1, 15))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("3"), carried_over=False)
+        r = self.client.get(f"/stocktakes/{st.pk}/csv/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "text/csv")
+        self.assertIn("stocktake-bakery-2026-01-15.csv", r["Content-Disposition"])
+        body = r.content.decode()
+        lines = body.splitlines()
+        self.assertEqual(lines[0], "Ingredient,Code,Minimum,Count,Needed,Value")
+        # value = 3 packs * £30.00 = £90.00; needed = 5 - 3 = 2
+        self.assertIn("Flour,FLR1,5.00,3.00,2.00,90.00", body)
+
+    def test_csv_renders_uncounted_line_with_blank_count(self):
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 2, 1))
+        StockLine.objects.create(stocktake=st, product=self.flour, current=None)
+        r = self.client.get(f"/stocktakes/{st.pk}/csv/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Uncounted: Count, Needed, Value all blank
+        self.assertIn("Flour,FLR1,5.00,,,", body)
+
+    def test_csv_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        st = Stocktake.objects.create(department=other,
+                                      date=datetime.date(2026, 1, 15))
+        r = self.client.get(f"/stocktakes/{st.pk}/csv/")
+        self.assertEqual(r.status_code, 403)
+
+    def test_csv_requires_login(self):
+        c = Client()
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 1, 15))
+        r = c.get(f"/stocktakes/{st.pk}/csv/")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/login/", r.headers["Location"])
+
+    def test_count_page_links_to_csv(self):
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 1, 15))
+        r = self.client.get(f"/stocktakes/{st.pk}/count/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(f'/stocktakes/{st.pk}/csv/', r.content.decode())
+
+
 class PackUnitConversionTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")

@@ -266,6 +266,32 @@ def count(request, pk):
     return render(request, "stock/count.html", {"st": st, "lines": lines})
 
 
+@login_required
+def stocktake_csv(request, pk):
+    import csv
+    from django.http import HttpResponse
+    st = get_object_or_404(Stocktake, pk=pk)
+    if st.department and not st.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    lines = list(st.lines.select_related("product").order_by("product__name"))
+    resp = HttpResponse(content_type="text/csv")
+    dept_slug = (st.department.name.lower() if st.department else "stocktake").replace(" ", "-")
+    fname = f"stocktake-{dept_slug}-{st.date:%Y-%m-%d}.csv"
+    resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+    w = csv.writer(resp)
+    w.writerow(["Ingredient", "Code", "Minimum", "Count", "Needed", "Value"])
+    for line in lines:
+        p = line.product
+        w.writerow([
+            p.name, p.code or "",
+            p.minimum,
+            line.current if line.current is not None else "",
+            line.needed if line.needed is not None else "",
+            line.value if line.value is not None else "",
+        ])
+    return resp
+
+
 @require_POST
 @login_required
 def save_count(request, line_id):
