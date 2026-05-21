@@ -112,13 +112,14 @@ class Stocktake(models.Model):
 
     @property
     def counted(self):
-        return self.lines.filter(current__isnull=False).count()
+        return self.lines.filter(current__isnull=False, carried_over=False).count()
 
 
 class StockLine(models.Model):
     stocktake = models.ForeignKey(Stocktake, related_name="lines", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     current = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    carried_over = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("stocktake", "product")

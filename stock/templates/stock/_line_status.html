@@ -1,4 +1,5 @@
 {% if line.current is None %}<span class="muted">—</span>
+{% elif line.carried_over %}<span class="tag prov">last wk</span>
 {% elif line.needed %}<span class="tag low">need {{ line.needed|floatformat:0 }}</span>
 {% else %}<span class="tag ok">ok</span>{% endif %}
 {% if line.value %}<span class="muted" style="margin-left:8px">£{{ line.value|floatformat:2 }}</span>{% endif %}

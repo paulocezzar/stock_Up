@@ -9,6 +9,17 @@ from django.http import HttpResponseForbidden
 from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department
 
 
+def _carry_over_value(dept, product_id, exclude_stocktake_id=None):
+    """Most recent non-null current for this product from a prior stocktake in the dept."""
+    qs = StockLine.objects.filter(
+        stocktake__department=dept, product_id=product_id, current__isnull=False,
+    )
+    if exclude_stocktake_id is not None:
+        qs = qs.exclude(stocktake_id=exclude_stocktake_id)
+    line = qs.order_by("-stocktake__date", "-id").first()
+    return line.current if line else None
+
+
 def _dec(raw):
     raw = (raw or "").strip()
     if raw == "":
@@ -196,8 +207,13 @@ def stocktakes(request):
         st = Stocktake.objects.create(
             department=dept, date=datetime.date.today(),
             completed_by=(request.POST.get("completed_by") or "").strip())
-        StockLine.objects.bulk_create(
-            [StockLine(stocktake=st, product=p) for p in dept.products.all()])
+        new_lines = []
+        for p in dept.products.all():
+            prev = _carry_over_value(dept, p.pk, exclude_stocktake_id=st.pk)
+            new_lines.append(StockLine(
+                stocktake=st, product=p,
+                current=prev, carried_over=prev is not None))
+        StockLine.objects.bulk_create(new_lines)
         return redirect("count", pk=st.pk)
     return render(request, "stock/stocktakes.html", {
         "stocktakes": dept.stocktakes.all(),
@@ -212,7 +228,13 @@ def count(request, pk):
         return HttpResponseForbidden("Not your department.")
     existing = set(st.lines.values_list("product_id", flat=True))
     extra_qs = (st.department.products if st.department else Product.objects).exclude(id__in=existing)
-    StockLine.objects.bulk_create([StockLine(stocktake=st, product=p) for p in extra_qs])
+    extra_lines = []
+    for p in extra_qs:
+        prev = _carry_over_value(st.department, p.pk, exclude_stocktake_id=st.pk) if st.department else None
+        extra_lines.append(StockLine(
+            stocktake=st, product=p,
+            current=prev, carried_over=prev is not None))
+    StockLine.objects.bulk_create(extra_lines)
     lines = list(st.lines.select_related("product").order_by("product__name"))
     return render(request, "stock/count.html", {"st": st, "lines": lines})
 
@@ -222,6 +244,7 @@ def count(request, pk):
 def save_count(request, line_id):
     line = get_object_or_404(StockLine, pk=line_id)
     line.current = _dec(request.POST.get("current"))
+    line.carried_over = False
     line.save()
     return render(request, "stock/_line_status.html", {"line": line})
 
