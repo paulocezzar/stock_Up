@@ -3,9 +3,10 @@ from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, Client
+from django.test import TestCase, SimpleTestCase, Client
 from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch
 from .ai_extract import parse_lines_json, auto_match
+from .templatetags.pack_format import pack_size
 
 
 class StockLineValueTests(TestCase):
@@ -255,3 +256,33 @@ class DeliveryScanFlowTests(TestCase):
         body = r.content.decode()
         self.assertIn("Scan delivery note", body)
         self.assertIn('name="file"', body)
+
+
+class PackSizeFilterTests(SimpleTestCase):
+    def test_grams_promoted_to_kg_at_threshold(self):
+        self.assertEqual(pack_size(25000, "g"), "25 kg")
+        self.assertEqual(pack_size(1500, "g"), "1.5 kg")
+        self.assertEqual(pack_size(1000, "g"), "1 kg")
+
+    def test_grams_under_threshold_stay_in_g(self):
+        self.assertEqual(pack_size(500, "g"), "500 g")
+        self.assertEqual(pack_size(999, "g"), "999 g")
+
+    def test_millilitres_promoted_to_litres_at_threshold(self):
+        self.assertEqual(pack_size(1500, "ml"), "1.5 L")
+        self.assertEqual(pack_size(2000, "ml"), "2 L")
+        self.assertEqual(pack_size(500, "ml"), "500 ml")
+
+    def test_each_unit_passes_through(self):
+        self.assertEqual(pack_size(12, "ea"), "12 ea")
+        self.assertEqual(pack_size(1, "ea"), "1 ea")
+
+    def test_accepts_decimal_input(self):
+        self.assertEqual(pack_size(Decimal("25000.00"), "g"), "25 kg")
+        self.assertEqual(pack_size(Decimal("1500.00"), "g"), "1.5 kg")
+        self.assertEqual(pack_size(Decimal("500.50"), "g"), "500.5 g")
+
+    def test_blank_inputs(self):
+        self.assertEqual(pack_size(None, "g"), "")
+        self.assertEqual(pack_size("", "g"), "")
+        self.assertEqual(pack_size("not a number", "g"), "")

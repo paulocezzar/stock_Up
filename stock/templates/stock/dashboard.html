@@ -1,4 +1,4 @@
-{% extends "stock/base.html" %}{% load humanize %}
+{% extends "stock/base.html" %}{% load humanize pack_format %}
 {% block n_dash %}on{% endblock %}
 {% block body %}
 <div class="stats">
@@ -14,11 +14,11 @@
   <tbody>
   {% for r in rows %}
     <tr class="{% if r.low %}low{% endif %}">
-      <td><a href="{% url 'product_detail' r.p.pk %}">{{ r.p.name }}</a> <span class="muted">{{ r.p.code }}</span></td>
+      <td><a href="{% url 'product_detail' r.p.pk %}">{{ r.p.name }}</a> <span class="muted">{{ r.p.code|default:"" }}</span></td>
       <td>{% if r.cheap %}{{ r.cheap.supplier.name }}{% else %}<span class="muted">no price set</span>{% endif %}</td>
       <td class="num">{% if r.cheap %}{{ r.cheap.per_1000|floatformat:2 }}{% else %}—{% endif %}</td>
       <td class="num">{% if r.current is not None %}{{ r.current|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="num">{{ r.p.minimum|floatformat:0 }}</td>
+      <td class="num">{{ r.p.minimum|floatformat:0 }}{% if r.cheap %} <span class="muted" style="font-size:11px">(×{{ r.cheap.pack_weight|pack_size:r.p.unit }})</span>{% endif %}</td>
       <td class="num">{% if r.needed %}{{ r.needed|floatformat:0 }}{% endif %}</td>
       <td>{% if r.low %}<span class="tag low">reorder</span>{% elif r.current is not None %}<span class="tag ok">ok</span>{% endif %}</td>
     </tr>

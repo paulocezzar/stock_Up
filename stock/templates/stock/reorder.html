@@ -1,4 +1,4 @@
-{% extends "stock/base.html" %}{% load humanize %}
+{% extends "stock/base.html" %}{% load humanize pack_format %}
 {% block n_reorder %}on{% endblock %}
 {% block body %}
 <h2>Reorder list <span class="muted" style="font-size:14px">{{ dept.name }}</span></h2>
@@ -19,7 +19,7 @@
         <td><a href="{% url 'product_detail' r.product.pk %}">{{ r.product.name }}</a> <span class="muted">{{ r.product.code|default:"" }}</span></td>
         <td class="num">{{ r.current|floatformat:0 }}</td>
         <td class="num">{{ r.minimum|floatformat:0 }}</td>
-        <td class="num"><b>{{ r.order_qty|floatformat:0 }}</b></td>
+        <td class="num"><b>{{ r.order_qty|floatformat:0 }}</b>{% if r.pack_weight %} <span class="muted" style="font-size:11px">(×{{ r.pack_weight|pack_size:r.product.unit }})</span>{% endif %}</td>
         <td class="num">{% if r.pack_price %}£{{ r.pack_price|floatformat:2 }}{% else %}—{% endif %}</td>
         <td class="num">{% if r.est_cost %}£{{ r.est_cost|floatformat:2 }}{% else %}—{% endif %}</td>
       </tr>

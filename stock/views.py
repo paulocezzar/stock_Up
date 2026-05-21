@@ -268,6 +268,7 @@ def _reorder_rows(dept):
             "order_qty": order_qty,
             "supplier": cheap.supplier.name if cheap else "(no price set)",
             "pack_price": cheap.pack_price if cheap else None,
+            "pack_weight": cheap.pack_weight if cheap else None,
             "est_cost": cost,
         })
     rows.sort(key=lambda r: (r["supplier"].lower(), r["product"].name.lower()))
