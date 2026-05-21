@@ -1,0 +1,3 @@
+{% if line.current is None %}<span class="muted">—</span>
+{% elif line.needed %}<span class="tag low">need {{ line.needed|floatformat:0 }}</span>
+{% else %}<span class="tag ok">ok</span>{% endif %}

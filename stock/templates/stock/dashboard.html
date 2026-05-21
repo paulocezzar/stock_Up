@@ -1,0 +1,29 @@
+{% extends "stock/base.html" %}{% load humanize %}
+{% block nav_d %}on{% endblock %}
+{% block body %}
+<div class="stats">
+  <div class="stat"><div class="k">Products</div><div class="v">{{ n_products }}</div></div>
+  <div class="stat {% if below %}warn{% endif %}"><div class="k">Below minimum</div><div class="v">{{ below }}</div></div>
+  <div class="stat"><div class="k">Stock value</div><div class="v">£{{ total_value|floatformat:0|intcomma }}</div></div>
+  <div class="stat"><div class="k">Last count</div><div class="v" style="font-size:16px">{% if latest %}{{ latest.date|date:"d M" }}{% else %}—{% endif %}</div></div>
+</div>
+<table>
+  <thead><tr>
+    <th>Product</th><th>Cheapest supplier</th><th class="num">£/1000{{ '' }}</th>
+    <th class="num">On hand</th><th class="num">Min</th><th class="num">Needed</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{% if r.low %}low{% endif %}">
+      <td>{{ r.p.name }} <span class="muted">{{ r.p.code }}</span></td>
+      <td>{% if r.cheap %}{{ r.cheap.supplier.name }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if r.cheap %}{{ r.cheap.per_1000|floatformat:2 }}{% else %}—{% endif %}</td>
+      <td class="num">{% if r.current is not None %}{{ r.current|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ r.p.minimum|floatformat:0 }}</td>
+      <td class="num">{% if r.needed %}{{ r.needed|floatformat:0 }}{% endif %}</td>
+      <td>{% if r.low %}<span class="tag low">reorder</span>{% elif r.current is not None %}<span class="tag ok">ok</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
