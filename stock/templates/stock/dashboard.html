@@ -1,22 +1,21 @@
 {% extends "stock/base.html" %}{% load humanize %}
-{% block nav_d %}on{% endblock %}
+{% block n_dash %}on{% endblock %}
 {% block body %}
 <div class="stats">
-  <div class="stat"><div class="k">Products</div><div class="v">{{ n_products }}</div></div>
+  <div class="stat"><div class="k">Ingredients</div><div class="v">{{ n_products }}</div></div>
   <div class="stat {% if below %}warn{% endif %}"><div class="k">Below minimum</div><div class="v">{{ below }}</div></div>
-  <div class="stat"><div class="k">Stock value</div><div class="v">£{{ total_value|floatformat:0|intcomma }}</div></div>
-  <div class="stat"><div class="k">Last count</div><div class="v" style="font-size:16px">{% if latest %}{{ latest.date|date:"d M" }}{% else %}—{% endif %}</div></div>
+  <div class="stat"><div class="k">Stock value</div><div class="v">£{{ value|floatformat:0|intcomma }}</div></div>
+  <div class="stat"><div class="k">Last count</div><div class="v" style="font-size:15px">{% if latest %}{{ latest.date|date:"d M Y" }}{% else %}—{% endif %}</div></div>
 </div>
+{% if rows %}
 <table>
-  <thead><tr>
-    <th>Product</th><th>Cheapest supplier</th><th class="num">£/1000{{ '' }}</th>
-    <th class="num">On hand</th><th class="num">Min</th><th class="num">Needed</th><th></th>
-  </tr></thead>
+  <thead><tr><th>Ingredient</th><th>Cheapest supplier</th><th class="num">£/1000</th>
+    <th class="num">On hand</th><th class="num">Min</th><th class="num">Needed</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
     <tr class="{% if r.low %}low{% endif %}">
-      <td>{{ r.p.name }} <span class="muted">{{ r.p.code }}</span></td>
-      <td>{% if r.cheap %}{{ r.cheap.supplier.name }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><a href="{% url 'product_detail' r.p.pk %}">{{ r.p.name }}</a> <span class="muted">{{ r.p.code }}</span></td>
+      <td>{% if r.cheap %}{{ r.cheap.supplier.name }}{% else %}<span class="muted">no price set</span>{% endif %}</td>
       <td class="num">{% if r.cheap %}{{ r.cheap.per_1000|floatformat:2 }}{% else %}—{% endif %}</td>
       <td class="num">{% if r.current is not None %}{{ r.current|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{{ r.p.minimum|floatformat:0 }}</td>
@@ -26,4 +25,10 @@
   {% endfor %}
   </tbody>
 </table>
+{% else %}
+<div class="card"><h3>Getting started</h3>
+<p class="muted">No ingredients yet. Add a few <a href="{% url 'suppliers' %}">suppliers</a>, then your
+<a href="{% url 'products' %}">ingredients</a> with their pack prices, then start a
+<a href="{% url 'stocktakes' %}">stocktake</a> to record what's on hand.</p></div>
+{% endif %}
 {% endblock %}

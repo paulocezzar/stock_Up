@@ -1,24 +1,21 @@
 {% extends "stock/base.html" %}
-{% block nav_c %}on{% endblock %}
+{% block n_st %}on{% endblock %}
 {% block body %}
-<p class="muted">Counting into <b style="color:var(--ink)">{{ st }}</b> — type a number and tab out; it saves itself.</p>
+<h2>Count — {{ st.date|date:"d M Y" }}</h2>
+<p class="muted">Type a number and tab out; each line saves itself.</p>
 <table>
-  <thead><tr><th>Product</th><th class="num">Min</th><th class="num">Count</th><th></th></tr></thead>
+  <thead><tr><th>Ingredient</th><th class="num">Min</th><th class="num">Count</th><th></th></tr></thead>
   <tbody>
-  {% for line in lines %}
-    <tr>
-      <td>{{ line.product.name }} <span class="muted">{{ line.product.code }}</span></td>
-      <td class="num">{{ line.product.minimum|floatformat:0 }}</td>
-      <td class="num">
-        <input type="number" step="any" name="current"
-               value="{{ line.current|default_if_none:'' }}"
-               hx-post="{% url 'save_count' line.id %}"
-               hx-trigger="change"
-               hx-target="#s-{{ line.id }}" hx-swap="innerHTML">
-      </td>
-      <td id="s-{{ line.id }}">{% include "stock/_line_status.html" %}</td>
-    </tr>
-  {% endfor %}
+  {% for line in lines %}<tr>
+    <td>{{ line.product.name }} <span class="muted">{{ line.product.code }}</span></td>
+    <td class="num">{{ line.product.minimum|floatformat:0 }}</td>
+    <td class="num"><input type="number" step="any" name="current" class="count"
+        value="{{ line.current|default_if_none:'' }}"
+        hx-post="{% url 'save_count' line.id %}" hx-trigger="change"
+        hx-target="#s-{{ line.id }}" hx-swap="innerHTML"></td>
+    <td id="s-{{ line.id }}">{% include "stock/_line_status.html" %}</td>
+  </tr>{% endfor %}
   </tbody>
 </table>
+<p><a href="{% url 'stocktakes' %}">← all stocktakes</a> &nbsp;·&nbsp; <a href="{% url 'dashboard' %}">dashboard →</a></p>
 {% endblock %}

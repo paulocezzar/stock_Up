@@ -1,0 +1,27 @@
+{% extends "stock/base.html" %}
+{% block n_prod %}on{% endblock %}
+{% block body %}
+<h2>Ingredients</h2>
+<div class="card"><h3>Add ingredient</h3>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Code</label><input type="text" name="code" required placeholder="BAKE00123" style="width:130px"></div>
+  <div class="field"><label>Name</label><input type="text" name="name" required placeholder="Caster Sugar" style="width:220px"></div>
+  <div class="field"><label>Unit</label><select name="unit"><option value="g">g</option><option value="ml">ml</option><option value="ea">each</option></select></div>
+  <div class="field"><label>Minimum</label><input type="number" step="any" name="minimum" class="count" value="0"></div>
+  <button class="btn" type="submit">Add</button>
+</form></div>
+<table>
+  <thead><tr><th>Ingredient</th><th>Cheapest</th><th class="num">£/1000</th><th class="num">Min</th><th></th></tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr>
+      <td><a href="{% url 'product_detail' p.pk %}">{{ p.name }}</a> <span class="muted">{{ p.code }}</span></td>
+      <td>{% with c=p.cheapest_price %}{% if c %}{{ c.supplier.name }}{% else %}<span class="muted">no price</span>{% endif %}{% endwith %}</td>
+      <td class="num">{% with c=p.cheapest_price %}{% if c %}{{ c.per_1000|floatformat:2 }}{% else %}—{% endif %}{% endwith %}</td>
+      <td class="num">{{ p.minimum|floatformat:0 }}</td>
+      <td><a href="{% url 'product_detail' p.pk %}">edit prices →</a></td>
+    </tr>
+  {% empty %}<tr><td colspan="5" class="muted">No ingredients yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

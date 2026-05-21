@@ -1,30 +1,27 @@
-# Bakery Stock — personal stock & supplier price tool
+# Stock Ops — bakery stock & supplier price tool
 
-Replaces the Price_Comparison + Stocktake spreadsheets with a single Django app.
-Products, suppliers and prices are relational, so "cheapest supplier" is a live
-query (no more #REF! errors), and a stocktake is a record in the DB, not a dated
-file copy.
+A small Django app that replaces the price-comparison + stocktake spreadsheets.
+Everything is relational, so "cheapest supplier" is a live query (no #REF! rot),
+and each weekly stocktake is kept as history.
+
+You add your own data in the app:
+1. Suppliers  → add your suppliers
+2. Ingredients → add each ingredient (code, name, unit, minimum/par level)
+3. Open an ingredient → add its pack prices per supplier (cheapest is auto-flagged)
+4. Stocktakes → "Start count for today", type what's on hand; it saves as you go
+5. Dashboard → cheapest supplier, value, and what's below minimum (reorder list)
 
 ## Run locally
     pip install -r requirements.txt
     python manage.py migrate
     python manage.py createsuperuser
-    python manage.py import_data --stocktake Stocktake_18_05_2026.xlsx --prices Price_Comparison.xlsx
     python manage.py runserver
-- `/`        dashboard (cheapest supplier, on-hand, reorder flags, stock value)
-- `/count/`  tap-through stocktake screen (saves each line as you type)
-- `/admin/`  add/edit products, suppliers and prices
+Visit http://127.0.0.1:8000/
 
 ## Deploy to Render (free)
-1. Push this folder to a GitHub repo.
-2. Render dashboard -> New -> Blueprint -> pick the repo. `render.yaml` provisions
-   the web service + free Postgres automatically.
-3. After first deploy, open the Render shell and run:
-       python manage.py createsuperuser
-       python manage.py import_data --stocktake <path> --prices <path>
-   (or upload via /admin/). The free web service sleeps after 15 min idle;
-   first request after that takes ~30-60s.
+Push to GitHub, then Render -> New -> Blueprint -> pick the repo.
+`render.yaml` provisions the web service + free Postgres.
+Set env vars ADMIN_USER / ADMIN_PASS / ADMIN_EMAIL so `build.sh` can create your
+login automatically (Render free has no shell). The DB starts empty — add data in-app.
 
-## Data model
-Supplier --< SupplierPrice >-- Product --< StockLine >-- Stocktake
-`needed` and stock `value` are computed at read time, never stored.
+Note: the free web service sleeps after ~15 min idle (first hit ~30-60s).

@@ -19,31 +19,31 @@ class Supplier(models.Model):
 
 
 class Product(models.Model):
+    UNIT_CHOICES = [("g", "grams"), ("ml", "millilitres"), ("ea", "each")]
     code = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=200)
-    unit = models.CharField(max_length=8, default="g")          # g / ml
+    unit = models.CharField(max_length=8, choices=UNIT_CHOICES, default="g")
+    minimum = models.DecimalField("minimum (par level)", max_digits=10, decimal_places=2, default=0)
     weekly_usage = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    minimum = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # par level
 
     class Meta:
         ordering = ["name"]
 
     def __str__(self):
-        return f"{self.name.strip()} ({self.code})"
+        return f"{self.name} ({self.code})"
 
     @property
     def cheapest_price(self):
-        p = self.prices.annotate(p1000=PER_1000).order_by("p1000").first()
-        return p
+        return self.prices.annotate(p1000=PER_1000).order_by("p1000").first()
 
     @property
-    def latest_count(self):
-        line = (StockLine.objects
-                .filter(product=self)
-                .select_related("stocktake")
-                .order_by("-stocktake__date", "-id")
-                .first())
-        return line
+    def latest_line(self):
+        return (StockLine.objects.filter(product=self, current__isnull=False)
+                .select_related("stocktake").order_by("-stocktake__date", "-id").first())
+
+    def history(self, limit=8):
+        return list(StockLine.objects.filter(product=self, current__isnull=False)
+                    .select_related("stocktake").order_by("-stocktake__date")[:limit])
 
 
 class SupplierPrice(models.Model):
@@ -51,10 +51,11 @@ class SupplierPrice(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
     pack_weight = models.DecimalField(max_digits=12, decimal_places=2)
     pack_price = models.DecimalField(max_digits=12, decimal_places=2)
-    effective_date = models.DateField(auto_now_add=True)
+    effective_date = models.DateField(auto_now=True)
 
     class Meta:
         ordering = ["product", "pack_price"]
+        unique_together = ("product", "supplier")
 
     @property
     def per_1000(self):
@@ -63,7 +64,7 @@ class SupplierPrice(models.Model):
         return (self.pack_price / self.pack_weight * 1000).quantize(Decimal("0.0001"))
 
     def __str__(self):
-        return f"{self.product.name.strip()} @ {self.supplier.name}"
+        return f"{self.product.name} @ {self.supplier.name}"
 
 
 class Stocktake(models.Model):
@@ -72,10 +73,23 @@ class Stocktake(models.Model):
     note = models.CharField(max_length=200, blank=True)
 
     class Meta:
-        ordering = ["-date"]
+        ordering = ["-date", "-id"]
 
     def __str__(self):
         return f"Stocktake {self.date:%d %b %Y}"
+
+    @property
+    def total_value(self):
+        total = Decimal("0")
+        for line in self.lines.select_related("product").all():
+            v = line.value
+            if v:
+                total += v
+        return total
+
+    @property
+    def counted(self):
+        return self.lines.filter(current__isnull=False).count()
 
 
 class StockLine(models.Model):

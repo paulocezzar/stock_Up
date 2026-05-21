@@ -1,0 +1,47 @@
+{% extends "stock/base.html" %}
+{% block n_prod %}on{% endblock %}
+{% block body %}
+<h2>{{ product.name }} <span class="muted" style="font-size:14px">{{ product.code }} · min {{ product.minimum|floatformat:0 }} {{ product.unit }}</span></h2>
+
+<div class="card"><h3>Supplier prices</h3>
+<table>
+  <thead><tr><th>Supplier</th><th class="num">Pack weight</th><th class="num">Pack price</th><th class="num">£/1000</th><th></th></tr></thead>
+  <tbody>
+  {% for pr in prices %}
+    <tr>
+      <td>{{ pr.supplier.name }}{% if pr == product.cheapest_price %} <span class="tag ok">cheapest</span>{% endif %}</td>
+      <td class="num">{{ pr.pack_weight|floatformat:0 }} {{ product.unit }}</td>
+      <td class="num">£{{ pr.pack_price|floatformat:2 }}</td>
+      <td class="num">{{ pr.per_1000|floatformat:2 }}</td>
+      <td><form method="post" action="{% url 'price_delete' pr.id %}" style="display:inline">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">remove</button></form></td>
+    </tr>
+  {% empty %}<tr><td colspan="5" class="muted">No prices yet — add one below.</td></tr>{% endfor %}
+  </tbody>
+</table>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Supplier</label>
+    <input type="text" name="supplier" list="suplist" required placeholder="type or pick">
+    <datalist id="suplist">{% for s in suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist></div>
+  <div class="field"><label>Pack weight ({{ product.unit }})</label><input type="number" step="any" name="pack_weight" class="count" required></div>
+  <div class="field"><label>Pack price (£)</label><input type="number" step="any" name="pack_price" class="count" required></div>
+  <button class="btn" type="submit">Save price</button>
+</form>
+</div>
+
+<div class="card"><h3>Count history</h3>
+{% if history %}
+<table>
+  <thead><tr><th>Stocktake</th><th class="num">On hand</th><th class="num">Min</th><th></th></tr></thead>
+  <tbody>
+  {% for l in history %}<tr>
+    <td>{{ l.stocktake.date|date:"d M Y" }}</td>
+    <td class="num">{{ l.current|floatformat:0 }}</td>
+    <td class="num">{{ product.minimum|floatformat:0 }}</td>
+    <td>{% if l.needed %}<span class="tag low">was low</span>{% else %}<span class="tag ok">ok</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No counts recorded yet.</p>{% endif %}
+</div>
+<p><a href="{% url 'products' %}">← all ingredients</a></p>
+{% endblock %}
