@@ -347,6 +347,70 @@ class UsageHistoryTests(TestCase):
         self.assertEqual(self.flour.usage_history(), [])
 
 
+class ReorderTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Acme Mill")
+        # Flour: minimum 10, on-hand 2 -> suggested order 8.
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="g", minimum=Decimal("10"))
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25000"), pack_price=Decimal("30.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 5, 22))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("2"), carried_over=False)
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_reorder_page_renders_editable_qty_input(self):
+        r = self.client.get("/reorder/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Editable input with suggested value 8 = 10 - 2
+        self.assertIn(f'name="qty_{self.flour.pk}"', body)
+        self.assertIn('value="8"', body)
+        # Pack price exposed for live JS recomputation
+        self.assertIn('data-pack-price="30.00"', body)
+        # Form posts to reorder_csv
+        self.assertIn('action="/reorder/csv/"', body)
+        # Single combined table with supplier sub-header row
+        self.assertEqual(body.count('id="reorder-tbl"'), 1)
+        self.assertIn('class="sup-row"', body)
+        self.assertIn("Acme Mill", body)
+
+    def test_reorder_csv_get_uses_suggested_qty_and_new_columns(self):
+        r = self.client.get("/reorder/csv/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "text/csv")
+        body = r.content.decode()
+        # New column order
+        self.assertEqual(body.splitlines()[0],
+                         "Supplier,Ingredient,Order qty,Pack size,Pack price,Est. cost")
+        # Suggested qty 8 @ £30 = £240; pack_size formatted by pack_format ("25 kg")
+        self.assertIn("Acme Mill,Flour,8.00,25 kg,30.00,240.00", body)
+
+    def test_reorder_csv_post_uses_overridden_qty(self):
+        r = self.client.post("/reorder/csv/", {
+            f"qty_{self.flour.pk}": "12",
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Override 12 @ £30 = £360
+        self.assertIn("Acme Mill,Flour,12,25 kg,30.00,360.00", body)
+
+    def test_reorder_csv_post_falls_back_to_suggested_when_override_blank(self):
+        r = self.client.post("/reorder/csv/", {f"qty_{self.flour.pk}": ""})
+        body = r.content.decode()
+        self.assertIn("Acme Mill,Flour,8.00,25 kg,30.00,240.00", body)
+
+
 class DeliveryDetailTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")

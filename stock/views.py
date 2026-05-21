@@ -351,21 +351,35 @@ def reorder(request):
 def reorder_csv(request):
     import csv
     from django.http import HttpResponse
+    from .templatetags.pack_format import pack_size as fmt_pack
     dept = current_department(request)
     if dept is None:
         return redirect("dashboard")
     rows = _reorder_rows(dept)
+    # POST may carry per-line overrides as qty_<product_id>; fall back to
+    # the suggested order qty when missing or unparseable.
+    if request.method == "POST":
+        for r in rows:
+            override = _dec(request.POST.get(f"qty_{r['product'].pk}"))
+            if override is not None and override >= 0:
+                r["order_qty"] = override
+                r["est_cost"] = ((override * r["pack_price"]).quantize(Decimal("0.01"))
+                                 if r["pack_price"] is not None else None)
     resp = HttpResponse(content_type="text/csv")
     fname = f"reorder-{dept.name.lower()}-{datetime.date.today():%Y-%m-%d}.csv"
     resp["Content-Disposition"] = f'attachment; filename="{fname}"'
     w = csv.writer(resp)
-    w.writerow(["Supplier", "Ingredient", "Code", "On hand", "Minimum",
-                "Order qty", "Pack price", "Est. cost"])
+    w.writerow(["Supplier", "Ingredient", "Order qty", "Pack size",
+                "Pack price", "Est. cost"])
     for r in rows:
-        w.writerow([r["supplier"], r["product"].name, r["product"].code or "",
-                    r["current"], r["minimum"], r["order_qty"],
-                    r["pack_price"] if r["pack_price"] is not None else "",
-                    r["est_cost"] if r["est_cost"] is not None else ""])
+        pack = fmt_pack(r["pack_weight"], r["product"].unit) if r["pack_weight"] else ""
+        w.writerow([
+            r["supplier"], r["product"].name,
+            r["order_qty"],
+            pack,
+            r["pack_price"] if r["pack_price"] is not None else "",
+            r["est_cost"] if r["est_cost"] is not None else "",
+        ])
     return resp
 
 
