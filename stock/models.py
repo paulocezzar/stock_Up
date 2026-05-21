@@ -8,6 +8,24 @@ PER_1000 = ExpressionWrapper(
 )
 
 
+from django.conf import settings
+
+
+class Department(models.Model):
+    name = models.CharField(max_length=120, unique=True)   # Bakery, Butchery...
+    members = models.ManyToManyField(settings.AUTH_USER_MODEL,
+                                     blank=True, related_name="departments")
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def accessible_to(self, user):
+        return user.is_superuser or self.members.filter(pk=user.pk).exists()
+
+
 class Supplier(models.Model):
     name = models.CharField(max_length=120, unique=True)
 
@@ -20,6 +38,8 @@ class Supplier(models.Model):
 
 class Product(models.Model):
     UNIT_CHOICES = [("g", "grams"), ("ml", "millilitres"), ("ea", "each")]
+    department = models.ForeignKey("Department", related_name="products",
+                                   on_delete=models.CASCADE, null=True, blank=True)
     code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     name = models.CharField(max_length=200)
     unit = models.CharField(max_length=8, choices=UNIT_CHOICES, default="g")
@@ -68,6 +88,8 @@ class SupplierPrice(models.Model):
 
 
 class Stocktake(models.Model):
+    department = models.ForeignKey("Department", related_name="stocktakes",
+                                   on_delete=models.CASCADE, null=True, blank=True)
     date = models.DateField()
     completed_by = models.CharField(max_length=120, blank=True)
     note = models.CharField(max_length=200, blank=True)
@@ -76,7 +98,8 @@ class Stocktake(models.Model):
         ordering = ["-date", "-id"]
 
     def __str__(self):
-        return f"Stocktake {self.date:%d %b %Y}"
+        dept = self.department.name if self.department else "Stocktake"
+        return f"{dept} - {self.date:%d %b %Y}"
 
     @property
     def total_value(self):

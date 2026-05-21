@@ -1,5 +1,11 @@
 from django.contrib import admin
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine
+
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    filter_horizontal = ("members",)
 
 
 class SupplierPriceInline(admin.TabularInline):
@@ -10,7 +16,8 @@ class SupplierPriceInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "unit", "minimum", "weekly_usage")
+    list_display = ("name", "code", "department", "unit", "minimum")
+    list_filter = ("department",)
     search_fields = ("code", "name")
     inlines = [SupplierPriceInline]
 
@@ -29,7 +36,8 @@ class StockLineInline(admin.TabularInline):
 
 @admin.register(Stocktake)
 class StocktakeAdmin(admin.ModelAdmin):
-    list_display = ("date", "completed_by", "counted", "note")
+    list_display = ("__str__", "department", "date", "completed_by")
+    list_filter = ("department",)
     inlines = [StockLineInline]
 
 

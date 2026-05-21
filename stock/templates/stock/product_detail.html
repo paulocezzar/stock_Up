@@ -43,5 +43,5 @@
 </table>
 {% else %}<p class="muted">No counts recorded yet.</p>{% endif %}
 </div>
-<p><a href="{% url 'products' %}">← all ingredients</a></p>
+<p><a href="{% url 'products' %}">← all ingredients</a> &nbsp;·&nbsp; <form method="post" action="{% url 'product_delete' product.pk %}" style="display:inline" onsubmit="return confirm('Delete {{ product.name }}?')">{% csrf_token %}<button class="btn ghost" style="padding:4px 12px">delete ingredient</button></form></p>
 {% endblock %}

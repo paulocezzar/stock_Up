@@ -25,3 +25,14 @@ Set env vars ADMIN_USER / ADMIN_PASS / ADMIN_EMAIL so `build.sh` can create your
 login automatically (Render free has no shell). The DB starts empty — add data in-app.
 
 Note: the free web service sleeps after ~15 min idle (first hit ~30-60s).
+
+
+## Multi-user & departments
+- Everything sits behind a login (`/login/`). The owner is the superuser created on deploy.
+- A **Department** (Bakery, Butchery, ...) owns its own ingredients and stocktakes.
+  Suppliers are shared across all departments.
+- Add departments and users in Django **/admin/**: open a Department and tick its
+  members; each user only sees the departments they belong to.
+- Use the department switcher (top-right) to move between units you can access.
+- Delete buttons exist for suppliers, ingredients, and prices.
+- On first deploy a starter department "Bakery" is created with the owner in it.

@@ -62,8 +62,17 @@
     <a href="{% url 'stocktakes' %}" class="{% block n_st %}{% endblock %}">Stocktakes</a>
     <a href="{% url 'products' %}" class="{% block n_prod %}{% endblock %}">Ingredients</a>
     <a href="{% url 'suppliers' %}" class="{% block n_sup %}{% endblock %}">Suppliers</a>
-    <a href="/admin/">Admin</a>
+    {% if user.is_superuser %}<a href="/admin/">Admin</a>{% endif %}
   </nav>
+  <div style="margin-left:auto;display:flex;gap:14px;align-items:center">
+    {% if departments %}
+    <select onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"
+      style="background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);padding:6px 8px">
+      {% for d in departments %}<option value="{{ d.pk }}" {% if d.pk == current_dept.pk %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select>{% endif %}
+    <span class="muted" style="font-size:12px">{{ user.username }}</span>
+    <form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" style="background:none;border:none;color:var(--amber);font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:1px;cursor:pointer;padding:0">Log out</button></form>
+  </div>
 </header>
 <main>
   {% for m in messages %}<div class="msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</div>{% endfor %}

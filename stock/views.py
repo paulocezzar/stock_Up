@@ -2,9 +2,11 @@ import datetime
 from decimal import Decimal, InvalidOperation
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Count
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine
+from django.http import HttpResponseForbidden
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department
 
 
 def _dec(raw):
@@ -17,8 +19,39 @@ def _dec(raw):
         return None
 
 
+def user_departments(user):
+    if user.is_superuser:
+        return Department.objects.all()
+    return user.departments.all()
+
+
+def current_department(request):
+    """The department the user is currently working in (from session)."""
+    depts = user_departments(request.user)
+    dept_id = request.session.get("dept_id")
+    if dept_id:
+        d = depts.filter(pk=dept_id).first()
+        if d:
+            return d
+    d = depts.first()
+    if d:
+        request.session["dept_id"] = d.pk
+    return d
+
+
+@login_required
+def switch_department(request, pk):
+    if user_departments(request.user).filter(pk=pk).exists():
+        request.session["dept_id"] = pk
+    return redirect(request.GET.get("next") or "dashboard")
+
+
+@login_required
 def dashboard(request):
-    products = list(Product.objects.prefetch_related("prices__supplier"))
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    products = list(dept.products.prefetch_related("prices__supplier"))
     rows, below = [], 0
     for p in products:
         line = p.latest_line
@@ -29,7 +62,7 @@ def dashboard(request):
         rows.append({"p": p, "cheap": p.cheapest_price, "current": cur,
                      "low": low, "needed": (p.minimum - cur) if low else None})
     rows.sort(key=lambda r: (not r["low"], r["p"].name.lower()))
-    latest = Stocktake.objects.first()
+    latest = dept.stocktakes.first()
     return render(request, "stock/dashboard.html", {
         "rows": rows, "below": below, "latest": latest,
         "n_products": len(products),
@@ -37,7 +70,8 @@ def dashboard(request):
     })
 
 
-# ---- suppliers ----
+# ---- suppliers (global, shared by all departments) ----
+@login_required
 def suppliers(request):
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
@@ -50,27 +84,36 @@ def suppliers(request):
     })
 
 
-# ---- products ----
+@require_POST
+@login_required
+def supplier_delete(request, pk):
+    s = get_object_or_404(Supplier, pk=pk)
+    name = s.name
+    s.delete()
+    messages.success(request, f"Deleted supplier '{name}'.")
+    return redirect("suppliers")
+
+
+# ---- ingredients (per department) ----
+@login_required
 def products(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
     if request.method == "POST":
         code = (request.POST.get("code") or "").strip() or None
         name = (request.POST.get("name") or "").strip()
         if not name:
             messages.error(request, "Name is required.")
             return redirect("products")
-        unit = request.POST.get("unit") or "g"
-        defaults = {"name": name, "unit": unit,
-                    "minimum": _dec(request.POST.get("minimum")) or 0}
+        defaults = {"name": name, "unit": request.POST.get("unit") or "g",
+                    "minimum": _dec(request.POST.get("minimum")) or 0,
+                    "department": dept}
         if code:
-            product, _ = Product.objects.update_or_create(code=code, defaults=defaults)
+            product, _ = Product.objects.update_or_create(
+                code=code, department=dept, defaults=defaults)
         else:
-            product, created = Product.objects.get_or_create(name=name, code__isnull=True,
-                                                             defaults=defaults)
-            if not created:
-                for k, v in defaults.items():
-                    setattr(product, k, v)
-                product.save()
-        # optional inline supplier price
+            product = Product.objects.create(**defaults)
         sup = (request.POST.get("supplier") or "").strip()
         qty = _dec(request.POST.get("quantity"))
         cost = _dec(request.POST.get("cost"))
@@ -84,13 +127,23 @@ def products(request):
             messages.success(request, f"Saved '{name}'.")
         return redirect("products")
     return render(request, "stock/products.html", {
-        "products": Product.objects.prefetch_related("prices__supplier"),
+        "products": dept.products.prefetch_related("prices__supplier"),
         "suppliers": Supplier.objects.all(),
     })
 
 
-def product_detail(request, pk):
+def _get_product(request, pk):
     product = get_object_or_404(Product, pk=pk)
+    if product.department and not product.department.accessible_to(request.user):
+        return None
+    return product
+
+
+@login_required
+def product_detail(request, pk):
+    product = _get_product(request, pk)
+    if product is None:
+        return HttpResponseForbidden("Not your department.")
     if request.method == "POST":
         sup = (request.POST.get("supplier") or "").strip()
         wt = _dec(request.POST.get("pack_weight"))
@@ -113,6 +166,19 @@ def product_detail(request, pk):
 
 
 @require_POST
+@login_required
+def product_delete(request, pk):
+    product = _get_product(request, pk)
+    if product is None:
+        return HttpResponseForbidden("Not your department.")
+    name = product.name
+    product.delete()
+    messages.success(request, f"Deleted '{name}'.")
+    return redirect("products")
+
+
+@require_POST
+@login_required
 def price_delete(request, price_id):
     price = get_object_or_404(SupplierPrice, pk=price_id)
     pk = price.product_id
@@ -120,34 +186,39 @@ def price_delete(request, price_id):
     return redirect("product_detail", pk=pk)
 
 
-# ---- stocktakes ----
+# ---- stocktakes (per department) ----
+@login_required
 def stocktakes(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
     if request.method == "POST":
         st = Stocktake.objects.create(
-            date=datetime.date.today(),
-            completed_by=(request.POST.get("completed_by") or "").strip(),
-        )
-        # pre-create a line per product
+            department=dept, date=datetime.date.today(),
+            completed_by=(request.POST.get("completed_by") or "").strip())
         StockLine.objects.bulk_create(
-            [StockLine(stocktake=st, product=p) for p in Product.objects.all()])
+            [StockLine(stocktake=st, product=p) for p in dept.products.all()])
         return redirect("count", pk=st.pk)
     return render(request, "stock/stocktakes.html", {
-        "stocktakes": Stocktake.objects.all(),
-        "has_products": Product.objects.exists(),
+        "stocktakes": dept.stocktakes.all(),
+        "has_products": dept.products.exists(),
     })
 
 
+@login_required
 def count(request, pk):
     st = get_object_or_404(Stocktake, pk=pk)
+    if st.department and not st.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
     existing = set(st.lines.values_list("product_id", flat=True))
-    StockLine.objects.bulk_create(
-        [StockLine(stocktake=st, product=p)
-         for p in Product.objects.exclude(id__in=existing)])
+    extra_qs = (st.department.products if st.department else Product.objects).exclude(id__in=existing)
+    StockLine.objects.bulk_create([StockLine(stocktake=st, product=p) for p in extra_qs])
     lines = list(st.lines.select_related("product").order_by("product__name"))
     return render(request, "stock/count.html", {"st": st, "lines": lines})
 
 
 @require_POST
+@login_required
 def save_count(request, line_id):
     line = get_object_or_404(StockLine, pk=line_id)
     line.current = _dec(request.POST.get("current"))
