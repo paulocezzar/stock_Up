@@ -2344,3 +2344,305 @@ class RecipesSectionViewTests(TestCase):
         resp = self.client.post(f"/recipes/{r.pk}/delete/")
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(code="NPD-R999").exists())
+
+
+class RecipeExplodedIngredientsTests(TestCase):
+    """The flat per-batch ingredient list: scale through each sub-recipe and
+    sum the same Product across branches."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.flour = Product.objects.create(
+            code="NPD-I001", name="Bread Flour",
+            department=self.dept, unit="g", minimum=0)
+        self.water = Product.objects.create(
+            code="NPD-I002", name="Water",
+            department=self.dept, unit="g", minimum=0)
+        self.salt = Product.objects.create(
+            code="NPD-I003", name="Salt",
+            department=self.dept, unit="g", minimum=0)
+
+    def _recipe(self, code, **kw):
+        return Recipe.objects.create(code=code, department=self.dept, **kw)
+
+    def _ing(self, recipe, product, weight, ordering=0):
+        return RecipeLine.objects.create(
+            recipe=recipe, ingredient=product,
+            weight_g=Decimal(str(weight)), ordering=ordering)
+
+    def _sub(self, recipe, sub_recipe, weight, ordering=0):
+        return RecipeLine.objects.create(
+            recipe=recipe, sub_recipe=sub_recipe,
+            weight_g=Decimal(str(weight)), ordering=ordering)
+
+    def test_simple_no_subrecipes_returns_direct_lines(self):
+        r = self._recipe("NPD-R001", name="Flat",
+                         finished_weight_g=Decimal("100"),
+                         deposit_weight_g=Decimal("100"))
+        self._ing(r, self.flour, 60)
+        self._ing(r, self.water, 40)
+        rows = r.exploded_ingredients()
+        by_code = {row["ingredient"].code: row["weight_g"] for row in rows}
+        self.assertEqual(by_code["NPD-I001"], Decimal("60"))
+        self.assertEqual(by_code["NPD-I002"], Decimal("40"))
+
+    def test_same_ingredient_in_one_recipe_is_summed(self):
+        # A recipe can list the same product on two lines (e.g. water in
+        # two mix stages) — the flat view collapses them into one row.
+        r = self._recipe("NPD-R002", name="Two waters",
+                         finished_weight_g=Decimal("60"),
+                         deposit_weight_g=Decimal("60"))
+        self._ing(r, self.water, 25, ordering=0)
+        self._ing(r, self.water, 35, ordering=1)
+        rows = r.exploded_ingredients()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ingredient"], self.water)
+        self.assertEqual(rows[0]["weight_g"], Decimal("60"))
+
+    def test_subrecipe_full_batch_consumed_keeps_ingredients_as_is(self):
+        # Parent uses the entire finished output of the sub-recipe → no scaling.
+        sub = self._recipe("NPD-R010", name="Dough",
+                           finished_weight_g=Decimal("100"),
+                           deposit_weight_g=Decimal("100"))
+        self._ing(sub, self.flour, 60)
+        self._ing(sub, self.water, 40)
+        parent = self._recipe("NPD-R011", name="Loaf",
+                              finished_weight_g=Decimal("100"),
+                              deposit_weight_g=Decimal("100"))
+        self._sub(parent, sub, 100)
+        rows = parent.exploded_ingredients()
+        by_code = {r["ingredient"].code: r["weight_g"] for r in rows}
+        self.assertEqual(by_code["NPD-I001"], Decimal("60"))
+        self.assertEqual(by_code["NPD-I002"], Decimal("40"))
+
+    def test_subrecipe_partial_batch_scales_ingredients(self):
+        # Parent uses 50g of a sub whose finished weight is 100g → 0.5×.
+        sub = self._recipe("NPD-R020", name="Sub",
+                           finished_weight_g=Decimal("100"),
+                           deposit_weight_g=Decimal("100"))
+        self._ing(sub, self.flour, 60)
+        self._ing(sub, self.water, 40)
+        parent = self._recipe("NPD-R021", name="Half loaf",
+                              finished_weight_g=Decimal("50"),
+                              deposit_weight_g=Decimal("50"))
+        self._sub(parent, sub, 50)
+        rows = parent.exploded_ingredients()
+        by_code = {r["ingredient"].code: r["weight_g"] for r in rows}
+        self.assertEqual(by_code["NPD-I001"], Decimal("30"))
+        self.assertEqual(by_code["NPD-I002"], Decimal("20"))
+
+    def test_subrecipe_scaling_uses_finished_weight_not_deposit(self):
+        # Sub has 9.09% cook loss: deposit 660g, finished 600g. Parent uses
+        # 600g (one finished batch). Scale must be 600/600 = 1.0, NOT
+        # 600/660 = 0.909 — so each ingredient comes through at full
+        # deposit-side weight.
+        sub = self._recipe("NPD-R030", name="Sourdough single",
+                           finished_weight_g=Decimal("600"),
+                           deposit_weight_g=Decimal("660"))
+        self._ing(sub, self.flour, 300)
+        self._ing(sub, self.water, 300)
+        self._ing(sub, self.salt, 60)
+        parent = self._recipe("NPD-R031", name="Sourdough loose",
+                              finished_weight_g=Decimal("600"),
+                              deposit_weight_g=Decimal("600"))
+        self._sub(parent, sub, 600)
+        rows = parent.exploded_ingredients()
+        by_code = {r["ingredient"].code: r["weight_g"] for r in rows}
+        self.assertEqual(by_code["NPD-I001"], Decimal("300"))
+        self.assertEqual(by_code["NPD-I002"], Decimal("300"))
+        self.assertEqual(by_code["NPD-I003"], Decimal("60"))
+
+    def test_same_ingredient_across_branches_is_summed(self):
+        # Parent has TWO sub-recipes (Dough and Glaze) that both contain
+        # flour. The flat view must collapse the two contributions into one
+        # "Bread Flour: 80g" row.
+        dough = self._recipe("NPD-R040", name="Dough",
+                             finished_weight_g=Decimal("100"),
+                             deposit_weight_g=Decimal("100"))
+        self._ing(dough, self.flour, 60)
+        self._ing(dough, self.water, 40)
+        glaze = self._recipe("NPD-R041", name="Glaze",
+                             finished_weight_g=Decimal("50"),
+                             deposit_weight_g=Decimal("50"))
+        self._ing(glaze, self.flour, 20)
+        self._ing(glaze, self.water, 30)
+        parent = self._recipe("NPD-R042", name="Glazed loaf",
+                              finished_weight_g=Decimal("150"),
+                              deposit_weight_g=Decimal("150"))
+        self._sub(parent, dough, 100, ordering=0)
+        self._sub(parent, glaze, 50, ordering=1)
+        rows = parent.exploded_ingredients()
+        by_code = {r["ingredient"].code: r["weight_g"] for r in rows}
+        # Flour: 60 (dough) + 20 (glaze) = 80g
+        self.assertEqual(by_code["NPD-I001"], Decimal("80"))
+        # Water: 40 (dough) + 30 (glaze) = 70g
+        self.assertEqual(by_code["NPD-I002"], Decimal("70"))
+        # Exactly two distinct ingredients, no duplicates
+        self.assertEqual(len(rows), 2)
+
+    def test_deeply_nested_explosion_accumulates_repeat_across_levels(self):
+        # Three levels deep: parent → starter → levain.
+        # Flour appears at every level (one of the sample's real patterns).
+        levain = self._recipe("NPD-R050", name="Levain",
+                              finished_weight_g=Decimal("10"),
+                              deposit_weight_g=Decimal("10"))
+        self._ing(levain, self.flour, 5)
+        self._ing(levain, self.water, 5)
+        starter = self._recipe("NPD-R051", name="Starter",
+                               finished_weight_g=Decimal("30"),
+                               deposit_weight_g=Decimal("30"))
+        self._ing(starter, self.flour, 10)
+        self._ing(starter, self.water, 10)
+        self._sub(starter, levain, 10)
+        parent = self._recipe("NPD-R052", name="Loaf",
+                              finished_weight_g=Decimal("100"),
+                              deposit_weight_g=Decimal("100"))
+        self._ing(parent, self.flour, 60)
+        self._ing(parent, self.water, 10)
+        self._sub(parent, starter, 30)
+        rows = parent.exploded_ingredients()
+        by_code = {r["ingredient"].code: r["weight_g"] for r in rows}
+        # Flour: 60 (parent) + 10 (starter) + 5 (levain, via starter) = 75g
+        self.assertEqual(by_code["NPD-I001"], Decimal("75"))
+        # Water: 10 (parent) + 10 (starter) + 5 (levain) = 25g
+        self.assertEqual(by_code["NPD-I002"], Decimal("25"))
+
+    def test_results_sorted_by_ingredient_name(self):
+        r = self._recipe("NPD-R060", name="Mixed",
+                         finished_weight_g=Decimal("100"),
+                         deposit_weight_g=Decimal("100"))
+        self._ing(r, self.salt, 5)
+        self._ing(r, self.flour, 60)
+        self._ing(r, self.water, 35)
+        rows = r.exploded_ingredients()
+        names = [r["ingredient"].name for r in rows]
+        self.assertEqual(names, ["Bread Flour", "Salt", "Water"])
+
+    def test_cycle_in_data_does_not_infinite_loop(self):
+        # If admin edits introduce a cycle (the import refuses one), the
+        # explosion must terminate rather than recurse forever.
+        a = self._recipe("NPD-R070", name="A",
+                         finished_weight_g=Decimal("10"),
+                         deposit_weight_g=Decimal("10"))
+        b = self._recipe("NPD-R071", name="B",
+                         finished_weight_g=Decimal("10"),
+                         deposit_weight_g=Decimal("10"))
+        self._sub(a, b, 10)
+        self._sub(b, a, 10)
+        # No assertion on contents — just that it returns rather than hangs.
+        a.exploded_ingredients()
+
+
+class RecipeDetailLayoutTests(TestCase):
+    """The reworked layout: ingredients before method; sub-recipes collapsed
+    by default; Structure / All-ingredients toggle."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Two-level recipe with method text.
+        self.flour = Product.objects.create(
+            code="NPD-I100", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        self.water = Product.objects.create(
+            code="NPD-I101", name="Water", department=self.dept,
+            unit="g", minimum=0)
+        self.sub = Recipe.objects.create(
+            code="NPD-R200", name="Starter", department=self.dept,
+            finished_weight_g=Decimal("100"),
+            deposit_weight_g=Decimal("100"),
+            method_text="Mix and rest 12h.")
+        RecipeLine.objects.create(
+            recipe=self.sub, ingredient=self.flour,
+            weight_g=Decimal("60"), ordering=0)
+        RecipeLine.objects.create(
+            recipe=self.sub, ingredient=self.water,
+            weight_g=Decimal("40"), ordering=1)
+        self.main = Recipe.objects.create(
+            code="NPD-R100", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("100"),
+            deposit_weight_g=Decimal("100"),
+            method_text="Bake at 230°C for 30 minutes.")
+        RecipeLine.objects.create(
+            recipe=self.main, sub_recipe=self.sub,
+            weight_g=Decimal("100"), ordering=0)
+
+    def test_ingredients_render_before_method_in_main_block(self):
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        # Anchor on element markup so this doesn't false-positive on CSS
+        # comments or unrelated text. The first `>Ingredients<` is the
+        # main recipe's section label; the first `>show method<` is its
+        # method toggle (sub-recipes are collapsed inside the main and
+        # render their own labels later in the document).
+        ing_idx = body.index(">Ingredients<")
+        method_idx = body.index(">show method<")
+        self.assertLess(ing_idx, method_idx,
+                        "Ingredients should render before the method toggle")
+
+    def test_method_is_collapsed_behind_a_toggle(self):
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        # The method body is wrapped in a <details class="rec-method">
+        # without `open`, so it's collapsed by default.
+        self.assertRegex(body, r'<details class="rec-method">\s*<summary>')
+        # The toggle label is present
+        self.assertIn("show method", body)
+        # The method text itself is still in the HTML (browser hides it)
+        self.assertIn("Bake at 230", body)
+
+    def test_subrecipes_collapsed_by_default(self):
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        # Sub-recipe rows are wrapped in <details class="rec-sub"> with NO
+        # `open` attribute — so the user clicks to expand.
+        self.assertIn('<details class="rec-sub">', body)
+        self.assertNotIn('<details class="rec-sub" open', body)
+        # The "expand" affordance is shown
+        self.assertIn("expand", body)
+        # And nothing on the page auto-opens the sub-recipe
+        # (the depth-0 recipe-block isn't wrapped in <details> at all)
+
+    def test_structure_view_is_default(self):
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        self.assertIn("Nested breakdown", body)
+        self.assertNotIn("All raw ingredients", body)
+        # View toggle: Structure is active
+        self.assertRegex(body, r'class="on"[^>]*>Structure')
+
+    def test_flat_view_renders_exploded_sums(self):
+        r = self.client.get(f"/recipes/{self.main.pk}/?view=flat")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Flat heading and the raw ingredient rows; Structure block hidden
+        self.assertIn("All raw ingredients", body)
+        self.assertNotIn("Nested breakdown", body)
+        self.assertRegex(body, r'class="on"[^>]*>All ingredients')
+        # Both raw ingredients show with their per-batch totals
+        # (full batch consumed → unchanged weights)
+        self.assertIn("NPD-I100", body)
+        self.assertIn("Flour", body)
+        self.assertIn("60.00", body)
+        self.assertIn("NPD-I101", body)
+        self.assertIn("Water", body)
+        self.assertIn("40.00", body)
+
+    def test_flat_view_does_not_list_sub_recipes(self):
+        # The flat view is leaves-only — NPD-R sub-recipes themselves
+        # should NOT appear as rows (only the raw NPD-I they explode to).
+        r = self.client.get(f"/recipes/{self.main.pk}/?view=flat")
+        body = r.content.decode()
+        # The sub-recipe code appears in the toggle/back link area but not
+        # as an ingredient row in the flat table.
+        table_section = body[body.index("All raw ingredients"):]
+        # Cut off at the next card / page footer
+        end = table_section.find("← all recipes")
+        if end > 0:
+            table_section = table_section[:end]
+        self.assertNotIn("NPD-R200", table_section)

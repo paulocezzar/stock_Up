@@ -1,44 +1,58 @@
-{# Recursive renderer for the recipe tree. Expects `node = {recipe, depth, lines, cycle}`. #}
-<details {% if node.depth < 2 %}open{% endif %} class="recipe-node depth-{{ node.depth }}">
-  <summary>
+{# Recursive renderer for one recipe in the nested tree.
+   Expects `node = {recipe, depth, lines, cycle}`. Layout for each block:
+       header → ingredients (sub-recipes are collapsed rows you expand
+       inline) → "show method" toggle (collapsed). Sub-recipes never
+       auto-expand, so deep formulas stay readable. #}
+<div class="recipe-block depth-{{ node.depth }}">
+  <div class="rec-head">
     <span class="rec-code">{{ node.recipe.code }}</span>
     <span class="rec-name">{{ node.recipe.name }}</span>
-    {% if node.recipe.finished_weight_g %}<span class="muted rec-weight">finished {{ node.recipe.finished_weight_g|floatformat:1 }}g</span>{% endif %}
-    {% if node.recipe.cook_loss_pct %}<span class="muted rec-weight">· cook loss {{ node.recipe.cook_loss_pct|floatformat:2 }}%</span>{% endif %}
-    <a href="{% url 'recipe_detail' node.recipe.pk %}" class="rec-open">open →</a>
-  </summary>
-
-  {% if node.recipe.method_text %}
-  <div class="rec-method">
-    <h4>Method</h4>
-    <pre>{{ node.recipe.method_text }}</pre>
+    {% if node.recipe.finished_weight_g %}<span class="muted rec-meta">finished {{ node.recipe.finished_weight_g|floatformat:1 }}g</span>{% endif %}
+    {% if node.recipe.cook_loss_pct %}<span class="muted rec-meta">· cook loss {{ node.recipe.cook_loss_pct|floatformat:2 }}%</span>{% endif %}
+    {% if node.depth > 0 %}<a href="{% url 'recipe_detail' node.recipe.pk %}" class="rec-open">open →</a>{% endif %}
   </div>
-  {% endif %}
 
+  <div class="rec-section-label">Ingredients</div>
   {% if node.lines %}
   <table class="rec-lines">
-    <thead><tr><th class="num">Weight</th><th>Code</th><th>Component</th><th></th></tr></thead>
+    <thead><tr><th class="num">Weight</th><th>Code</th><th>Component</th></tr></thead>
     <tbody>
     {% for entry in node.lines %}
+      {% if entry.line.sub_recipe_id %}
+      <tr class="sub-line"><td colspan="3" class="sub-cell">
+        <details class="rec-sub">
+          <summary>
+            <span class="rec-weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
+            <span class="rec-code small">{{ entry.line.sub_recipe.code }}</span>
+            <span class="rec-name small">{{ entry.line.sub_recipe.name }}</span>
+            <span class="tag prov">sub-recipe</span>{% if entry.cycle %} <span class="tag low">cycle</span>{% endif %}
+            <span class="rec-expand muted">expand</span>
+          </summary>
+          {% if entry.cycle %}
+            <p class="muted" style="margin:10px 0 0">Cycle detected — this sub-recipe is already on the current path. Inline expansion stops here to keep the page finite.</p>
+          {% elif entry.subtree %}
+            {% include "stock/_recipe_node.html" with node=entry.subtree %}
+          {% endif %}
+        </details>
+      </td></tr>
+      {% else %}
       <tr>
         <td class="num">{{ entry.line.weight_g|floatformat:1 }}g</td>
-        {% if entry.line.sub_recipe_id %}
-          <td><a href="{% url 'recipe_detail' entry.line.sub_recipe.pk %}">{{ entry.line.sub_recipe.code }}</a></td>
-          <td>{{ entry.line.sub_recipe.name }} <span class="tag prov">sub-recipe</span>{% if entry.cycle %} <span class="tag low">cycle</span>{% endif %}</td>
-          <td>{% if entry.subtree %}<span class="muted">expand below</span>{% endif %}</td>
-        {% else %}
-          <td><a href="{% url 'product_detail' entry.line.ingredient.pk %}">{{ entry.line.ingredient.code }}</a></td>
-          <td>{{ entry.line.ingredient.name }}</td>
-          <td></td>
-        {% endif %}
+        <td><a href="{% url 'product_detail' entry.line.ingredient.pk %}">{{ entry.line.ingredient.code }}</a></td>
+        <td>{{ entry.line.ingredient.name }}</td>
       </tr>
-      {% if entry.subtree %}
-      <tr class="sub-row"><td colspan="4">{% include "stock/_recipe_node.html" with node=entry.subtree %}</td></tr>
       {% endif %}
     {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="muted" style="margin:10px 0 0">No lines yet — this recipe is a stub.</p>
+  <p class="muted" style="margin:6px 0 0">No lines yet — this recipe is a stub.</p>
   {% endif %}
-</details>
+
+  {% if node.recipe.method_text %}
+  <details class="rec-method">
+    <summary><span class="when-closed">show method</span><span class="when-open">hide method</span></summary>
+    <pre>{{ node.recipe.method_text }}</pre>
+  </details>
+  {% endif %}
+</div>

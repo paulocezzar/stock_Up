@@ -2,25 +2,65 @@
 {% block n_rec_list %}on{% endblock %}
 {% block body %}
 <style>
-  .recipe-node{margin:0 0 4px;padding:0}
-  .recipe-node summary{cursor:pointer;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);
-    list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .recipe-node summary::-webkit-details-marker{display:none}
-  .recipe-node summary::before{content:"▸";color:var(--muted);font-size:11px;margin-right:4px}
-  .recipe-node[open] > summary::before{content:"▾"}
-  .recipe-node .rec-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px}
-  .recipe-node .rec-name{flex:1;min-width:0}
-  .recipe-node .rec-weight{font-size:12px}
-  .recipe-node .rec-open{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
-  .rec-lines{margin:8px 0 14px;width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--line)}
-  .rec-lines th,.rec-lines td{padding:6px 10px;border-bottom:1px solid var(--line)}
-  .rec-lines .sub-row > td{padding:0 0 0 22px;background:transparent;border-bottom:0}
-  .recipe-node.depth-1 > summary{border-left-color:var(--amber);background:var(--panel2)}
-  .recipe-node.depth-2 > summary, .recipe-node.depth-3 > summary,
-  .recipe-node.depth-4 > summary, .recipe-node.depth-5 > summary{background:var(--panel2)}
-  .rec-method{padding:10px 12px;border:1px solid var(--line);border-top:0;background:var(--panel2)}
-  .rec-method h4{margin:0 0 6px;font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500}
-  .rec-method pre{margin:0;font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:var(--ink)}
+  /* ---- a recipe block (top-level or any nested sub-recipe) ---- */
+  .recipe-block{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);padding:14px 16px;margin:0}
+  .recipe-block.depth-0{background:var(--panel)}
+  .recipe-block.depth-1,
+  .recipe-block.depth-2,
+  .recipe-block.depth-3,
+  .recipe-block.depth-4,
+  .recipe-block.depth-5,
+  .recipe-block.depth-6,
+  .recipe-block.depth-7{background:var(--panel2);margin-top:8px}
+
+  .rec-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .rec-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px}
+  .rec-code.small{font-size:13px}
+  .rec-name{flex:1;min-width:0}
+  .rec-name.small{flex:initial}
+  .rec-meta{font-size:12px}
+  .rec-open{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
+  .rec-section-label{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 6px}
+
+  /* ---- the ingredient table inside each recipe block ---- */
+  .rec-lines{margin:0;width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--line)}
+  .rec-lines th,.rec-lines td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  .rec-lines tr:last-child > td{border-bottom:0}
+  .rec-lines .sub-cell{padding:0}
+
+  /* ---- a sub-recipe row: collapsed by default, click to expand inline ---- */
+  .rec-sub{margin:0}
+  .rec-sub > summary{cursor:pointer;list-style:none;padding:8px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:transparent}
+  .rec-sub > summary:hover{background:var(--low-bg)}
+  .rec-sub > summary::-webkit-details-marker{display:none}
+  .rec-sub > summary::before{content:"▸";color:var(--muted);font-size:11px;margin-right:2px;width:10px;display:inline-block}
+  .rec-sub[open] > summary::before{content:"▾"}
+  .rec-sub .rec-weight{font-variant-numeric:tabular-nums;min-width:60px;text-align:right}
+  .rec-sub .rec-expand{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
+  .rec-sub[open] > summary .rec-expand{display:none}
+  .rec-sub[open] > .recipe-block{margin-left:18px;margin-top:6px}
+
+  /* ---- the method toggle and method body ---- */
+  .rec-method{margin:12px 0 0}
+  .rec-method > summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+    padding:6px 12px;background:transparent;color:var(--amber);border:1px solid var(--amber);
+    font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .rec-method > summary::-webkit-details-marker{display:none}
+  .rec-method > summary::before{content:"+";font-weight:700}
+  .rec-method[open] > summary::before{content:"−"}
+  .rec-method[open] > summary{background:var(--amber);color:#111}
+  .rec-method .when-open{display:none}
+  .rec-method[open] .when-open{display:inline}
+  .rec-method[open] .when-closed{display:none}
+  .rec-method pre{margin:10px 0 0;padding:12px;background:var(--bg);border:1px solid var(--line);
+    white-space:pre-wrap;font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  /* ---- view toggle ---- */
+  .view-toggle{display:inline-flex;border:1px solid var(--line);margin:0 0 14px}
+  .view-toggle a{padding:6px 14px;font-family:var(--disp);font-size:11px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);border-right:1px solid var(--line)}
+  .view-toggle a:last-child{border-right:0}
+  .view-toggle a.on{background:var(--amber);color:#111}
 </style>
 
 <h2>{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span></h2>
@@ -32,9 +72,36 @@
   <div class="stat"><div class="k">Lines</div><div class="v">{{ recipe.lines.count }}</div></div>
 </div>
 
+<div class="view-toggle" role="tablist">
+  <a href="{% url 'recipe_detail' recipe.pk %}" class="{% if view_mode == 'structure' %}on{% endif %}">Structure</a>
+  <a href="{% url 'recipe_detail' recipe.pk %}?view=flat" class="{% if view_mode == 'flat' %}on{% endif %}">All ingredients</a>
+</div>
+
+{% if view_mode == "flat" %}
+<div class="card"><h3>All raw ingredients <span class="muted" style="font-size:11px">per stated batch · exploded across every sub-recipe</span></h3>
+{% if flat_ingredients %}
+<table>
+  <thead><tr><th>Code</th><th>Ingredient</th><th class="num">Total grams</th></tr></thead>
+  <tbody>
+  {% for row in flat_ingredients %}
+    <tr>
+      <td><a href="{% url 'product_detail' row.ingredient.pk %}">{{ row.ingredient.code }}</a></td>
+      <td>{{ row.ingredient.name }}</td>
+      <td class="num">{{ row.weight_g|floatformat:2 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Same ingredient appearing in several sub-recipes is summed; weights are scaled by each parent line's share of the sub-recipe's finished output.</p>
+{% else %}
+<p class="muted">No raw ingredients yet — this recipe has no leaf NPD-I lines.</p>
+{% endif %}
+</div>
+{% else %}
 <div class="card"><h3>Nested breakdown</h3>
 {% include "stock/_recipe_node.html" with node=tree %}
 </div>
+{% endif %}
 
 <p>
   <a href="{% url 'recipes' %}">← all recipes</a>

@@ -415,11 +415,18 @@ def recipe_detail(request, pk):
     recipe = get_object_or_404(Recipe, pk=pk)
     if recipe.department and not recipe.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    tree = _recipe_tree(recipe)
-    return render(request, "stock/recipe_detail.html", {
+    # Two views: the nested structure (default) and a flat per-batch
+    # ingredient list (the same explode-and-sum used by production later).
+    view_mode = "flat" if request.GET.get("view") == "flat" else "structure"
+    context = {
         "recipe": recipe,
-        "tree": tree,
-    })
+        "view_mode": view_mode,
+    }
+    if view_mode == "flat":
+        context["flat_ingredients"] = recipe.exploded_ingredients()
+    else:
+        context["tree"] = _recipe_tree(recipe)
+    return render(request, "stock/recipe_detail.html", context)
 
 
 @require_POST

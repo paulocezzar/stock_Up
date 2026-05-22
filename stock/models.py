@@ -419,6 +419,50 @@ class Recipe(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+    def exploded_ingredients(self):
+        """Flat list of raw ingredients to make one stated batch of this recipe.
+
+        Walks every sub-recipe; at each step scales components by
+        ``parent_line_weight / sub.finished_weight_g`` so deeper batches
+        contribute the amount the parent actually consumes (a parent line
+        is a quantity of *finished* sub-recipe output, after the sub's
+        cook loss). The same Product appearing across multiple branches is
+        summed into a single row.
+
+        Returns a list of ``{ingredient: Product, weight_g: Decimal}``
+        sorted by ingredient name. Reused by the flat detail view and
+        intended for the production / consumption flows.
+        """
+        totals = {}
+        self._explode_into(totals, Decimal("1"), set())
+        return sorted(totals.values(),
+                      key=lambda e: e["ingredient"].name.lower())
+
+    def _explode_into(self, totals, multiplier, seen):
+        """Recursive accumulator; safe against cycles via `seen`."""
+        if self.pk in seen:
+            return
+        seen = seen | {self.pk}
+        for line in self.lines.select_related("ingredient", "sub_recipe").all():
+            if line.ingredient_id:
+                key = line.ingredient_id
+                wt = line.weight_g * multiplier
+                if key in totals:
+                    totals[key]["weight_g"] += wt
+                else:
+                    totals[key] = {"ingredient": line.ingredient, "weight_g": wt}
+            elif line.sub_recipe_id:
+                sub = line.sub_recipe
+                # Parent's line uses N grams of the sub's *finished* output;
+                # fall back to deposit (input) weight, then to the line sum,
+                # only if finished isn't populated.
+                ref = sub.finished_weight_g or sub.deposit_weight_g
+                if not ref or ref == 0:
+                    ref = sum((ln.weight_g for ln in sub.lines.all()),
+                              Decimal("0")) or Decimal("1")
+                sub_mult = multiplier * (line.weight_g / ref)
+                sub._explode_into(totals, sub_mult, seen)
+
     def contains_cycle(self, candidate_child_id):
         """Would adding `candidate_child_id` as a sub-recipe create a cycle?
 
