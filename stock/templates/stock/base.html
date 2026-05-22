@@ -115,14 +115,13 @@
 <header>
   <h1>STOCK<span class="dot">.</span>UP</h1>
   <nav>
-    <a href="{% url 'dashboard' %}" class="{% block n_dash %}{% endblock %}">Dashboard</a>
-    <a href="{% url 'stocktakes' %}" class="{% block n_st %}{% endblock %}">Stocktakes</a>
-    <a href="{% url 'deliveries' %}" class="{% block n_deliv %}{% endblock %}">Deliveries</a>
-    <a href="{% url 'adjustments' %}" class="{% block n_adj %}{% endblock %}">Adjustments</a>
-    <a href="{% url 'reorder' %}" class="{% block n_reorder %}{% endblock %}">Reorder</a>
-    <a href="{% url 'products' %}" class="{% block n_prod %}{% endblock %}">Ingredients</a>
-    <a href="{% url 'suppliers' %}" class="{% block n_sup %}{% endblock %}">Suppliers</a>
-    {% if user.is_superuser %}<a href="/admin/">Admin</a>{% endif %}
+    <a href="{% url 'home' %}" class="{% block n_home %}{% endblock %}">Home</a>
+    <a href="{% url 'stock_home' %}" class="{% block n_stock %}{% endblock %}">Stock</a>
+    <a href="{% url 'recipes' %}" class="{% block n_recipes %}{% endblock %}">Recipes</a>
+    <a href="{% url 'production' %}" class="{% block n_production %}{% endblock %}">Production</a>
+    <a href="{% url 'rota' %}" class="{% block n_rota %}{% endblock %}">Rota</a>
+    <a href="{% url 'notes' %}" class="{% block n_notes %}{% endblock %}">Notes</a>
+    <a href="{% url 'profile' %}" class="{% block n_profile %}{% endblock %}">Profile</a>
   </nav>
   <div class="hdr-right">
     {% if departments %}

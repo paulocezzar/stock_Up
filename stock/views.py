@@ -66,6 +66,73 @@ def current_department(request):
 
 
 @login_required
+def home(request):
+    """Top-level landing page — the post-login destination."""
+    dept = current_department(request)
+    stock_below = 0
+    stock_last_count = None
+    if dept is not None:
+        for p in dept.products.prefetch_related("prices__supplier"):
+            line = p.latest_line
+            cur = line.current if line else None
+            if cur is not None and cur < p.minimum:
+                stock_below += 1
+        st = dept.stocktakes.first()
+        stock_last_count = st.date if st else None
+    return render(request, "stock/home.html", {
+        "stock_below": stock_below,
+        "stock_last_count": stock_last_count,
+        "has_dept": dept is not None,
+    })
+
+
+@login_required
+def stock_home(request):
+    """Stock section landing — links to the existing stock sub-pages."""
+    return render(request, "stock/section_stock.html", {})
+
+
+_COMING_SOON = {
+    "recipes": ("Recipes", "Recipe cards, ingredients, scaling and yields will live here."),
+    "production": ("Production", "Daily production plans, batch schedules and outputs."),
+    "rota": ("Rota", "Staff schedules, shift assignments and time-off requests."),
+    "notes": ("Notes", "Shared notes for the team — handover, reminders, ideas."),
+}
+
+
+def _placeholder(request, key):
+    title, blurb = _COMING_SOON[key]
+    return render(request, "stock/coming_soon.html",
+                  {"title": title, "blurb": blurb, "section": key})
+
+
+@login_required
+def recipes_home(request):
+    return _placeholder(request, "recipes")
+
+
+@login_required
+def production_home(request):
+    return _placeholder(request, "production")
+
+
+@login_required
+def rota_home(request):
+    return _placeholder(request, "rota")
+
+
+@login_required
+def notes_home(request):
+    return _placeholder(request, "notes")
+
+
+@login_required
+def profile(request):
+    depts = user_departments(request.user)
+    return render(request, "stock/profile.html", {"departments_list": depts})
+
+
+@login_required
 def switch_department(request, pk):
     if user_departments(request.user).filter(pk=pk).exists():
         request.session["dept_id"] = pk

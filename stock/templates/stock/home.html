@@ -1,0 +1,51 @@
+{% extends "stock/base.html" %}{% load humanize %}
+{% block n_home %}on{% endblock %}
+{% block body %}
+<h2>Home</h2>
+{% if not has_dept %}
+<div class="card"><h3>No department</h3>
+<p class="muted">You haven't been added to a department yet. Ask an administrator to add you in the admin.</p></div>
+{% endif %}
+
+<style>
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin:0 0 22px}
+  .grid .card{margin:0;display:flex;flex-direction:column;gap:6px;text-decoration:none;color:inherit;
+    transition:border-color .12s;border-left:3px solid var(--line);padding:18px}
+  .grid .card:hover{border-color:var(--amber);border-left-color:var(--amber)}
+  .grid .card h3{margin:0;color:var(--ink);font-size:14px}
+  .grid .card .stat-line{font-family:var(--disp);font-size:22px;font-weight:600;margin-top:4px}
+  .grid .card .meta{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+  .grid .card .meta.warn{color:var(--red)}
+</style>
+
+<div class="grid">
+  <a class="card" href="{% url 'stock_home' %}">
+    <h3>Stock</h3>
+    <div class="stat-line">
+      {% if stock_below %}<span style="color:var(--red)">{{ stock_below }}</span>{% else %}{{ stock_below }}{% endif %}
+      <span class="muted" style="font-size:13px;font-weight:400">below minimum</span>
+    </div>
+    <div class="meta">Last count: {% if stock_last_count %}{{ stock_last_count|date:"d M Y" }}{% else %}—{% endif %}</div>
+  </a>
+  <a class="card" href="{% url 'recipes' %}">
+    <h3>Recipes</h3>
+    <div class="meta">Coming soon</div>
+  </a>
+  <a class="card" href="{% url 'production' %}">
+    <h3>Production</h3>
+    <div class="meta">Coming soon</div>
+  </a>
+  <a class="card" href="{% url 'rota' %}">
+    <h3>Rota</h3>
+    <div class="meta">Coming soon</div>
+  </a>
+  <a class="card" href="{% url 'notes' %}">
+    <h3>Notes</h3>
+    <div class="meta">Coming soon</div>
+  </a>
+  <a class="card" href="{% url 'profile' %}">
+    <h3>Profile</h3>
+    <div class="meta">{{ user.username }}</div>
+  </a>
+</div>
+{% endblock %}

@@ -1,5 +1,5 @@
 {% extends "stock/base.html" %}{% load humanize pack_format %}
-{% block n_reorder %}on{% endblock %}
+{% block n_stock %}on{% endblock %}
 {% block body %}
 <h2>Reorder list <span class="muted" style="font-size:14px">{{ dept.name }}</span></h2>
 {% if rows %}

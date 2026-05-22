@@ -1,0 +1,13 @@
+{% extends "stock/base.html" %}
+{% block n_recipes %}{% if section == "recipes" %}on{% endif %}{% endblock %}
+{% block n_production %}{% if section == "production" %}on{% endif %}{% endblock %}
+{% block n_rota %}{% if section == "rota" %}on{% endif %}{% endblock %}
+{% block n_notes %}{% if section == "notes" %}on{% endif %}{% endblock %}
+{% block body %}
+<h2>{{ title }} <span class="muted" style="font-size:14px">coming soon</span></h2>
+<div class="card" style="border-left:3px solid var(--amber)">
+  <h3>Not yet</h3>
+  <p style="margin:0">{{ blurb }}</p>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">For now, head <a href="{% url 'home' %}">back to Home</a>.</p>
+</div>
+{% endblock %}

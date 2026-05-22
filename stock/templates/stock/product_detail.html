@@ -1,5 +1,5 @@
 {% extends "stock/base.html" %}{% load pack_format %}
-{% block n_prod %}on{% endblock %}
+{% block n_stock %}on{% endblock %}
 {% block body %}
 <h2>{{ product.name }} <span class="muted" style="font-size:14px">{% if product.code %}{{ product.code }} · {% endif %}min {{ product.minimum|floatformat:0 }}{% with c=product.cheapest_price %}{% if c %} (×{{ c.pack_weight|pack_size:product.unit }}){% endif %}{% endwith %}</span></h2>
 

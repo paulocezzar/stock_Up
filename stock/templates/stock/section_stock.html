@@ -1,0 +1,32 @@
+{% extends "stock/base.html" %}
+{% block n_stock %}on{% endblock %}
+{% block body %}
+<h2>Stock</h2>
+<p class="muted" style="margin:-6px 0 18px">Everything stock-related lives here.</p>
+
+<style>
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:0 0 22px}
+  .grid .card{margin:0;display:block;text-decoration:none;color:inherit;padding:16px;
+    border-left:3px solid var(--line);transition:border-color .12s}
+  .grid .card:hover{border-color:var(--amber);border-left-color:var(--amber)}
+  .grid .card h3{margin:0 0 4px;color:var(--ink);font-size:14px}
+  .grid .card p{margin:0;color:var(--muted);font-size:12px}
+</style>
+
+<div class="grid">
+  <a class="card" href="{% url 'dashboard' %}"><h3>Dashboard</h3>
+    <p>Snapshot — what's below minimum, stock value, last count.</p></a>
+  <a class="card" href="{% url 'stocktakes' %}"><h3>Stocktakes</h3>
+    <p>Run a weekly count and review past ones.</p></a>
+  <a class="card" href="{% url 'deliveries' %}"><h3>Deliveries</h3>
+    <p>Log goods-in, with batch codes and use-by dates.</p></a>
+  <a class="card" href="{% url 'adjustments' %}"><h3>Adjustments</h3>
+    <p>Waste, spillage, found stock and corrections.</p></a>
+  <a class="card" href="{% url 'reorder' %}"><h3>Reorder</h3>
+    <p>Suggested order quantities and CSV export.</p></a>
+  <a class="card" href="{% url 'products' %}"><h3>Ingredients</h3>
+    <p>Manage ingredients, pack sizes and minimums.</p></a>
+  <a class="card" href="{% url 'suppliers' %}"><h3>Suppliers</h3>
+    <p>Shared supplier directory.</p></a>
+</div>
+{% endblock %}

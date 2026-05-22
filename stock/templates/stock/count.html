@@ -1,5 +1,5 @@
 {% extends "stock/base.html" %}{% load humanize %}
-{% block n_st %}on{% endblock %}
+{% block n_stock %}on{% endblock %}
 {% block body %}
 <h2>Count — {{ st.date|date:"d M Y" }}</h2>
 <p style="margin:-6px 0 14px"><a class="btn" href="{% url 'stocktake_csv' st.pk %}">Download CSV</a></p>

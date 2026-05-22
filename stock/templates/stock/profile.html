@@ -1,0 +1,35 @@
+{% extends "stock/base.html" %}
+{% block n_profile %}on{% endblock %}
+{% block body %}
+<h2>Profile</h2>
+
+<div class="card"><h3>Account</h3>
+<table style="margin:0">
+  <tbody>
+    <tr><td class="muted" style="width:140px">Username</td><td><b>{{ user.username }}</b></td></tr>
+    {% if user.email %}<tr><td class="muted">Email</td><td>{{ user.email }}</td></tr>{% endif %}
+    <tr><td class="muted">Role</td><td>{% if user.is_superuser %}Superuser{% elif user.is_staff %}Staff{% else %}Member{% endif %}</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="card"><h3>Departments</h3>
+{% if departments_list %}
+<table style="margin:0">
+  <thead><tr><th>Name</th><th></th></tr></thead>
+  <tbody>
+  {% for d in departments_list %}<tr>
+    <td>{{ d.name }}{% if current_dept and d.pk == current_dept.pk %} <span class="tag ok">current</span>{% endif %}</td>
+    <td>{% if current_dept is None or d.pk != current_dept.pk %}<a href="{% url 'switch_department' d.pk %}?next={% url 'profile' %}">switch to this</a>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted" style="margin:0">You haven't been added to a department yet.</p>{% endif %}
+</div>
+
+<div class="card"><h3>Session</h3>
+<p style="margin:0 0 12px"><form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button class="btn ghost" type="submit">Log out</button></form>
+{% if user.is_superuser %}&nbsp;<a class="btn ghost" href="/admin/">Django admin</a>{% endif %}
+</p>
+</div>
+{% endblock %}

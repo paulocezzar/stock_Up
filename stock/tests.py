@@ -1008,6 +1008,121 @@ class PriceHistoryTests(TestCase):
         self.assertEqual(ids, [self.sup.pk])
 
 
+class SectionNavigationTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_home_page_renders_with_section_cards(self):
+        r = self.client.get("/home/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        for label in ("Stock", "Recipes", "Production", "Rota", "Notes", "Profile"):
+            self.assertIn(f">{label}</h3>", body)
+        for url in ("/stock/", "/recipes/", "/production/", "/rota/",
+                    "/notes/", "/profile/"):
+            self.assertIn(f'href="{url}"', body)
+
+    def test_home_stock_card_shows_below_minimum_and_last_count(self):
+        # 2 below-minimum products + a stocktake gives the home stat numbers.
+        flour = Product.objects.create(
+            name="Flour", department=self.dept, unit="g",
+            minimum=Decimal("10"))
+        sugar = Product.objects.create(
+            name="Sugar", department=self.dept, unit="g",
+            minimum=Decimal("5"))
+        # And one that's NOT below minimum
+        salt = Product.objects.create(
+            name="Salt", department=self.dept, unit="g",
+            minimum=Decimal("1"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 5, 20))
+        StockLine.objects.create(stocktake=st, product=flour, current=Decimal("2"))
+        StockLine.objects.create(stocktake=st, product=sugar, current=Decimal("1"))
+        StockLine.objects.create(stocktake=st, product=salt, current=Decimal("5"))
+
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        self.assertIn(">2<", body)            # below-minimum count
+        self.assertIn("below minimum", body)
+        self.assertIn("20 May 2026", body)    # last count date
+
+    def test_stock_section_landing_links_to_existing_pages(self):
+        r = self.client.get("/stock/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        for url in ("/", "/stocktakes/", "/deliveries/", "/adjustments/",
+                    "/reorder/", "/products/", "/suppliers/"):
+            self.assertIn(f'href="{url}"', body)
+
+    def test_placeholder_sections_render_with_coming_soon(self):
+        for path, title in (("/recipes/", "Recipes"), ("/production/", "Production"),
+                            ("/rota/", "Rota"), ("/notes/", "Notes")):
+            r = self.client.get(path)
+            self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
+            body = r.content.decode()
+            self.assertIn(title, body)
+            self.assertIn("coming soon", body.lower())
+
+    def test_profile_shows_username_departments_and_logout(self):
+        r = self.client.get("/profile/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("alice", body)
+        self.assertIn("Bakery", body)
+        self.assertIn('action="/logout/"', body)
+
+    def test_profile_shows_admin_link_only_for_superusers(self):
+        r = self.client.get("/profile/")
+        self.assertNotIn("/admin/", r.content.decode())
+
+        U = get_user_model()
+        boss = U.objects.create_superuser("boss", password="pw")
+        c = Client()
+        c.login(username="boss", password="pw")
+        r = c.get("/profile/")
+        self.assertIn("/admin/", r.content.decode())
+
+    def test_top_nav_has_seven_sections(self):
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        # Extract the <nav>…</nav> block so we count exactly the top-level links.
+        nav_start = body.index("<nav>")
+        nav_end = body.index("</nav>", nav_start)
+        nav = body[nav_start:nav_end]
+        self.assertEqual(nav.count("<a "), 7)
+        for label in (">Home<", ">Stock<", ">Recipes<", ">Production<",
+                      ">Rota<", ">Notes<", ">Profile<"):
+            self.assertIn(label, nav)
+
+    def test_login_redirects_to_home(self):
+        c = Client()
+        r = c.post("/login/", {"username": "alice", "password": "pw"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/home/")
+
+    def test_existing_urls_still_work(self):
+        # Sanity: the existing stock pages keep their URLs and views.
+        for path in ("/", "/stocktakes/", "/deliveries/", "/adjustments/",
+                     "/reorder/", "/products/", "/suppliers/"):
+            r = self.client.get(path)
+            self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
+
+    def test_existing_stock_pages_highlight_stock_in_nav(self):
+        r = self.client.get("/")  # dashboard
+        body = r.content.decode()
+        nav_start = body.index("<nav>")
+        nav_end = body.index("</nav>", nav_start)
+        nav = body[nav_start:nav_end]
+        # Stock link gets class="on" when on a stock sub-page
+        self.assertRegex(nav, r'href="/stock/"\s+class="on"')
+
+
 class PackSizeFilterTests(SimpleTestCase):
     def test_grams_promoted_to_kg_at_threshold(self):
         self.assertEqual(pack_size(25000, "g"), "25 kg")
