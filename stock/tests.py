@@ -2633,18 +2633,45 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertIn("Water", body)
         self.assertIn("40.00", body)
 
-    def test_role_tag_renders_on_detail_page(self):
-        # The main recipe isn't referenced anywhere → final_product.
-        Recipe.recompute_all_roles()
+    def test_detail_tags_for_sold_only_recipe(self):
+        # Main isn't used by anything → sold tag only, no component tag,
+        # no "Used in" list.
+        Recipe.recompute_all_sold_defaults()
         r = self.client.get(f"/recipes/{self.main.pk}/")
         body = r.content.decode()
-        self.assertIn("Final product", body)
-        # And the sub-recipe lists its parent (the main) on its detail page
+        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        self.assertIn("Sold product", header)
+        self.assertNotIn("Component", header)
+        self.assertNotIn("Used in:", body)
+
+    def test_detail_tags_for_component_only_recipe(self):
+        # The sub-recipe is used by main and (default) not sold standalone.
+        # Show Component tag + Used-in list; do NOT show Sold-product tag.
+        Recipe.recompute_all_sold_defaults()
+        self.sub.refresh_from_db()
+        self.assertFalse(self.sub.sold_as_product)
         r = self.client.get(f"/recipes/{self.sub.pk}/")
         body = r.content.decode()
-        self.assertIn("Component", body)
+        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        self.assertIn("Component", header)
+        self.assertNotIn("Sold product", header)
         self.assertIn("Used in:", body)
         self.assertIn("NPD-R100", body)
+
+    def test_detail_tags_for_both_sold_and_component(self):
+        # The independent axis: a component that the operator also marks
+        # as sold (e.g. a dough sold by the kg AND used in pastries) shows
+        # BOTH tags — sold and component — and the Used-in list.
+        Recipe.recompute_all_sold_defaults()
+        self.sub.sold_as_product = True
+        self.sub.is_sold_manual = True
+        self.sub.save(update_fields=["sold_as_product", "is_sold_manual"])
+        r = self.client.get(f"/recipes/{self.sub.pk}/")
+        body = r.content.decode()
+        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        self.assertIn("Sold product", header)
+        self.assertIn("Component", header)
+        self.assertIn("Used in:", body)
 
     def test_no_template_comment_text_on_detail_page(self):
         # _recipe_node.html previously used a multi-line {# ... #} block,
@@ -2654,41 +2681,37 @@ class RecipeDetailLayoutTests(TestCase):
         r = self.client.get(f"/recipes/{self.main.pk}/")
         body = r.content.decode()
         self.assertNotIn("Recursive renderer", body)
+        self.assertNotIn("Two independent tags", body)
         self.assertNotIn("{# ", body)
         self.assertNotIn(" #}", body)
         self.assertNotIn("{% comment %}", body)
         self.assertNotIn("{% endcomment %}", body)
 
-    def test_detail_role_tag_derives_from_references_not_stored_role(self):
-        # The exact bug: a sub-recipe whose stored Recipe.role says
-        # final_product (e.g. role_is_manual=True after a manual override,
-        # or because recompute hasn't run) must still show "Component"
-        # on its detail page because it IS used by another recipe.
-        self.sub.role = Recipe.ROLE_FINAL
-        self.sub.role_is_manual = True
-        self.sub.save(update_fields=["role", "role_is_manual"])
-        # Sanity: the stored field is final_product, but parents() lists
-        # the main recipe — i.e. it's actually a component.
-        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
+    def test_detail_used_by_others_still_shows_component_even_if_sold_flag_off(self):
+        # is_used_as_component is live-derived from parents() and cannot
+        # be desynced. Even if sold_as_product is True/False and manual
+        # is on, the Component tag must appear when something references
+        # this recipe.
+        self.sub.sold_as_product = False
+        self.sub.is_sold_manual = True
+        self.sub.save(update_fields=["sold_as_product", "is_sold_manual"])
         self.assertTrue(list(self.sub.parents()))
-        # The displayed tag derives from references, so "Component" wins.
         r = self.client.get(f"/recipes/{self.sub.pk}/")
         body = r.content.decode()
         header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Component", header)
-        self.assertNotIn("Final product", header)
+        self.assertNotIn("Sold product", header)
 
-    def test_detail_final_tag_when_not_referenced_even_if_stored_says_component(self):
-        # The mirror case: stored role is "component" but nothing actually
-        # references this recipe — the tag must say "Final product".
-        # (No existing references to self.main; just push a stale stored role.)
-        self.main.role = Recipe.ROLE_COMPONENT
-        self.main.role_is_manual = True
-        self.main.save(update_fields=["role", "role_is_manual"])
+    def test_detail_final_tag_when_not_referenced(self):
+        # Nothing references main, so even if sold_as_product is fiddled
+        # with, the Component tag must NOT appear.
+        self.main.sold_as_product = True
+        self.main.is_sold_manual = True
+        self.main.save(update_fields=["sold_as_product", "is_sold_manual"])
         r = self.client.get(f"/recipes/{self.main.pk}/")
         body = r.content.decode()
         header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
-        self.assertIn("Final product", header)
+        self.assertIn("Sold product", header)
         self.assertNotIn("Component", header)
 
     def test_flat_view_does_not_list_sub_recipes(self):
@@ -2706,8 +2729,9 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertNotIn("NPD-R200", table_section)
 
 
-class RecipeRoleTests(TestCase):
-    """Auto-derived role, parents() helper, and the manual override flow."""
+class RecipeSoldFlagTests(TestCase):
+    """sold_as_product (stored), is_used_as_component (live), and the
+    manual-override flow that replaces the old single `role` field."""
 
     @classmethod
     def setUpTestData(cls):
@@ -2726,26 +2750,28 @@ class RecipeRoleTests(TestCase):
                 unit="g", minimum=0)
         call_command("import_recipe", SAMPLE_RECIPE_XLSX, "--department", "Bakery")
 
-    def test_sample_main_recipe_is_final_product(self):
-        # NPD-R800 isn't referenced as a sub_recipe by anything → final.
+    def test_import_marks_main_as_sold(self):
+        # NPD-R800 isn't referenced as a sub_recipe by anything → sold by default.
         r800 = Recipe.objects.get(code="NPD-R800")
-        self.assertEqual(r800.role, Recipe.ROLE_FINAL)
-        self.assertFalse(r800.role_is_manual)
+        self.assertTrue(r800.sold_as_product)
+        self.assertFalse(r800.is_sold_manual)
+        # And is NOT itself used as a component
+        self.assertFalse(r800.is_used_as_component)
 
-    def test_sample_sub_recipes_are_components(self):
-        # All other six are referenced somewhere → component.
+    def test_import_marks_sub_recipes_as_not_sold(self):
+        # All six sub-recipes are referenced → sold defaults to False.
         for code in ("NPD-R364", "NPD-R2031", "NPD-R2082",
                      "NPD-R2029", "NPD-R1823", "NPD-R307"):
             r = Recipe.objects.get(code=code)
-            self.assertEqual(r.role, Recipe.ROLE_COMPONENT,
-                             f"{code} should be component")
+            self.assertFalse(r.sold_as_product, f"{code} should not be sold by default")
+            self.assertTrue(r.is_used_as_component,
+                            f"{code} should be a component")
 
     def test_parents_lists_recipes_that_use_this_as_sub(self):
         # NPD-R2029 (Stiff Starter) is used in NPD-R2082 (Ferment).
         r2029 = Recipe.objects.get(code="NPD-R2029")
-        parents = list(r2029.parents())
-        self.assertEqual([p.code for p in parents], ["NPD-R2082"])
-        # NPD-R800 (the final product) has no parents.
+        self.assertEqual([p.code for p in r2029.parents()], ["NPD-R2082"])
+        # NPD-R800 (the sold product) has no parents.
         r800 = Recipe.objects.get(code="NPD-R800")
         self.assertEqual(list(r800.parents()), [])
 
@@ -2754,67 +2780,82 @@ class RecipeRoleTests(TestCase):
         # additions during the bake) shouldn't appear twice in parents().
         parent = Recipe.objects.get(code="NPD-R2031")
         sub = Recipe.objects.get(code="NPD-R2082")
-        # Add a second line referencing the same sub.
         RecipeLine.objects.create(recipe=parent, sub_recipe=sub,
                                   weight_g=Decimal("10"), ordering=99)
         self.assertEqual([p.code for p in sub.parents()], ["NPD-R2031"])
 
-    def test_recompute_role_demotes_to_component_when_referenced(self):
-        # Create a fresh recipe, default role = final.
+    def test_recompute_sold_default_demotes_when_referenced(self):
+        # Create a fresh recipe → defaults to sold (no references yet).
         r = Recipe.objects.create(
             code="NPD-R9001", name="New", department=self.dept,
             finished_weight_g=Decimal("100"))
-        self.assertEqual(r.role, Recipe.ROLE_FINAL)
-        # Reference it from an existing recipe...
+        self.assertTrue(r.sold_as_product)
+        # Reference it from an existing recipe; recompute → not sold.
         parent = Recipe.objects.get(code="NPD-R800")
         RecipeLine.objects.create(recipe=parent, sub_recipe=r,
                                   weight_g=Decimal("10"), ordering=99)
-        # ...then recompute: it must flip to component.
-        r.recompute_role()
+        r.recompute_sold_default()
         r.refresh_from_db()
-        self.assertEqual(r.role, Recipe.ROLE_COMPONENT)
+        self.assertFalse(r.sold_as_product)
 
-    def test_recompute_role_promotes_back_to_final_when_unreferenced(self):
-        # A component that loses all parents becomes a final product again.
+    def test_recompute_sold_default_promotes_when_unreferenced(self):
+        # A component that loses all parents becomes sold by default.
         r307 = Recipe.objects.get(code="NPD-R307")
-        self.assertEqual(r307.role, Recipe.ROLE_COMPONENT)
-        # Remove every line that references it
+        self.assertFalse(r307.sold_as_product)
         RecipeLine.objects.filter(sub_recipe=r307).delete()
-        r307.recompute_role()
+        r307.recompute_sold_default()
         r307.refresh_from_db()
-        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
+        self.assertTrue(r307.sold_as_product)
 
-    def test_manual_override_is_not_overwritten_by_recompute(self):
-        # The operator marks a component as a final product (e.g. they
-        # also sell the starter as a standalone product). Bulk recompute
-        # — including the post-import call — must leave that alone.
+    def test_manual_sold_override_survives_recompute(self):
+        # The headline use case: a component the operator also sells
+        # standalone. They flip sold_as_product=True with is_sold_manual,
+        # and post-import recompute leaves it alone.
         r307 = Recipe.objects.get(code="NPD-R307")
-        r307.role = Recipe.ROLE_FINAL
-        r307.role_is_manual = True
-        r307.save(update_fields=["role", "role_is_manual"])
+        r307.sold_as_product = True
+        r307.is_sold_manual = True
+        r307.save(update_fields=["sold_as_product", "is_sold_manual"])
         # Per-instance recompute respects it
-        r307.recompute_role()
+        r307.recompute_sold_default()
         r307.refresh_from_db()
-        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
-        # And the bulk class-method respects it too
-        Recipe.recompute_all_roles()
+        self.assertTrue(r307.sold_as_product)
+        # Bulk recompute respects it
+        Recipe.recompute_all_sold_defaults()
         r307.refresh_from_db()
-        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
-        self.assertTrue(r307.role_is_manual)
+        self.assertTrue(r307.sold_as_product)
+        self.assertTrue(r307.is_sold_manual)
+        # And it's STILL a component (the two axes are independent)
+        self.assertTrue(r307.is_used_as_component)
 
-    def test_import_recomputes_roles(self):
-        # Import is set up in setUpTestData; assert R800 is final and the
-        # rest are component, which is precisely what the import-time
-        # recompute is supposed to produce.
-        roles = dict(Recipe.objects.values_list("code", "role"))
-        self.assertEqual(roles["NPD-R800"], Recipe.ROLE_FINAL)
-        for code in ("NPD-R364", "NPD-R2031", "NPD-R2082",
-                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
-            self.assertEqual(roles[code], Recipe.ROLE_COMPONENT)
+    def test_manual_sold_flag_survives_reimport(self):
+        # Re-running the import should preserve the operator's choice.
+        from django.core.management import call_command
+        r307 = Recipe.objects.get(code="NPD-R307")
+        r307.sold_as_product = True
+        r307.is_sold_manual = True
+        r307.save(update_fields=["sold_as_product", "is_sold_manual"])
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX, "--department", "Bakery")
+        r307.refresh_from_db()
+        self.assertTrue(r307.sold_as_product)
+        self.assertTrue(r307.is_sold_manual)
+
+    def test_is_used_as_component_property_is_live_derived(self):
+        # Adding/removing a sub_recipe edge flips is_used_as_component on
+        # the next access — no save/recompute needed.
+        r = Recipe.objects.create(
+            code="NPD-R9002", name="Z", department=self.dept,
+            finished_weight_g=Decimal("100"))
+        self.assertFalse(r.is_used_as_component)
+        parent = Recipe.objects.get(code="NPD-R800")
+        line = RecipeLine.objects.create(recipe=parent, sub_recipe=r,
+                                         weight_g=Decimal("10"), ordering=99)
+        self.assertTrue(r.is_used_as_component)
+        line.delete()
+        self.assertFalse(r.is_used_as_component)
 
 
-class RecipesListRoleColumnTests(TestCase):
-    """The list page renders Role + Used-in columns and the override POST works."""
+class RecipesListSoldColumnTests(TestCase):
+    """The list page renders Sold/Component tags + the sold-toggle POST works."""
 
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
@@ -2824,7 +2865,7 @@ class RecipesListRoleColumnTests(TestCase):
         self.client = Client()
         assert self.client.login(username="alice", password="pw")
         self.client.get(f"/switch/{self.dept.pk}/")
-        # Two recipes: parent references sub
+        # Two recipes: parent references sub.
         self.sub = Recipe.objects.create(
             code="NPD-R301", name="Starter", department=self.dept,
             finished_weight_g=Decimal("100"))
@@ -2833,98 +2874,105 @@ class RecipesListRoleColumnTests(TestCase):
             finished_weight_g=Decimal("400"))
         RecipeLine.objects.create(recipe=self.parent, sub_recipe=self.sub,
                                   weight_g=Decimal("100"), ordering=0)
-        Recipe.recompute_all_roles()
+        Recipe.recompute_all_sold_defaults()
+        self.sub.refresh_from_db()
+        self.parent.refresh_from_db()
 
-    def test_list_page_shows_role_column_with_tags(self):
-        # Role / Used-in / dropdown override live on the flat table view.
+    def test_list_page_shows_tag_columns(self):
         r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
-        # Both roles render
-        self.assertIn("Final product", body)
+        # Both tags render somewhere in the flat table
+        self.assertIn("Sold", body)
         self.assertIn("Component", body)
-        # Header has Role + Used in
-        self.assertIn(">Role<", body)
+        # Header has the two new columns
+        self.assertIn(">Tags<", body)
+        self.assertIn(">Sold?<", body)
         self.assertIn(">Used in<", body)
 
-    def test_list_page_shows_parent_links_for_components(self):
+    def test_sub_recipe_row_shows_component_tag_and_no_sold_tag_by_default(self):
         r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
-        # The sub-recipe row links to its parent
         sub_row_start = body.find('data-search="npd-r301')
-        self.assertGreater(sub_row_start, 0)
-        row_end = body.find("</tr>", sub_row_start)
-        sub_row = body[sub_row_start:row_end]
+        sub_row = body[sub_row_start:body.find("</tr>", sub_row_start)]
+        # Component badge present; Sold badge absent (default for a used
+        # recipe is sold_as_product=False).
+        self.assertIn('class="role-tag component"', sub_row)
+        self.assertNotIn('class="role-tag sold"', sub_row)
+        # Parent link in the Used-in column
         self.assertIn(f'href="/recipes/{self.parent.pk}/"', sub_row)
-        self.assertIn("NPD-R300", sub_row)
-        # The final product row shows the em-dash placeholder, no parent
+
+    def test_parent_row_shows_sold_tag_and_no_component_tag(self):
+        r = self.client.get("/recipes/?view=flat")
+        body = r.content.decode()
         parent_row_start = body.find('data-search="npd-r300')
         parent_row = body[parent_row_start:body.find("</tr>", parent_row_start)]
+        self.assertIn('class="role-tag sold"', parent_row)
+        self.assertNotIn('class="role-tag component"', parent_row)
+        # Used-in column shows em-dash for a sold-only recipe
         self.assertIn("—", parent_row)
 
-    def test_role_override_post_sets_manual_flag(self):
-        # Operator flips the starter to final product.
-        r = self.client.post(f"/recipes/{self.sub.pk}/role/",
-                             {"role": Recipe.ROLE_FINAL})
+    def test_sold_override_post_sets_manual_flag(self):
+        # Flip the sub from "not sold" to "sold".
+        r = self.client.post(f"/recipes/{self.sub.pk}/sold/",
+                             {"sold": "true"})
         self.assertEqual(r.status_code, 302)
         self.sub.refresh_from_db()
-        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
-        self.assertTrue(self.sub.role_is_manual)
-        # Subsequent bulk recompute (e.g. after import) leaves it alone.
-        Recipe.recompute_all_roles()
+        self.assertTrue(self.sub.sold_as_product)
+        self.assertTrue(self.sub.is_sold_manual)
+        # Subsequent bulk recompute leaves it alone
+        Recipe.recompute_all_sold_defaults()
         self.sub.refresh_from_db()
-        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
+        self.assertTrue(self.sub.sold_as_product)
+        # And it STILL shows as a component (independent axis)
+        self.assertTrue(self.sub.is_used_as_component)
 
-    def test_role_override_rejects_bad_value(self):
-        r = self.client.post(f"/recipes/{self.sub.pk}/role/",
-                             {"role": "bogus"})
+    def test_sold_override_can_also_unsell(self):
+        # Flip the parent from sold to not-sold.
+        r = self.client.post(f"/recipes/{self.parent.pk}/sold/",
+                             {"sold": "false"})
+        self.assertEqual(r.status_code, 302)
+        self.parent.refresh_from_db()
+        self.assertFalse(self.parent.sold_as_product)
+        self.assertTrue(self.parent.is_sold_manual)
+
+    def test_sold_override_rejects_bad_value(self):
+        r = self.client.post(f"/recipes/{self.sub.pk}/sold/",
+                             {"sold": "bogus"})
         self.assertEqual(r.status_code, 302)
         self.sub.refresh_from_db()
-        # Original auto-derived role retained
-        self.assertEqual(self.sub.role, Recipe.ROLE_COMPONENT)
-        self.assertFalse(self.sub.role_is_manual)
+        # Default retained
+        self.assertFalse(self.sub.sold_as_product)
+        self.assertFalse(self.sub.is_sold_manual)
 
-    def test_role_override_blocked_for_other_department(self):
+    def test_sold_override_blocked_for_other_department(self):
         other = Department.objects.create(name="Butchery")
         r = Recipe.objects.create(code="NPD-R900", name="X", department=other)
-        resp = self.client.post(f"/recipes/{r.pk}/role/",
-                                {"role": Recipe.ROLE_FINAL})
+        resp = self.client.post(f"/recipes/{r.pk}/sold/", {"sold": "true"})
         self.assertEqual(resp.status_code, 403)
 
     def test_filter_input_still_present(self):
         r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
         # The data-filter hook + data-search on rows is what the existing
-        # filter JS expects — both must survive the column-add refactor.
+        # filter JS expects — both must survive each list refactor.
         self.assertIn('data-filter="recipes-tbl"', body)
         self.assertIn('data-search="npd-r300', body)
         self.assertIn('data-search="npd-r301', body)
 
-    def test_flat_role_tag_derives_from_references_not_stored_role(self):
-        # Same bug as the detail page, on the All-recipes flat table:
-        # a recipe referenced by another must render as "Component" even
-        # if its stored Recipe.role is final_product (stale or manually
-        # overridden). And vice versa for a final product whose stored
-        # role is component.
-        self.sub.role = Recipe.ROLE_FINAL
-        self.sub.role_is_manual = True
-        self.sub.save(update_fields=["role", "role_is_manual"])
-        self.parent.role = Recipe.ROLE_COMPONENT
-        self.parent.role_is_manual = True
-        self.parent.save(update_fields=["role", "role_is_manual"])
-
+    def test_flat_component_tag_is_live_derived_from_references(self):
+        # Even if the operator sets sold_as_product on a recipe, the
+        # Component tag must still appear when something references it
+        # (the two axes are independent).
+        self.sub.sold_as_product = True
+        self.sub.is_sold_manual = True
+        self.sub.save(update_fields=["sold_as_product", "is_sold_manual"])
         r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
-        # The displayed tag is wrapped in <span class="role-tag {final|component}">;
-        # the override dropdown carries both labels as <option>s, so anchor
-        # on the role-tag span class to avoid false matches.
         sub_row_start = body.find('data-search="npd-r301')
         sub_row = body[sub_row_start:body.find("</tr>", sub_row_start)]
+        # Both tags now
+        self.assertIn('class="role-tag sold"', sub_row)
         self.assertIn('class="role-tag component"', sub_row)
-        self.assertNotIn('class="role-tag final"', sub_row)
-        parent_row_start = body.find('data-search="npd-r300')
-        parent_row = body[parent_row_start:body.find("</tr>", parent_row_start)]
-        self.assertIn('class="role-tag final"', parent_row)
-        self.assertNotIn('class="role-tag component"', parent_row)
 
 
 class RecipesByProductTreeTests(TestCase):
@@ -3029,8 +3077,46 @@ class RecipesByProductTreeTests(TestCase):
         # The tree HTML structure is present
         self.assertIn('class="tree-list"', body)
         self.assertIn('class="tree-node"', body)
-        # And NPD-R800 is labelled a final product in the tree
-        self.assertIn("final product", body)
+        # And NPD-R800 is labelled as a sold product in the tree
+        self.assertIn("sold product", body)
+
+    def test_sold_component_appears_at_top_level_and_nested(self):
+        # The headline new-model use case: a recipe that's BOTH used as
+        # a component AND sold standalone must appear as a tree root AND
+        # nested under each parent that uses it.
+        r364 = Recipe.objects.get(code="NPD-R364")
+        r364.sold_as_product = True
+        r364.is_sold_manual = True
+        r364.save(update_fields=["sold_as_product", "is_sold_manual"])
+
+        forest = self._forest()
+        root_codes = [n["recipe"].code for n in forest]
+        # Both R800 (original final product) AND R364 (now also sold) appear at top
+        self.assertIn("NPD-R800", root_codes)
+        self.assertIn("NPD-R364", root_codes)
+        # And R364 is STILL nested under R800 — the dual appearance is intentional
+        r800_node = next(n for n in forest if n["recipe"].code == "NPD-R800")
+        r800_child_codes = [c["recipe"].code for c in r800_node["children"]]
+        self.assertIn("NPD-R364", r800_child_codes)
+
+        # And the rendered page reflects this: NPD-R364 appears twice
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        self.assertGreaterEqual(body.count("NPD-R364"), 2,
+                                "Sold-AND-component recipe should render in two places")
+        # "also sold" hint appears for the nested occurrence
+        self.assertIn("also sold", body)
+
+    def test_unselling_a_top_level_recipe_removes_it_from_the_tree(self):
+        # The operator flags R800 as not sold (e.g. discontinued). The
+        # tree should no longer surface it as a product.
+        r800 = Recipe.objects.get(code="NPD-R800")
+        r800.sold_as_product = False
+        r800.is_sold_manual = True
+        r800.save(update_fields=["sold_as_product", "is_sold_manual"])
+        forest = self._forest()
+        self.assertEqual([n["recipe"].code for n in forest], [],
+                         "Unselling the only sold recipe empties the tree")
 
     def test_tree_codes_render_in_top_to_leaf_order(self):
         # The chain should appear in document order parent-before-child,

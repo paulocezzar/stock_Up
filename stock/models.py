@@ -398,14 +398,20 @@ class Recipe(models.Model):
     at raw ingredients (Product) or at other Recipes (sub-recipes), which is
     how multi-stage bakery formulas (starter -> ferment -> dough -> finished
     loaf) are modelled.
-    """
-    ROLE_FINAL = "final_product"
-    ROLE_COMPONENT = "component"
-    ROLE_CHOICES = [
-        (ROLE_FINAL, "Final product"),
-        (ROLE_COMPONENT, "Component"),
-    ]
 
+    Two independent properties classify a recipe:
+
+    - ``is_used_as_component`` (live-derived from ``parents()``) — true iff
+      any other Recipe references it via RecipeLine.sub_recipe. Never
+      stored; can't go stale.
+    - ``sold_as_product`` (stored bool) — true iff we sell this recipe as
+      a standalone product. On import, defaults from references (not used
+      → sold; used → not sold) but ``is_sold_manual`` locks in any operator
+      choice so re-imports won't clobber it.
+
+    A recipe can be BOTH at once — a dough sold per kg that's also used
+    inside pastries is sold_as_product=True AND is_used_as_component=True.
+    """
     department = models.ForeignKey("Department", related_name="recipes",
                                    on_delete=models.CASCADE, null=True, blank=True)
     code = models.CharField(max_length=20, unique=True)
@@ -417,13 +423,11 @@ class Recipe(models.Model):
     cook_loss_pct = models.DecimalField(max_digits=6, decimal_places=2,
                                         null=True, blank=True)
     method_text = models.TextField(blank=True)
-    # Auto-derived from RecipeLine.sub_recipe references unless the user has
-    # explicitly set it (role_is_manual=True), in which case recompute_role()
-    # leaves it alone. New recipes default to final_product; recompute will
-    # demote them to component as soon as another recipe references them.
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES,
-                            default=ROLE_FINAL)
-    role_is_manual = models.BooleanField(default=False)
+    # Set on import (true if not used by anything, false if used as
+    # sub_recipe). Manual overrides via the list page set is_sold_manual=True
+    # so subsequent recompute_all_sold_defaults() leaves them alone.
+    sold_as_product = models.BooleanField(default=True)
+    is_sold_manual = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
@@ -433,7 +437,7 @@ class Recipe(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
-    # ---- role / parent helpers ----
+    # ---- structural helpers ----
 
     def parents(self):
         """Recipes that reference this one as a sub_recipe (any number).
@@ -446,43 +450,50 @@ class Recipe(models.Model):
                 .distinct()
                 .order_by("code"))
 
-    def recompute_role(self, save=True):
-        """Re-derive `role` from current RecipeLine references.
+    @property
+    def is_used_as_component(self):
+        """True iff any other recipe references this one as a sub_recipe.
 
-        Used as a sub_recipe anywhere → component, otherwise final_product.
-        No-op if the operator has manually set the role (role_is_manual).
-        Returns the resolved role (after any change).
+        Live-derived; never stored. Uses the reverse `used_in_lines`
+        relation so a single prefetch on the caller (``prefetch_related
+        ('used_in_lines')``) makes this O(1) without an extra query.
         """
-        if self.role_is_manual:
-            return self.role
-        is_referenced = RecipeLine.objects.filter(
-            sub_recipe_id=self.pk).exists()
-        new_role = self.ROLE_COMPONENT if is_referenced else self.ROLE_FINAL
-        if new_role != self.role:
-            self.role = new_role
+        return self.used_in_lines.exists()
+
+    # ---- sold_as_product recompute (default-from-references) ----
+
+    def recompute_sold_default(self, save=True):
+        """Re-derive `sold_as_product` from current RecipeLine references.
+
+        Not referenced → sold (a top-level product); referenced → not sold
+        (it's purely an internal component). No-op if the operator has set
+        ``is_sold_manual=True``. Returns the resolved value.
+        """
+        if self.is_sold_manual:
+            return self.sold_as_product
+        new_value = not self.parents().exists()
+        if new_value != self.sold_as_product:
+            self.sold_as_product = new_value
             if save:
-                # update_fields keeps `updated` from churning the rest of
-                # the row (and avoids triggering full-row signals callers
-                # may have wired up).
-                self.save(update_fields=["role"])
-        return self.role
+                self.save(update_fields=["sold_as_product"])
+        return self.sold_as_product
 
     @classmethod
-    def recompute_all_roles(cls):
-        """Refresh `role` on every non-manual recipe in one pass.
+    def recompute_all_sold_defaults(cls):
+        """Refresh `sold_as_product` for every non-manual recipe in one pass.
 
-        Cheaper than per-recipe queries when called after a bulk import:
-        one query lists all sub_recipe IDs in use, then a single SQL
-        UPDATE flips each non-manual recipe to the right role.
+        Two queries: collect every sub_recipe id in use, then two UPDATEs
+        (referenced → not sold; everything else → sold). Manual overrides
+        are excluded so operator choices survive re-imports.
         """
         referenced = set(
             RecipeLine.objects
             .filter(sub_recipe__isnull=False)
             .values_list("sub_recipe_id", flat=True))
-        cls.objects.filter(role_is_manual=False, pk__in=referenced).update(
-            role=cls.ROLE_COMPONENT)
-        cls.objects.filter(role_is_manual=False).exclude(
-            pk__in=referenced).update(role=cls.ROLE_FINAL)
+        cls.objects.filter(is_sold_manual=False, pk__in=referenced).update(
+            sold_as_product=False)
+        cls.objects.filter(is_sold_manual=False).exclude(
+            pk__in=referenced).update(sold_as_product=True)
 
     def exploded_ingredients(self):
         """Flat list of raw ingredients to make one stated batch of this recipe.

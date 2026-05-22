@@ -453,10 +453,10 @@ def save_recipes(parsed, department):
                     weight_g=weight, ordering=i,
                 )
 
-    # After the lines are written, refresh which recipes are final products
-    # vs components based on the new reference graph. Manual overrides
-    # (role_is_manual=True) are preserved.
-    Recipe.recompute_all_roles()
+    # After the lines are written, refresh sold_as_product defaults based
+    # on the new reference graph (not referenced = sold, referenced = not
+    # sold). Manual overrides (is_sold_manual=True) are preserved.
+    Recipe.recompute_all_sold_defaults()
 
     return {
         "created": created,

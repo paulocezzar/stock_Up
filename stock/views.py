@@ -333,31 +333,28 @@ def _recipe_tree(recipe, depth=0, seen=None):
 def _by_product_forest(recipes):
     """Build the top-level → sub-recipe forest for the by-product view.
 
-    Roots are recipes that NO other recipe references as a sub_recipe —
-    derived from the actual RecipeLine.sub_recipe edges in `recipes` (not
-    from the stored role field, which a manual override can desync).
+    Roots are recipes the bakery sells (``sold_as_product=True``). A recipe
+    that's BOTH sold and used as a component appears as a root AND nested
+    under each parent that uses it, so the tree shows both "things we sell"
+    and "what each is built from."
 
-    Each node is ``{recipe, depth, children: [...], cycle: bool}``.
-    `seen` on the recursion path prevents an admin-edited cycle from
-    rendering forever; a back-edge becomes a leaf with cycle=True.
-
-    A recipe used by multiple parents shows under each parent.
+    Each node is ``{recipe, depth, children, cycle}``. The recursion path's
+    ``seen`` set prevents an admin-edited cycle from rendering forever; a
+    back-edge becomes a leaf with cycle=True.
     """
     by_id = {r.pk: r for r in recipes}
-    # Map parent_id → ordered, deduped list of (sub_id, first_seen_ordering)
+    # parent_id → ordered, deduped list of sub_recipe ids
     children_of = {pk: [] for pk in by_id}
-    referenced = set()
     for r in recipes:
         seen_for_this = set()
         for line in sorted(r.lines.all(), key=lambda l: (l.ordering, l.id)):
             if not line.sub_recipe_id or line.sub_recipe_id not in by_id:
                 continue
-            referenced.add(line.sub_recipe_id)
             if line.sub_recipe_id in seen_for_this:
                 continue
             seen_for_this.add(line.sub_recipe_id)
             children_of[r.pk].append(line.sub_recipe_id)
-    roots = [r for r in recipes if r.pk not in referenced]
+    roots = [r for r in recipes if r.sold_as_product]
     roots.sort(key=lambda r: r.code)
 
     def build(rid, depth, path):
@@ -391,7 +388,6 @@ def recipes_home(request):
     context = {
         "n_recipes": len(recipes),
         "view_mode": view_mode,
-        "role_choices": Recipe.ROLE_CHOICES,
     }
 
     if view_mode == "by_product":
@@ -416,25 +412,25 @@ def recipes_home(request):
 
 @require_POST
 @login_required
-def recipe_set_role(request, pk):
-    """Manual role override from the recipe list page.
+def recipe_set_sold(request, pk):
+    """Toggle whether a recipe is sold as a standalone product.
 
-    Setting this flips `role_is_manual` so the next bulk recompute_all_roles
-    (e.g. after another import) won't overwrite the operator's choice.
+    Sets ``is_sold_manual=True`` so the next bulk
+    ``recompute_all_sold_defaults()`` (e.g. post-import) won't overwrite
+    the operator's choice. Accepts "true" / "false" in POST["sold"].
     """
     recipe = get_object_or_404(Recipe, pk=pk)
     if recipe.department and not recipe.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    role = request.POST.get("role")
-    valid = {k for k, _ in Recipe.ROLE_CHOICES}
-    if role not in valid:
-        messages.error(request, "Pick a valid role.")
+    raw = (request.POST.get("sold") or "").strip().lower()
+    if raw not in ("true", "false"):
+        messages.error(request, "Pick a valid sold state.")
         return redirect("recipes")
-    recipe.role = role
-    recipe.role_is_manual = True
-    recipe.save(update_fields=["role", "role_is_manual"])
-    messages.success(request,
-                     f"Marked {recipe.code} as {recipe.get_role_display().lower()}.")
+    recipe.sold_as_product = (raw == "true")
+    recipe.is_sold_manual = True
+    recipe.save(update_fields=["sold_as_product", "is_sold_manual"])
+    label = "sold as a product" if recipe.sold_as_product else "not sold standalone"
+    messages.success(request, f"Marked {recipe.code} as {label}.")
     return redirect("recipes")
 
 

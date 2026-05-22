@@ -3,12 +3,12 @@
 {% block body %}
 <style>
   .role-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
-    padding:3px 8px;border:1px solid;display:inline-block}
-  .role-tag.final{color:var(--amber);border-color:var(--amber)}
+    padding:3px 8px;border:1px solid;display:inline-block;margin-right:4px}
+  .role-tag.sold{color:var(--amber);border-color:var(--amber)}
   .role-tag.component{color:var(--muted);border-color:var(--muted)}
-  .role-form{display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle}
-  .role-form select{padding:3px 6px;font-size:11px}
-  .role-form button{padding:3px 8px;font-size:10px}
+  .sold-form{display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle}
+  .sold-form select{padding:3px 6px;font-size:11px}
+  .sold-form button{padding:3px 8px;font-size:10px}
   .parents-list a{margin-right:8px}
 
   /* ---- view toggle ---- */
@@ -81,7 +81,7 @@
   <table id="recipes-tbl">
     <thead><tr>
       <th>Code</th><th>Name</th>
-      <th>Role</th><th>Used in</th>
+      <th>Tags</th><th>Sold?</th><th>Used in</th>
       <th class="num">Lines</th><th class="num">Finished (g)</th><th class="num">Cook loss</th>
       <th></th>
     </tr></thead>
@@ -92,15 +92,20 @@
         <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
         <td>{{ r.name }}</td>
         <td>
-          {# Derived from row.parents (actual sub_recipe references); the #}
-          {# manual-override dropdown below still writes to recipe.role, but #}
-          {# the displayed tag tracks structure so a stale override can't lie. #}
-          {% if row.parents %}<span class="role-tag component" title="Used by {{ row.parents|length }} recipe{{ row.parents|length|pluralize }}">Component</span>{% else %}<span class="role-tag final" title="Not used by any other recipe">Final product</span>{% endif %}
-          <form method="post" action="{% url 'recipe_set_role' r.pk %}" class="role-form">{% csrf_token %}
-            <select name="role" aria-label="Override role for {{ r.code }}">
-              {% for value, label in role_choices %}
-                <option value="{{ value }}" {% if r.role == value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
+          {% comment %}
+          Two independent badges. "Sold" comes from the stored
+          sold_as_product flag (the operator's authoritative choice, with
+          a sensible default from references); "Component" is live-derived
+          from row.parents so a stale flag can never lie about structure.
+          {% endcomment %}
+          {% if r.sold_as_product %}<span class="role-tag sold" title="Sold as a standalone product{% if r.is_sold_manual %} (manually set){% endif %}">Sold{% if r.is_sold_manual %} ·M{% endif %}</span>{% endif %}
+          {% if row.parents %}<span class="role-tag component" title="Used by {{ row.parents|length }} recipe{{ row.parents|length|pluralize }}">Component</span>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="{% url 'recipe_set_sold' r.pk %}" class="sold-form">{% csrf_token %}
+            <select name="sold" aria-label="Toggle sold-as-product for {{ r.code }}">
+              <option value="true" {% if r.sold_as_product %}selected{% endif %}>Sold</option>
+              <option value="false" {% if not r.sold_as_product %}selected{% endif %}>Not sold</option>
             </select>
             <button class="btn ghost" type="submit">set</button>
           </form>
@@ -121,7 +126,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted" style="margin:10px 0 0;font-size:12px">Roles are derived from sub-recipe references after each import. Set one manually with the dropdown to lock it (re-imports won't overwrite a manual choice).</p>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">"Sold" defaults to true for recipes nothing else uses, false for components. Toggle it manually and the choice sticks across re-imports.</p>
   {% else %}
   <p class="muted">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
   {% endif %}

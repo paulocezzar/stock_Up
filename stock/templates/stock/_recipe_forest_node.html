@@ -1,11 +1,16 @@
 {% comment %}
 Recursive node for the by-product tree. Renders as an <li> so siblings
 line up; depth indentation and the guide line are handled by .tree-list
-in the parent CSS. A node with children becomes a <details>/<summary> so
-the tree is collapsed by default — only the top-level final products
+in the parent CSS. A node with children becomes a <details>/<summary>
+so the tree is collapsed by default — only the top-level sold products
 show until the user expands one. Cycles render as a leaf (no <details>)
-with the "cycle — stops here" tag so an admin-edited loop can't blow up
-the page.
+with the "cycle — stops here" tag so an admin-edited loop can't blow
+up the page.
+
+Roots are recipes with sold_as_product=True; the same recipe nested
+under a parent (because it's also a component) shows the "also a
+component" hint at depth > 0 so the duplicate doesn't look like an
+accident.
 
 Expects ``node = {recipe, depth, children, cycle}``.
 {% endcomment %}<li class="tree-node">
@@ -16,7 +21,7 @@ Expects ``node = {recipe, depth, children, cycle}``.
       <a class="tree-code" href="{% url 'recipe_detail' node.recipe.pk %}">{{ node.recipe.code }}</a>
       <span class="tree-name">{{ node.recipe.name }}</span>
       {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
-      {% if node.depth == 0 %}<span class="role-tag final">final product</span>{% endif %}
+      {% if node.depth == 0 %}<span class="role-tag sold">sold product</span>{% elif node.recipe.sold_as_product %}<span class="role-tag sold" title="Also sold as a standalone product">also sold</span>{% endif %}
     </summary>
     <ul class="tree-list">
       {% for child in node.children %}{% include "stock/_recipe_forest_node.html" with node=child %}{% endfor %}
@@ -28,7 +33,7 @@ Expects ``node = {recipe, depth, children, cycle}``.
     <a class="tree-code" href="{% url 'recipe_detail' node.recipe.pk %}">{{ node.recipe.code }}</a>
     <span class="tree-name">{{ node.recipe.name }}</span>
     {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
-    {% if node.depth == 0 %}<span class="role-tag final">final product</span>{% endif %}
+    {% if node.depth == 0 %}<span class="role-tag sold">sold product</span>{% elif node.recipe.sold_as_product %}<span class="role-tag sold" title="Also sold as a standalone product">also sold</span>{% endif %}
     {% if node.cycle %}<span class="tag low">cycle — stops here</span>{% endif %}
   </div>
 {% endif %}
