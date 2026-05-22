@@ -65,14 +65,95 @@ def current_department(request):
     return d
 
 
+def _weather_label(code):
+    if code is None:
+        return "—"
+    if code == 0:
+        return "Clear sky"
+    if code in (1, 2):
+        return "Partly cloudy"
+    if code == 3:
+        return "Overcast"
+    if code in (45, 48):
+        return "Fog"
+    if code in (51, 53, 55, 56, 57):
+        return "Drizzle"
+    if code in (61, 63, 65, 66, 67):
+        return "Rain"
+    if code in (71, 73, 75, 77, 85, 86):
+        return "Snow"
+    if code in (80, 81, 82):
+        return "Showers"
+    if code in (95, 96, 99):
+        return "Thunderstorm"
+    return "—"
+
+
+def _weather_icon(code):
+    if code is None:
+        return "·"
+    if code == 0:
+        return "☼"
+    if code in (1, 2):
+        return "◐"
+    if code == 3:
+        return "●"
+    if code in (45, 48):
+        return "≋"
+    if code in (51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82):
+        return "‖"
+    if code in (71, 73, 75, 77, 85, 86):
+        return "✻"
+    if code in (95, 96, 99):
+        return "↯"
+    return "·"
+
+
+def _packs(d):
+    """Render a Decimal pack count without trailing zeros (2.00 -> "2")."""
+    if d == d.to_integral_value():
+        return str(int(d))
+    return format(d.normalize(), "f")
+
+
+def fetch_weather(lat=51.1485, lon=-2.7137, timeout=3.0):
+    """Open-Meteo current weather for Glastonbury. No API key required.
+
+    Returns a dict with temperature, condition, icon and the API's
+    timestamp, or None on any failure (timeout, parse error, missing
+    fields). Tests patch this function on stock.views to avoid hitting
+    the network.
+    """
+    import json
+    import urllib.request
+    url = (f"https://api.open-meteo.com/v1/forecast"
+           f"?latitude={lat}&longitude={lon}&current_weather=true")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        cw = data.get("current_weather") or {}
+        code = cw.get("weathercode")
+        temp = cw.get("temperature")
+        if temp is None:
+            return None
+        return {
+            "temperature": temp,
+            "code": code,
+            "condition": _weather_label(code),
+            "icon": _weather_icon(code),
+            "time": cw.get("time"),
+        }
+    except Exception:
+        return None
+
+
 @login_required
 def home(request):
-    """Card-hub landing page — the post-login destination.
+    """Dashboard-style landing page — the post-login destination.
 
-    Builds an alert list for the "needs attention" hero card from existing
-    Stock data: below-minimum ingredients, batches expiring within 7 days,
-    a stale stocktake (>7 days old), and items projected to run out within
-    14 days based on the burn-rate calc.
+    Top row: welcome + weather + urgent tasks cards. Below: per-ingredient
+    stock alerts table. Weather is fetched live via Open-Meteo (no API key)
+    and falls back gracefully when the request fails.
     """
     dept = current_department(request)
     today = datetime.date.today()
@@ -84,7 +165,8 @@ def home(request):
     else:
         greeting = "Good evening"
 
-    alerts = []
+    urgent_alerts = []
+    stock_alerts = []
     stock_below = 0
     expiring_count = 0
     low_cover_count = 0
@@ -95,72 +177,93 @@ def home(request):
         for p in products:
             line = p.latest_line
             cur = line.current if line else None
-            if cur is not None and cur < p.minimum:
+            if cur is None:
+                continue
+            if cur < p.minimum:
                 stock_below += 1
-            if cur is not None:
+                stock_alerts.append({
+                    "ingredient": p,
+                    "alert": "Below minimum",
+                    "detail": f"{_packs(cur)} / {_packs(p.minimum)} packs",
+                    "href": "/reorder/",
+                    "kind": "below_min",
+                })
+            else:
                 cover = p.days_of_cover(cur)
-                if cover is not None and cover < 14 and (cur >= p.minimum):
-                    # already-below-minimum items are reported separately
+                if cover is not None and cover < 14:
                     low_cover_count += 1
+                    stock_alerts.append({
+                        "ingredient": p,
+                        "alert": "Low days of cover",
+                        "detail": f"~{cover} days",
+                        "href": f"/products/{p.pk}/",
+                        "kind": "low_cover",
+                    })
+
+        soon = today + datetime.timedelta(days=7)
+        expiring_batches = (Batch.objects
+            .filter(delivery__department=dept,
+                    use_by__isnull=False,
+                    use_by__gte=today,
+                    use_by__lte=soon,
+                    qty_remaining__gt=0)
+            .select_related("product", "delivery"))
+        for b in expiring_batches:
+            expiring_count += 1
+            stock_alerts.append({
+                "ingredient": b.product,
+                "alert": "Expires soon",
+                "detail": f"use-by {b.use_by:%d %b}",
+                "href": f"/deliveries/{b.delivery.pk}/",
+                "kind": "expiring",
+            })
+
         if stock_below:
-            alerts.append({
-                "kind": "below_min",
+            urgent_alerts.append({
                 "title": (f"{stock_below} ingredient"
                           f"{'s' if stock_below != 1 else ''} below minimum"),
                 "href": "/reorder/",
             })
-
-        soon = today + datetime.timedelta(days=7)
-        expiring_count = Batch.objects.filter(
-            delivery__department=dept,
-            use_by__isnull=False,
-            use_by__gte=today,
-            use_by__lte=soon,
-            qty_remaining__gt=0,
-        ).count()
         if expiring_count:
-            alerts.append({
-                "kind": "expiring",
+            urgent_alerts.append({
                 "title": (f"{expiring_count} batch"
                           f"{'es' if expiring_count != 1 else ''} "
                           f"expiring within 7 days"),
                 "href": "/deliveries/",
             })
-
         last_st = dept.stocktakes.first()
         if last_st:
             days_since_count = (today - last_st.date).days
             if days_since_count > 7:
-                alerts.append({
-                    "kind": "stale_count",
+                urgent_alerts.append({
                     "title": f"Last stocktake {days_since_count} days ago",
                     "href": "/stocktakes/",
                 })
         elif products:
-            alerts.append({
-                "kind": "no_count",
+            urgent_alerts.append({
                 "title": "No stocktake recorded yet",
                 "href": "/stocktakes/",
             })
-
         if low_cover_count:
-            alerts.append({
-                "kind": "low_cover",
+            urgent_alerts.append({
                 "title": (f"{low_cover_count} item"
                           f"{'s' if low_cover_count != 1 else ''} "
                           f"with <14 days cover"),
                 "href": "/",
             })
 
+    try:
+        weather = fetch_weather()
+    except Exception:
+        weather = None
     return render(request, "stock/home.html", {
         "greeting": greeting,
         "today": today,
-        "alerts": alerts,
+        "urgent_alerts": urgent_alerts,
+        "urgent_count": len(urgent_alerts),
+        "stock_alerts": stock_alerts,
         "has_dept": dept is not None,
-        "stock_below": stock_below,
-        "expiring_count": expiring_count,
-        "days_since_count": days_since_count,
-        "low_cover_count": low_cover_count,
+        "weather": weather,
     })
 
 

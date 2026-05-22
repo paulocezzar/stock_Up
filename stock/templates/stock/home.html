@@ -1,99 +1,154 @@
 {% extends "stock/base.html" %}{% load humanize %}
-{% block section_nav %}{% endblock %}
+{% block section_nav %}
+<a href="{% url 'home' %}" class="on">Home</a>
+<a href="{% url 'stock_home' %}">Stock</a>
+<a href="{% url 'recipes' %}">Recipes</a>
+<a href="{% url 'production' %}">Production</a>
+<a href="{% url 'rota' %}">Rota</a>
+<a href="{% url 'notes' %}">Notes</a>
+<a href="{% url 'profile' %}">Profile</a>
+{% endblock %}
 {% block body %}
 <style>
-  .home-hero{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:0 0 22px}
-  .home-hero .card{margin:0;padding:18px;display:flex;flex-direction:column;gap:8px;border-left:3px solid var(--amber)}
-  .home-hero .card .sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
-  .home-hero .welcome h2{margin:0;font-family:var(--disp);font-size:22px;line-height:1.2}
-  .home-hero .needs .alerts{display:flex;flex-direction:column;gap:6px;margin-top:2px}
-  .home-hero .needs .alerts a{display:flex;justify-content:space-between;align-items:center;gap:10px;
-    padding:9px 12px;background:var(--panel2);border-left:2px solid var(--red);
-    text-decoration:none;color:var(--ink);font-size:13px}
-  .home-hero .needs .alerts a:hover{border-left-color:var(--amber)}
-  .home-hero .needs .alerts a .view{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}
-  .home-hero .needs .calm{font-family:var(--disp);font-size:18px;color:var(--green);margin-top:2px}
+  .dash{display:grid;grid-template-columns:4fr 3fr 5fr;gap:16px;margin:0 0 16px;align-items:stretch}
+  .dash > .panel{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:24px;position:relative;display:flex;flex-direction:column;gap:12px}
+  .dash > .panel.strip{padding-top:28px}
+  .dash > .panel.strip::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;
+    background:var(--amber);border-radius:12px 12px 0 0}
 
-  .home-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
-  .home-grid .card{margin:0;padding:16px;display:flex;flex-direction:column;gap:6px;
-    text-decoration:none;color:inherit;border-left:3px solid var(--line);transition:border-color .12s}
-  .home-grid .card:hover{border-color:var(--amber);border-left-color:var(--amber)}
-  .home-grid .card .icon{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;
-    border:1px solid var(--line);color:var(--amber);font-family:var(--disp);font-size:14px;font-weight:600;
-    letter-spacing:.5px}
-  .home-grid .card h3{margin:6px 0 0;color:var(--ink);font-size:14px}
-  .home-grid .card .desc{margin:0;color:var(--muted);font-size:12px;flex:1}
-  .home-grid .card .footer{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:6px}
-  .home-grid .card .footer.warn{color:var(--red)}
-  .home-grid .card .open{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--amber);margin-top:4px}
+  /* welcome (flat amber, no gradient) */
+  .dash .welcome{background:var(--amber);border:none;color:#111;display:flex;flex-direction:column;
+    justify-content:space-between;gap:14px}
+  .dash .welcome .date-pill{background:rgba(0,0,0,.14);color:#111;padding:5px 14px;border-radius:999px;
+    font-size:11px;text-transform:uppercase;letter-spacing:1px;align-self:flex-start;font-family:var(--disp)}
+  .dash .welcome h2{margin:0;font-family:var(--disp);font-weight:600;font-size:26px;line-height:1.15;color:#111}
+  .dash .welcome .sub{margin:0;font-size:13px;color:#111;opacity:.78}
+  .dash .welcome .status{margin:0;font-size:12px;color:#111;opacity:.7}
 
-  @media (max-width:768px){
-    .home-hero{grid-template-columns:1fr}
+  /* weather */
+  .dash .weather .live{position:absolute;top:10px;right:14px;background:var(--green);color:#fff;
+    font-family:var(--disp);font-size:10px;padding:2px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:1px}
+  .dash .weather .row{display:flex;align-items:center;gap:14px}
+  .dash .weather .circle{width:56px;height:56px;border-radius:50%;background:var(--panel2);
+    border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--disp);font-size:22px;color:var(--amber);flex:0 0 auto}
+  .dash .weather .temp{margin:0;font-family:var(--disp);font-size:38px;font-weight:600;line-height:1;color:var(--ink)}
+  .dash .weather .loc{margin:4px 0 0;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+  .dash .weather .cond{margin:0;font-size:13px;color:var(--ink)}
+  .dash .weather .updated{margin:auto 0 0;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+
+  /* urgent */
+  .dash .urgent{flex-direction:column}
+  .dash .urgent .badge{position:absolute;top:14px;right:14px;background:var(--red);color:#fff;
+    font-family:var(--disp);font-size:12px;font-weight:600;padding:3px 11px;border-radius:999px;min-width:24px;text-align:center}
+  .dash .urgent h3{margin:0;font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--ink)}
+  .dash .urgent .sub{margin:-6px 0 4px;font-size:12px;color:var(--muted)}
+  .dash .urgent .alerts{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
+  .dash .urgent .alerts li a{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    padding:9px 12px;background:var(--panel2);border-left:2px solid var(--red);text-decoration:none;
+    color:var(--ink);font-size:13px}
+  .dash .urgent .alerts li a:hover{border-left-color:var(--amber)}
+  .dash .urgent .alerts li a .view{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}
+  .dash .urgent .calm{text-align:center;color:var(--green);font-family:var(--disp);font-size:18px;padding:20px 0;margin:0}
+  .dash .urgent .view-all{margin-top:auto;display:block;text-align:center;background:transparent;
+    border:1px solid var(--amber);color:var(--amber);padding:9px;text-transform:uppercase;
+    letter-spacing:1px;font-size:12px;font-family:var(--disp);font-weight:600;text-decoration:none;border-radius:6px}
+  .dash .urgent .view-all:hover{background:rgba(240,165,0,.08)}
+
+  /* alerts table card */
+  .stock-alerts{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:24px;position:relative;padding-top:28px;margin-bottom:20px}
+  .stock-alerts::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;
+    background:var(--amber);border-radius:12px 12px 0 0}
+  .stock-alerts h3{margin:0 0 4px;font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--ink)}
+  .stock-alerts .sub{margin:0 0 14px;font-size:12px;color:var(--muted)}
+  .stock-alerts table{margin:0;background:transparent;border:none}
+  .stock-alerts table th{border-bottom:1px solid var(--line)}
+  .stock-alerts table td{border-bottom:1px solid var(--line)}
+  .stock-alerts table tr:last-child td{border-bottom:none}
+  .stock-alerts .healthy{padding:20px 0;text-align:center;color:var(--green);font-family:var(--disp);font-size:16px;margin:0}
+
+  @media (max-width:1024px){
+    .dash{grid-template-columns:1fr 1fr}
+    .dash .welcome{grid-column:1/-1}
+  }
+  @media (max-width:640px){
+    .dash{grid-template-columns:1fr}
+    .dash > .panel{padding:20px}
+    .stock-alerts{padding:20px;padding-top:24px}
   }
 </style>
 
-<div class="home-hero">
-  <div class="card welcome">
-    <span class="sub">{{ today|date:"l, d M Y" }}</span>
-    <h2>{{ greeting }}{% if user.username %}, {{ user.username }}{% endif %}</h2>
-    <p class="muted" style="margin:0;font-size:13px">Here's what's happening today.</p>
-  </div>
-  <div class="card needs">
-    <span class="sub">Needs attention</span>
-    {% if alerts %}
-    <div class="alerts">
-      {% for a in alerts %}<a href="{{ a.href }}"><span>{{ a.title }}</span><span class="view">view →</span></a>{% endfor %}
+<div class="dash">
+
+  <div class="panel welcome">
+    <div>
+      <span class="date-pill">{{ today|date:"D, d M Y" }}</span>
+      <h2 style="margin-top:14px">Hello{% if user.username %}, {{ user.username }}{% endif %}!</h2>
+      <p class="sub">Welcome to your dashboard</p>
     </div>
-    {% else %}
-    <div class="calm">✓ All caught up</div>
-    <p class="muted" style="margin:0;font-size:12px">No critical alerts in {% if has_dept and current_dept %}{{ current_dept.name }}{% else %}your department{% endif %} right now.</p>
-    {% endif %}
+    <p class="status">
+      {% if has_dept and current_dept %}{{ current_dept.name }} · {% endif %}{{ greeting }}
+    </p>
   </div>
-  {# weather card slot — intentionally empty; can be added as a 3rd column later #}
+
+  <div class="panel strip weather">
+    {% if weather %}<span class="live">Live</span>{% endif %}
+    <div class="row">
+      <span class="circle">{% if weather %}{{ weather.icon }}{% else %}·{% endif %}</span>
+      <div>
+        {% if weather %}
+          <p class="temp">{{ weather.temperature|floatformat:0 }}°C</p>
+        {% else %}
+          <p class="temp" style="font-size:18px;color:var(--muted)">weather unavailable</p>
+        {% endif %}
+        <p class="loc">Glastonbury</p>
+      </div>
+    </div>
+    <p class="cond">{% if weather %}{{ weather.condition }}{% else %}—{% endif %}</p>
+    <p class="updated">
+      {% if weather and weather.time %}Last updated: {{ weather.time|slice:"11:16" }}
+      {% else %}Last updated: —{% endif %}
+    </p>
+  </div>
+
+  <div class="panel strip urgent">
+    <span class="badge">{{ urgent_count }}</span>
+    <h3>Urgent Tasks</h3>
+    <p class="sub">Requires immediate action</p>
+    {% if urgent_alerts %}
+    <ul class="alerts">
+      {% for a in urgent_alerts %}<li><a href="{{ a.href }}"><span>{{ a.title }}</span><span class="view">view →</span></a></li>{% endfor %}
+    </ul>
+    {% else %}
+    <div class="calm">✓ All caught up!</div>
+    {% endif %}
+    <a class="view-all" href="#stock-alerts">View all alerts</a>
+  </div>
+
 </div>
 
-<div class="home-grid">
-  <a class="card" href="{% url 'stock_home' %}">
-    <span class="icon">ST</span>
-    <h3>Stock</h3>
-    <p class="desc">Counts, deliveries, reorder list, ingredient prices.</p>
-    <span class="footer{% if stock_below %} warn{% endif %}">{{ stock_below|default:0 }} below minimum</span>
-    <span class="open">Open →</span>
-  </a>
-  <a class="card" href="{% url 'recipes' %}">
-    <span class="icon">RC</span>
-    <h3>Recipes</h3>
-    <p class="desc">Recipe cards, ingredients, scaling and yields.</p>
-    <span class="footer">Coming soon</span>
-    <span class="open">Open →</span>
-  </a>
-  <a class="card" href="{% url 'production' %}">
-    <span class="icon">PR</span>
-    <h3>Production</h3>
-    <p class="desc">Daily production plans, batch schedules, outputs.</p>
-    <span class="footer">Coming soon</span>
-    <span class="open">Open →</span>
-  </a>
-  <a class="card" href="{% url 'rota' %}">
-    <span class="icon">RO</span>
-    <h3>Rota</h3>
-    <p class="desc">Staff schedules, shifts, time-off requests.</p>
-    <span class="footer">Coming soon</span>
-    <span class="open">Open →</span>
-  </a>
-  <a class="card" href="{% url 'notes' %}">
-    <span class="icon">NT</span>
-    <h3>Notes</h3>
-    <p class="desc">Shared team notes — handover, reminders, ideas.</p>
-    <span class="footer">Coming soon</span>
-    <span class="open">Open →</span>
-  </a>
-  <a class="card" href="{% url 'profile' %}">
-    <span class="icon">PF</span>
-    <h3>Profile</h3>
-    <p class="desc">Your account, departments and session.</p>
-    <span class="footer">{{ user.username }}</span>
-    <span class="open">Open →</span>
-  </a>
+<div class="stock-alerts" id="stock-alerts">
+  <h3>Stock alerts</h3>
+  <p class="sub">Ingredients that need attention right now</p>
+  {% if stock_alerts %}
+  <table>
+    <thead><tr><th>Ingredient</th><th>Alert</th><th>Detail</th><th></th></tr></thead>
+    <tbody>
+    {% for a in stock_alerts %}<tr>
+      <td><a href="{% url 'product_detail' a.ingredient.pk %}">{{ a.ingredient.name }}</a>
+        <span class="muted">{{ a.ingredient.code|default:"" }}</span></td>
+      <td>{% if a.kind == "low_cover" %}<span class="tag prov">{{ a.alert }}</span>
+          {% else %}<span class="tag low">{{ a.alert }}</span>{% endif %}</td>
+      <td class="muted">{{ a.detail }}</td>
+      <td><a href="{{ a.href }}" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">
+        {% if a.kind == "below_min" %}Reorder →{% else %}View →{% endif %}</a></td>
+    </tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="healthy">✓ Stock looks healthy — no alerts in {% if has_dept and current_dept %}{{ current_dept.name }}{% else %}your department{% endif %}.</p>
+  {% endif %}
 </div>
 {% endblock %}

@@ -1018,26 +1018,32 @@ class SectionNavigationTests(TestCase):
         self.client = Client()
         assert self.client.login(username="alice", password="pw")
         self.client.get(f"/switch/{self.dept.pk}/")
+        # Keep the home page off the network in tests. Tests that need to
+        # exercise the weather card explicitly override the return value.
+        self._weather_patch = patch("stock.views.fetch_weather", return_value=None)
+        self._weather_patch.start()
+        self.addCleanup(self._weather_patch.stop)
 
     def test_home_renders_for_logged_in_user(self):
         r = self.client.get("/home/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
+        # Welcome / weather / urgent hero cards
         self.assertIn("alice", body)
-        # Hero cards present
-        self.assertIn("Needs attention", body)
-        # Section grid: cards for each of the six sections
-        for label in ("Stock", "Recipes", "Production", "Rota", "Notes", "Profile"):
-            self.assertIn(f"<h3>{label}</h3>", body)
-        for url in ("/stock/", "/recipes/", "/production/", "/rota/",
-                    "/notes/", "/profile/"):
-            self.assertIn(f'href="{url}"', body)
+        self.assertIn("Welcome to your dashboard", body)
+        self.assertIn("Glastonbury", body)
+        self.assertIn("Urgent Tasks", body)
+        # Stock alerts card below
+        self.assertIn("Stock alerts", body)
 
-    def test_home_needs_attention_flags_below_minimum_ingredient(self):
-        # An ingredient counted below its minimum should produce an alert
-        # linking to /reorder/.
+    def test_home_below_minimum_appears_in_urgent_card_and_alerts_table(self):
+        # An ingredient counted below its minimum should:
+        #   - bump the urgent badge to 1
+        #   - appear as an aggregate line in the urgent card
+        #   - render as a row in the per-ingredient stock alerts table
+        #     with a Reorder action.
         flour = Product.objects.create(
-            name="Flour", department=self.dept, unit="g",
+            name="Flour", code="FLR1", department=self.dept, unit="g",
             minimum=Decimal("10"))
         st = Stocktake.objects.create(department=self.dept,
                                       date=datetime.date.today())
@@ -1045,22 +1051,69 @@ class SectionNavigationTests(TestCase):
                                  current=Decimal("2"), carried_over=False)
         r = self.client.get("/home/")
         body = r.content.decode()
-        # Pull just the needs-attention card block to assert against
-        start = body.index("Needs attention")
-        end = body.index("home-grid", start)
-        card = body[start:end]
-        self.assertIn("1 ingredient below minimum", card)
-        self.assertIn('href="/reorder/"', card)
-        # And not the calm state
-        self.assertNotIn("All caught up", card)
+
+        urgent = body[body.index('class="panel strip urgent"'):body.index('id="stock-alerts"')]
+        # Aggregate line in the urgent card + link to /reorder/
+        self.assertIn("1 ingredient below minimum", urgent)
+        self.assertIn('href="/reorder/"', urgent)
+        # Badge shows the urgent count
+        self.assertRegex(urgent, r'class="badge">\s*1\s*<')
+
+        table = body[body.index('id="stock-alerts"'):]
+        # Per-ingredient row with the ingredient name, alert label, detail
+        # and Reorder action
+        self.assertIn("Flour", table)
+        self.assertIn("Below minimum", table)
+        self.assertIn("2 / 10 packs", table)
+        self.assertIn("Reorder", table)
+
+    def test_home_renders_when_weather_fetch_fails(self):
+        # Stop the default None-mock and replace with one that raises;
+        # fetch_weather catches it and returns None, the page must still
+        # render with a "weather unavailable" placeholder.
+        self._weather_patch.stop()
+        with patch("stock.views.fetch_weather", side_effect=RuntimeError("nope")) as p:
+            try:
+                r = self.client.get("/home/")
+            except RuntimeError:
+                self.fail("home view propagated weather error")
+            else:
+                # If side_effect doesn't get suppressed inside the view, the
+                # request raises. Otherwise the fall-through is None, which
+                # we want.
+                self.assertEqual(r.status_code, 200)
+                body = r.content.decode()
+                self.assertIn("weather unavailable", body)
+                self.assertIn("Glastonbury", body)
+        # Restart the default patch so addCleanup's stop() still pairs.
+        self._weather_patch.start()
+
+    def test_home_renders_weather_card_when_fetch_succeeds(self):
+        self._weather_patch.stop()
+        weather = {
+            "temperature": 12.4,
+            "code": 1,
+            "condition": "Partly cloudy",
+            "icon": "◐",
+            "time": "2026-05-22T15:00",
+        }
+        with patch("stock.views.fetch_weather", return_value=weather):
+            r = self.client.get("/home/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("12°C", body)
+        self.assertIn("Partly cloudy", body)
+        self.assertIn("Live", body)
+        self.assertIn("15:00", body)
+        self._weather_patch.start()
 
     def test_home_calm_state_when_nothing_is_urgent(self):
-        # Department exists but nothing alarming — the calm "all caught up"
-        # message should appear instead of any alert links.
         r = self.client.get("/home/")
         body = r.content.decode()
-        self.assertIn("All caught up", body)
-        self.assertNotIn("below minimum</span>", body[body.index("Needs attention"):body.index("home-grid")])
+        urgent = body[body.index("Urgent Tasks"):body.index('id="stock-alerts"')]
+        self.assertIn("All caught up", urgent)
+        table = body[body.index('id="stock-alerts"'):]
+        self.assertIn("Stock looks healthy", table)
 
     def test_stock_section_landing_renders_with_stock_submenu(self):
         # /stock/ is a Stock section page — its navbar carries the Stock
@@ -1105,12 +1158,16 @@ class SectionNavigationTests(TestCase):
         nav = body[body.index("<nav>"):body.index("</nav>")]
         return nav, [m.group(1) for m in re.finditer(r">([A-Za-z]+)<", nav)]
 
-    def test_home_page_navbar_is_empty(self):
-        # On the Home hub the contextual navbar has no links — the cards on
-        # the page are the navigation.
+    def test_home_navbar_shows_seven_top_sections(self):
+        # Home's contextual navbar is the section picker:
+        # Home | Stock | Recipes | Production | Rota | Notes | Profile,
+        # with Home itself marked active.
         r = self.client.get("/home/")
-        nav, _ = self._nav(r.content.decode())
-        self.assertEqual(nav.count("<a "), 0)
+        nav, labels = self._nav(r.content.decode())
+        for top in ("Home", "Stock", "Recipes", "Production",
+                    "Rota", "Notes", "Profile"):
+            self.assertIn(top, labels)
+        self.assertRegex(nav, r'href="/home/"\s+class="on"')
 
     def test_stock_section_nav_shows_sub_items(self):
         # Any Stock page (e.g. the dashboard) renders the Stock contextual
