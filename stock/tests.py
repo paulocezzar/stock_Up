@@ -2791,7 +2791,8 @@ class RecipesListRoleColumnTests(TestCase):
         Recipe.recompute_all_roles()
 
     def test_list_page_shows_role_column_with_tags(self):
-        r = self.client.get("/recipes/")
+        # Role / Used-in / dropdown override live on the flat table view.
+        r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
         # Both roles render
         self.assertIn("Final product", body)
@@ -2801,7 +2802,7 @@ class RecipesListRoleColumnTests(TestCase):
         self.assertIn(">Used in<", body)
 
     def test_list_page_shows_parent_links_for_components(self):
-        r = self.client.get("/recipes/")
+        r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
         # The sub-recipe row links to its parent
         sub_row_start = body.find('data-search="npd-r301')
@@ -2845,10 +2846,161 @@ class RecipesListRoleColumnTests(TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_filter_input_still_present(self):
-        r = self.client.get("/recipes/")
+        r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
         # The data-filter hook + data-search on rows is what the existing
         # filter JS expects — both must survive the column-add refactor.
         self.assertIn('data-filter="recipes-tbl"', body)
         self.assertIn('data-search="npd-r300', body)
         self.assertIn('data-search="npd-r301', body)
+
+
+class RecipesByProductTreeTests(TestCase):
+    """The default /recipes/ view: top-level final products with nested
+    sub-recipes derived from RecipeLine edges (not the stored role field)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        for code, name in (
+            ("NPD-I10758", "WILDFARMED BREAD FLOUR (T65)"),
+            ("NPD-I10756", "Water"),
+            ("NPD-I11057", "FLOUR RYE DARK 100%"),
+            ("NPD-I10893", "Dorset Sea Salt"),
+            ("NPD-I10951", "WILDFARMED WHOLEMEAL FLOUR (T150)"),
+            ("NPD-I10759", "WILDFARMED RUSTIC FLOUR (T80)"),
+        ):
+            Product.objects.create(
+                code=code, name=name, department=cls.dept,
+                unit="g", minimum=0)
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX, "--department", "Bakery")
+
+    def setUp(self):
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def _forest(self):
+        from stock.views import _by_product_forest
+        recipes = list(
+            Recipe.objects.filter(department=self.dept)
+            .prefetch_related("lines__sub_recipe"))
+        return _by_product_forest(recipes)
+
+    def test_sample_chain_nests_top_to_leaf(self):
+        # NPD-R800 → R364 → R2031 → R2082 → R2029 → R1823 → R307
+        forest = self._forest()
+        # Single final product: NPD-R800
+        self.assertEqual(len(forest), 1)
+        root = forest[0]
+        self.assertEqual(root["recipe"].code, "NPD-R800")
+        self.assertEqual(root["depth"], 0)
+
+        # Walk down the unique-child chain
+        expected = ["NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
+                    "NPD-R2029", "NPD-R1823", "NPD-R307"]
+        node = root
+        for depth, code in enumerate(expected):
+            self.assertEqual(node["recipe"].code, code,
+                             f"depth {depth} should be {code}, got {node['recipe'].code}")
+            self.assertEqual(node["depth"], depth)
+            if depth < len(expected) - 1:
+                # NPD-R2031 has 6 lines (5 ingredients + 1 sub-recipe), but
+                # only one of those is a sub_recipe — find it.
+                sub_kids = [c for c in node["children"]
+                            if c["recipe"].code == expected[depth + 1]]
+                self.assertEqual(len(sub_kids), 1,
+                                 f"{code} should have {expected[depth+1]} as a child")
+                node = sub_kids[0]
+        # Leaf: NPD-R307 has no sub-recipes
+        self.assertEqual(node["children"], [])
+
+    def test_recipe_used_by_two_products_appears_under_both(self):
+        # Build a second final product that ALSO uses NPD-R364 as a sub.
+        # The tree must show R364 under both NPD-R800 and the new product.
+        r364 = Recipe.objects.get(code="NPD-R364")
+        second = Recipe.objects.create(
+            code="NPD-R801", name="Apple Waste Sourdough (Boule)",
+            department=self.dept,
+            finished_weight_g=Decimal("600"))
+        RecipeLine.objects.create(recipe=second, sub_recipe=r364,
+                                  weight_g=Decimal("600"), ordering=0)
+        forest = self._forest()
+        roots = {n["recipe"].code: n for n in forest}
+        self.assertIn("NPD-R800", roots)
+        self.assertIn("NPD-R801", roots)
+        # Both roots have R364 as a child
+        r800_children = [c["recipe"].code for c in roots["NPD-R800"]["children"]]
+        r801_children = [c["recipe"].code for c in roots["NPD-R801"]["children"]]
+        self.assertIn("NPD-R364", r800_children)
+        self.assertIn("NPD-R364", r801_children)
+        # And the deeper chain shows under BOTH (verify one level deeper).
+        r364_under_801 = [c for c in roots["NPD-R801"]["children"]
+                          if c["recipe"].code == "NPD-R364"][0]
+        deeper = [c["recipe"].code for c in r364_under_801["children"]]
+        self.assertIn("NPD-R2031", deeper)
+
+    def test_by_product_view_is_default_and_renders_nesting(self):
+        r = self.client.get("/recipes/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # The toggle exists with By-product active
+        self.assertRegex(body, r'class="on"[^>]*>By product')
+        # All chain codes appear (the tree renders the whole sample)
+        for code in ("NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
+                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            self.assertIn(code, body)
+        # The tree HTML structure is present
+        self.assertIn('class="tree-list"', body)
+        self.assertIn('class="tree-node"', body)
+        # And NPD-R800 is labelled a final product in the tree
+        self.assertIn("final product", body)
+
+    def test_tree_codes_render_in_top_to_leaf_order(self):
+        # The chain should appear in document order parent-before-child,
+        # which is what the recursive include guarantees.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        chain = ["NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
+                 "NPD-R2029", "NPD-R1823", "NPD-R307"]
+        positions = [body.index(c) for c in chain]
+        self.assertEqual(positions, sorted(positions),
+                         "Tree codes should appear parent-before-child in the HTML")
+
+    def test_flat_view_still_renders_under_its_toggle(self):
+        r = self.client.get("/recipes/?view=flat")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Flat-view toggle is active and the table markup is present
+        self.assertRegex(body, r'class="on"[^>]*>All recipes')
+        self.assertIn('id="recipes-tbl"', body)
+        self.assertIn('data-filter="recipes-tbl"', body)
+        # And the tree css/markup is NOT rendered in flat mode
+        self.assertNotIn('class="tree-list"', body)
+
+    def test_cycle_in_data_does_not_hang_the_page(self):
+        # Wire up a cycle directly in the DB (the import refuses one, but
+        # an admin edit could land one). The forest builder must terminate.
+        a = Recipe.objects.create(code="NPD-R901", name="A",
+                                  department=self.dept,
+                                  finished_weight_g=Decimal("10"))
+        b = Recipe.objects.create(code="NPD-R902", name="B",
+                                  department=self.dept,
+                                  finished_weight_g=Decimal("10"))
+        RecipeLine.objects.create(recipe=a, sub_recipe=b,
+                                  weight_g=Decimal("5"), ordering=0)
+        RecipeLine.objects.create(recipe=b, sub_recipe=a,
+                                  weight_g=Decimal("5"), ordering=0)
+        # Neither is a root (each references the other), but the tree
+        # builder must terminate rather than loop forever on either branch
+        # if reached through some hypothetical root. Just calling it is
+        # the test — the assertion is "this returned" + the page renders.
+        forest = self._forest()
+        self.assertIsInstance(forest, list)
+        # The page itself renders without timing out
+        r = self.client.get("/recipes/")
+        self.assertEqual(r.status_code, 200)

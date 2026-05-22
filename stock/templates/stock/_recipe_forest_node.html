@@ -1,0 +1,20 @@
+{# Recursive node for the by-product tree.
+   Expects `node = {recipe, depth, children, cycle}`. Renders as a <li>
+   so siblings line up; depth indentation + guide line is handled by .tree-list
+   in the parent CSS. #}
+<li class="tree-node">
+  <div class="tree-row">
+    <a class="tree-code" href="{% url 'recipe_detail' node.recipe.pk %}">{{ node.recipe.code }}</a>
+    <span class="tree-name">{{ node.recipe.name }}</span>
+    {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
+    {% if node.depth == 0 %}<span class="role-tag final">final product</span>{% endif %}
+    {% if node.cycle %}<span class="tag low">cycle — stops here</span>{% endif %}
+  </div>
+  {% if node.children and not node.cycle %}
+  <ul class="tree-list">
+    {% for child in node.children %}
+      {% include "stock/_recipe_forest_node.html" with node=child %}
+    {% endfor %}
+  </ul>
+  {% endif %}
+</li>

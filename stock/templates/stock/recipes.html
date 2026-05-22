@@ -11,6 +11,28 @@
   .role-form select{padding:3px 6px;font-size:11px}
   .role-form button{padding:3px 8px;font-size:10px}
   .parents-list a{margin-right:8px}
+
+  /* ---- view toggle ---- */
+  .view-toggle{display:inline-flex;border:1px solid var(--line);margin:0 0 14px}
+  .view-toggle a{padding:6px 14px;font-family:var(--disp);font-size:11px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);border-right:1px solid var(--line)}
+  .view-toggle a:last-child{border-right:0}
+  .view-toggle a.on{background:var(--amber);color:#111}
+
+  /* ---- by-product tree ---- */
+  .tree-list{list-style:none;margin:0;padding:0}
+  .tree-list .tree-list{margin-left:18px;padding-left:14px;border-left:1px dashed var(--line)}
+  .tree-node{margin:0;padding:0}
+  .tree-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;
+    border-bottom:1px solid var(--line)}
+  .tree-node > .tree-row{border-left:3px solid transparent}
+  /* Final products: solid amber left edge marks the roots */
+  .tree-list > .tree-node > .tree-row{border-left-color:var(--amber);background:var(--panel2)}
+  .tree-row .tree-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px;
+    min-width:90px}
+  .tree-row .tree-name{flex:1;min-width:0}
+  .tree-row .tree-meta{font-size:12px}
+  .tree-empty{padding:14px;color:var(--muted)}
 </style>
 
 <h2>Recipes <span class="muted" style="font-size:14px">{{ n_recipes }} in this department</span></h2>
@@ -21,56 +43,76 @@
   <p style="margin:0"><a href="{% url 'recipe_upload' %}" class="btn">Upload recipe →</a></p>
 </div>
 
-{% if rows %}
-<div class="filter">
-  <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
-  <span class="count-out"></span>
+<div class="view-toggle" role="tablist">
+  <a href="{% url 'recipes' %}" class="{% if view_mode == 'by_product' %}on{% endif %}">By product</a>
+  <a href="{% url 'recipes' %}?view=flat" class="{% if view_mode == 'flat' %}on{% endif %}">All recipes</a>
 </div>
-<table id="recipes-tbl">
-  <thead><tr>
-    <th>Code</th><th>Name</th>
-    <th>Role</th><th>Used in</th>
-    <th class="num">Lines</th><th class="num">Finished (g)</th><th class="num">Cook loss</th>
-    <th></th>
-  </tr></thead>
-  <tbody>
-  {% for row in rows %}
-    {% with r=row.r %}
-    <tr data-search="{{ r.code|lower }} {{ r.name|lower }}">
-      <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
-      <td>{{ r.name }}</td>
-      <td>
-        <span class="role-tag {% if r.role == 'final_product' %}final{% else %}component{% endif %}{% if r.role_is_manual %} manual{% endif %}"
-              title="{% if r.role_is_manual %}Manually set{% else %}Auto from references{% endif %}">
-          {{ r.get_role_display }}{% if r.role_is_manual %} ·M{% endif %}
-        </span>
-        <form method="post" action="{% url 'recipe_set_role' r.pk %}" class="role-form">{% csrf_token %}
-          <select name="role" aria-label="Override role for {{ r.code }}">
-            {% for value, label in role_choices %}
-              <option value="{{ value }}" {% if r.role == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-          <button class="btn ghost" type="submit">set</button>
-        </form>
-      </td>
-      <td>
-        {% if row.parents %}
-          <span class="parents-list">{% for p in row.parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</span>
-        {% else %}
-          <span class="muted">—</span>
-        {% endif %}
-      </td>
-      <td class="num">{{ r.n_lines }}</td>
-      <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td><a href="{% url 'recipe_detail' r.pk %}">open →</a></td>
-    </tr>
-    {% endwith %}
-  {% endfor %}
-  </tbody>
-</table>
-<p class="muted" style="margin:10px 0 0;font-size:12px">Roles are derived from sub-recipe references after each import. Set one manually with the dropdown to lock it (re-imports won't overwrite a manual choice).</p>
+
+{% if view_mode == "by_product" %}
+  {% if forest %}
+  <div class="card"><h3>By product <span class="muted" style="font-size:11px">final products and the components they're built from</span></h3>
+    <ul class="tree-list">
+      {% for root in forest %}
+        {% include "stock/_recipe_forest_node.html" with node=root %}
+      {% endfor %}
+    </ul>
+    <p class="muted" style="margin:14px 0 0;font-size:12px">Roots are recipes nothing else uses; nested rows are sub-recipes referenced by the parent above. A component used by more than one product appears under each.</p>
+  </div>
+  {% else %}
+    <p class="tree-empty">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
+  {% endif %}
 {% else %}
-<p class="muted">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
+  {% if rows %}
+  <div class="filter">
+    <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
+    <span class="count-out"></span>
+  </div>
+  <table id="recipes-tbl">
+    <thead><tr>
+      <th>Code</th><th>Name</th>
+      <th>Role</th><th>Used in</th>
+      <th class="num">Lines</th><th class="num">Finished (g)</th><th class="num">Cook loss</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      {% with r=row.r %}
+      <tr data-search="{{ r.code|lower }} {{ r.name|lower }}">
+        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
+        <td>{{ r.name }}</td>
+        <td>
+          <span class="role-tag {% if r.role == 'final_product' %}final{% else %}component{% endif %}{% if r.role_is_manual %} manual{% endif %}"
+                title="{% if r.role_is_manual %}Manually set{% else %}Auto from references{% endif %}">
+            {{ r.get_role_display }}{% if r.role_is_manual %} ·M{% endif %}
+          </span>
+          <form method="post" action="{% url 'recipe_set_role' r.pk %}" class="role-form">{% csrf_token %}
+            <select name="role" aria-label="Override role for {{ r.code }}">
+              {% for value, label in role_choices %}
+                <option value="{{ value }}" {% if r.role == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn ghost" type="submit">set</button>
+          </form>
+        </td>
+        <td>
+          {% if row.parents %}
+            <span class="parents-list">{% for p in row.parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="num">{{ r.n_lines }}</td>
+        <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><a href="{% url 'recipe_detail' r.pk %}">open →</a></td>
+      </tr>
+      {% endwith %}
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">Roles are derived from sub-recipe references after each import. Set one manually with the dropdown to lock it (re-imports won't overwrite a manual choice).</p>
+  {% else %}
+  <p class="muted">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
+  {% endif %}
 {% endif %}
 {% endblock %}

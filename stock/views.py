@@ -330,34 +330,88 @@ def _recipe_tree(recipe, depth=0, seen=None):
     return node
 
 
+def _by_product_forest(recipes):
+    """Build the top-level → sub-recipe forest for the by-product view.
+
+    Roots are recipes that NO other recipe references as a sub_recipe —
+    derived from the actual RecipeLine.sub_recipe edges in `recipes` (not
+    from the stored role field, which a manual override can desync).
+
+    Each node is ``{recipe, depth, children: [...], cycle: bool}``.
+    `seen` on the recursion path prevents an admin-edited cycle from
+    rendering forever; a back-edge becomes a leaf with cycle=True.
+
+    A recipe used by multiple parents shows under each parent.
+    """
+    by_id = {r.pk: r for r in recipes}
+    # Map parent_id → ordered, deduped list of (sub_id, first_seen_ordering)
+    children_of = {pk: [] for pk in by_id}
+    referenced = set()
+    for r in recipes:
+        seen_for_this = set()
+        for line in sorted(r.lines.all(), key=lambda l: (l.ordering, l.id)):
+            if not line.sub_recipe_id or line.sub_recipe_id not in by_id:
+                continue
+            referenced.add(line.sub_recipe_id)
+            if line.sub_recipe_id in seen_for_this:
+                continue
+            seen_for_this.add(line.sub_recipe_id)
+            children_of[r.pk].append(line.sub_recipe_id)
+    roots = [r for r in recipes if r.pk not in referenced]
+    roots.sort(key=lambda r: r.code)
+
+    def build(rid, depth, path):
+        recipe = by_id[rid]
+        node = {"recipe": recipe, "depth": depth,
+                "children": [], "cycle": False}
+        if rid in path:
+            node["cycle"] = True
+            return node
+        new_path = path | {rid}
+        for child_id in children_of.get(rid, []):
+            node["children"].append(build(child_id, depth + 1, new_path))
+        return node
+
+    return [build(r.pk, 0, set()) for r in roots]
+
+
 @login_required
 def recipes_home(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
+    # Default to the structural "by-product" view; flat list under ?view=flat.
+    view_mode = "flat" if request.GET.get("view") == "flat" else "by_product"
     qs = (Recipe.objects.filter(department=dept)
           .annotate(n_lines=Count("lines"))
-          .prefetch_related("used_in_lines__recipe")
+          .prefetch_related("lines__sub_recipe", "used_in_lines__recipe")
           .order_by("code"))
-    rows = []
-    for r in qs:
-        # Dedupe parents (a parent that uses the sub-recipe on two lines
-        # would otherwise show twice).
-        seen = set()
-        parents = []
-        for line in r.used_in_lines.all():
-            p = line.recipe
-            if p.pk in seen:
-                continue
-            seen.add(p.pk)
-            parents.append(p)
-        parents.sort(key=lambda p: p.code)
-        rows.append({"r": r, "parents": parents})
-    return render(request, "stock/recipes.html", {
-        "rows": rows,
-        "n_recipes": qs.count(),
+    recipes = list(qs)
+
+    context = {
+        "n_recipes": len(recipes),
+        "view_mode": view_mode,
         "role_choices": Recipe.ROLE_CHOICES,
-    })
+    }
+
+    if view_mode == "by_product":
+        context["forest"] = _by_product_forest(recipes)
+    else:
+        rows = []
+        for r in recipes:
+            seen = set()
+            parents = []
+            for line in r.used_in_lines.all():
+                p = line.recipe
+                if p.pk in seen:
+                    continue
+                seen.add(p.pk)
+                parents.append(p)
+            parents.sort(key=lambda p: p.code)
+            rows.append({"r": r, "parents": parents})
+        context["rows"] = rows
+
+    return render(request, "stock/recipes.html", context)
 
 
 @require_POST
