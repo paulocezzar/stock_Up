@@ -1336,3 +1336,273 @@ class PackSizeFilterTests(SimpleTestCase):
         self.assertEqual(pack_size(None, "g"), "")
         self.assertEqual(pack_size("", "g"), "")
         self.assertEqual(pack_size("not a number", "g"), "")
+
+
+class IngredientImportTests(TestCase):
+    """The Excel master import + the matching reset command.
+
+    The fixture workbook is built in-memory so tests don't depend on data/.
+    """
+
+    def _make_workbook(self, path, ingredients, uoms):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ing_ws = wb.active
+        ing_ws.title = "Ingredients"
+        # Header up to Category (col 36). Only columns we read need real names;
+        # the importer indexes by position, not header.
+        header = [""] * 36
+        header[0] = "Code"
+        header[1] = "Description"
+        header[33] = "Cost"
+        header[34] = "Supply Unit"
+        header[35] = "Category"
+        ing_ws.append(header)
+        for ing in ingredients:
+            row = [""] * 36
+            row[0] = ing["code"]
+            row[1] = ing["name"]
+            row[33] = ing["cost"]
+            row[34] = ing["supply_unit"]
+            row[35] = ing["category"]
+            ing_ws.append(row)
+
+        uom_ws = wb.create_sheet("Units Of Measure")
+        uom_ws.append(["Code", "Description", "UOM", "Quantity", "RUOM", "Ref Quantity", "Is Default"])
+        for u in uoms:
+            uom_ws.append([u["code"], None, u["uom"], u.get("quantity", 1),
+                           u["ruom"], u["ref_quantity"], "No"])
+        wb.save(path)
+
+    def test_import_creates_products_with_code_name_category(self):
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I001", "name": "Bread Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+                {"code": "NPD-I002", "name": "Whole Milk", "cost": 2.39,
+                 "supply_unit": "2 Litres", "category": "Dairy & Eggs"},
+                {"code": "NPD-I003", "name": "Strawberries", "cost": 4.50,
+                 "supply_unit": "Punnet", "category": "Fruit & Veg"},
+                {"code": "NPD-I004", "name": "Mystery", "cost": 1.0,
+                 "supply_unit": "Widget", "category": "Unassigned"},
+            ],
+            uoms=[
+                {"code": "NPD-I001", "uom": "Trade Paper Sack", "ruom": "Kilograms", "ref_quantity": 16},
+                {"code": "NPD-I002", "uom": "2 Litres", "ruom": "Kilograms", "ref_quantity": 2},
+                {"code": "NPD-I003", "uom": "Punnet", "ruom": "Grams", "ref_quantity": 250},
+                # NPD-I004 has no UOM row → flagged.
+            ])
+        call_command("import_ingredients", path)
+        self.assertEqual(Product.objects.count(), 4)
+        flour = Product.objects.get(code="NPD-I001")
+        self.assertEqual(flour.name, "Bread Flour")
+        self.assertEqual(flour.category, "dry_goods")
+        self.assertEqual(flour.unit, "g")
+        milk = Product.objects.get(code="NPD-I002")
+        self.assertEqual(milk.category, "dairy_eggs")
+        berries = Product.objects.get(code="NPD-I003")
+        self.assertEqual(berries.category, "fruit_veg")
+        mystery = Product.objects.get(code="NPD-I004")
+        self.assertEqual(mystery.category, "unassigned")
+
+    def test_16kg_sack_at_18_40_gives_pack_weight_16000_and_price_18_40(self):
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I001", "name": "Bread Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I001", "uom": "Trade Paper Sack", "ruom": "Kilograms", "ref_quantity": 16},
+            ])
+        call_command("import_ingredients", path)
+        flour = Product.objects.get(code="NPD-I001")
+        sp = flour.prices.get()
+        self.assertEqual(sp.pack_weight, Decimal("16000"))
+        self.assertEqual(sp.pack_price, Decimal("18.40"))
+
+    def test_case_insensitive_supply_unit_match(self):
+        # Ingredient supply unit "2 litres" (lowercase l) matches a UOM row
+        # written as "2 Litres". Same for "Case" vs "case".
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I010", "name": "Milk", "cost": 2.0,
+                 "supply_unit": "2 litres", "category": "Dairy & Eggs"},
+                {"code": "NPD-I011", "name": "Jar", "cost": 3.0,
+                 "supply_unit": "Case", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I010", "uom": "2 Litres", "ruom": "Kilograms", "ref_quantity": 2},
+                {"code": "NPD-I011", "uom": "case", "ruom": "Kilograms", "ref_quantity": 6},
+            ])
+        call_command("import_ingredients", path)
+        self.assertEqual(Product.objects.get(code="NPD-I010").prices.get().pack_weight,
+                         Decimal("2000"))
+        self.assertEqual(Product.objects.get(code="NPD-I011").prices.get().pack_weight,
+                         Decimal("6000"))
+
+    def test_kilograms_supply_unit_without_uom_row_is_one_kg_pack(self):
+        # Supply Unit "Kilograms" itself is a base unit - treat as 1kg pack
+        # without needing a UOM row.
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I020", "name": "Fresh Yeast", "cost": 2.68,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[])
+        call_command("import_ingredients", path)
+        sp = Product.objects.get(code="NPD-I020").prices.get()
+        self.assertEqual(sp.pack_weight, Decimal("1000"))
+        self.assertEqual(sp.pack_price, Decimal("2.68"))
+
+    def test_indirect_uom_chain_resolves(self):
+        # Box → 40 Pack → 0.25 Kilograms = 10 kg = 10000 g
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I030", "name": "Butter", "cost": 50.0,
+                 "supply_unit": "Box", "category": "Dairy & Eggs"},
+            ],
+            uoms=[
+                {"code": "NPD-I030", "uom": "Pack", "ruom": "Kilograms", "ref_quantity": 0.25},
+                {"code": "NPD-I030", "uom": "Box", "ruom": "Pack", "ref_quantity": 40},
+            ])
+        call_command("import_ingredients", path)
+        sp = Product.objects.get(code="NPD-I030").prices.get()
+        self.assertEqual(sp.pack_weight, Decimal("10000.00"))
+
+    def test_ingredient_without_uom_is_created_but_flagged(self):
+        # Mystery supply unit with no UOM row: ingredient still exists, but no
+        # SupplierPrice gets written.
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I040", "name": "Mystery", "cost": 1.0,
+                 "supply_unit": "Widget", "category": "Unassigned"},
+            ],
+            uoms=[])
+        call_command("import_ingredients", path)
+        p = Product.objects.get(code="NPD-I040")
+        self.assertFalse(p.prices.exists())
+
+    def test_import_is_idempotent(self):
+        # Running twice doesn't duplicate products or pile up history.
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I001", "name": "Bread Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I001", "uom": "Trade Paper Sack", "ruom": "Kilograms", "ref_quantity": 16},
+            ])
+        call_command("import_ingredients", path)
+        call_command("import_ingredients", path)
+        self.assertEqual(Product.objects.filter(code="NPD-I001").count(), 1)
+        flour = Product.objects.get(code="NPD-I001")
+        self.assertEqual(flour.prices.count(), 1)
+        self.assertEqual(flour.prices.get().pack_weight, Decimal("16000"))
+
+    def test_import_assigns_to_department_arg(self):
+        import tempfile, os
+        from django.core.management import call_command
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "ing.xlsx")
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I001", "name": "X", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[])
+        call_command("import_ingredients", path, "--department", "Pastry")
+        p = Product.objects.get(code="NPD-I001")
+        self.assertEqual(p.department.name, "Pastry")
+
+
+class ResetStockDataTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.sup = Supplier.objects.create(name="Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept, unit="g",
+            minimum=Decimal("5"))
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25000"), pack_price=Decimal("30.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 5, 22))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("3"), carried_over=False)
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=self.sup,
+            date=datetime.date(2026, 5, 22))
+        Batch.objects.create(delivery=delivery, product=self.flour,
+                             qty_received=Decimal("3"), qty_remaining=Decimal("3"))
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour,
+            quantity=Decimal("1"), reason="waste", user=self.user,
+            date=datetime.date(2026, 5, 10))
+
+    def test_without_yes_nothing_is_deleted(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("reset_stock_data", stdout=out)
+        # Everything still here
+        self.assertEqual(Product.objects.count(), 1)
+        self.assertEqual(SupplierPrice.objects.count(), 1)
+        self.assertEqual(Stocktake.objects.count(), 1)
+        self.assertEqual(Delivery.objects.count(), 1)
+        self.assertEqual(Batch.objects.count(), 1)
+        self.assertEqual(Adjustment.objects.count(), 1)
+        self.assertIn("Refusing", out.getvalue())
+
+    def test_with_yes_clears_stock_but_leaves_auth_and_departments(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("reset_stock_data", "--yes", stdout=out)
+        # Stock content gone
+        self.assertEqual(Product.objects.count(), 0)
+        self.assertEqual(SupplierPrice.objects.count(), 0)
+        self.assertEqual(Stocktake.objects.count(), 0)
+        self.assertEqual(StockLine.objects.count(), 0)
+        self.assertEqual(Delivery.objects.count(), 0)
+        self.assertEqual(Batch.objects.count(), 0)
+        self.assertEqual(Adjustment.objects.count(), 0)
+        # Auth + departments untouched
+        self.assertEqual(get_user_model().objects.filter(username="alice").count(), 1)
+        self.assertEqual(Department.objects.filter(name="Bakery").count(), 1)
+        # Supplier rows also preserved - they're a separate dimension to stock.
+        self.assertEqual(Supplier.objects.filter(name="Mill").count(), 1)
+        # Department membership preserved
+        self.assertTrue(self.dept.members.filter(username="alice").exists())
+        # Summary lists what was cleared
+        self.assertIn("Products: 1 deleted", out.getvalue())

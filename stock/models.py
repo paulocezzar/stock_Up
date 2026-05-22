@@ -39,10 +39,18 @@ class Supplier(models.Model):
 
 class Product(models.Model):
     UNIT_CHOICES = [("g", "grams"), ("ml", "millilitres"), ("ea", "each")]
+    CATEGORY_CHOICES = [
+        ("dry_goods", "Dry Goods"),
+        ("dairy_eggs", "Dairy & Eggs"),
+        ("frozen_goods", "Frozen Goods"),
+        ("fruit_veg", "Fruit & Veg"),
+        ("unassigned", "Unassigned"),
+    ]
     department = models.ForeignKey("Department", related_name="products",
                                    on_delete=models.CASCADE, null=True, blank=True)
     code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     name = models.CharField(max_length=200)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="unassigned")
     unit = models.CharField(max_length=8, choices=UNIT_CHOICES, default="g")
     minimum = models.DecimalField("minimum (par level)", max_digits=10, decimal_places=2, default=0)
     weekly_usage = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
