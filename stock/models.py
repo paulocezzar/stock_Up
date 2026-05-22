@@ -1,7 +1,7 @@
 import datetime
 from decimal import Decimal
 from django.db import models
-from django.db.models import F, ExpressionWrapper, DecimalField, Sum
+from django.db.models import F, ExpressionWrapper, DecimalField, Sum, Q
 
 PER_1000 = ExpressionWrapper(
     F("pack_price") / F("pack_weight") * 1000,
@@ -70,6 +70,20 @@ class Product(models.Model):
     def on_hand_from_batches(self):
         return self.batches.aggregate(total=Sum("qty_remaining"))["total"] or Decimal("0")
 
+    @property
+    def adjustments_net(self):
+        """Signed sum of adjustments (positive = stock added, negative = removed)."""
+        agg = self.adjustments.aggregate(
+            out=Sum("quantity", filter=Q(reason__in=Adjustment.REDUCING_REASONS)),
+            inn=Sum("quantity", filter=Q(reason="found")),
+        )
+        return (agg["inn"] or Decimal("0")) - (agg["out"] or Decimal("0"))
+
+    @property
+    def on_hand(self):
+        """Batch-derived on-hand minus net loss from logged adjustments."""
+        return self.on_hand_from_batches + self.adjustments_net
+
     def usage_history(self, limit=8):
         """Per-count usage records, most recent first.
 
@@ -96,7 +110,18 @@ class Product(models.Model):
                 delivery__date__gt=prev_date,
                 delivery__date__lte=cur_date,
             ).aggregate(t=Sum("qty_received"))["t"] or Decimal("0")
-            raw = prev.current + delivered - line.current
+            adj = Adjustment.objects.filter(
+                product=self, department_id=self.department_id,
+                date__gt=prev_date, date__lte=cur_date,
+            ).aggregate(
+                out=Sum("quantity", filter=Q(reason__in=Adjustment.REDUCING_REASONS)),
+                inn=Sum("quantity", filter=Q(reason="found")),
+            )
+            adj_net = (adj["inn"] or Decimal("0")) - (adj["out"] or Decimal("0"))
+            # C = P + D + adj_net - U   =>   U = P + D + adj_net - C
+            # Logged waste is moved out of "usage" so burn-rate reflects real
+            # consumption, not loss.
+            raw = prev.current + delivered + adj_net - line.current
             clamped = raw < 0
             rows.append({
                 "stocktake": line.stocktake,
@@ -104,6 +129,7 @@ class Product(models.Model):
                 "previous_current": prev.current,
                 "current": line.current,
                 "delivered": delivered,
+                "adjustments": adj_net,
                 "usage": Decimal("0") if clamped else raw,
                 "clamped": clamped,
                 "days": (cur_date - prev_date).days,
@@ -235,3 +261,40 @@ class Batch(models.Model):
             product_id=self.product_id,
             supplier_id=self.delivery.supplier_id,
         ).exists()
+
+
+class Adjustment(models.Model):
+    """Wastage / discrepancy log against an ingredient.
+
+    quantity is always stored as a positive magnitude in packs. The reason
+    determines the effect on stock: waste, spillage and correction (i.e.
+    counted less than expected) reduce stock; found / other increases it.
+    Net signed effect is exposed via signed_qty.
+    """
+    REASON_CHOICES = [
+        ("waste", "Waste"),
+        ("spillage", "Spillage"),
+        ("correction", "Correction (stock was less than expected)"),
+        ("found", "Found / other (stock was more than expected)"),
+    ]
+    REDUCING_REASONS = ("waste", "spillage", "correction")
+
+    product = models.ForeignKey(Product, related_name="adjustments", on_delete=models.CASCADE)
+    department = models.ForeignKey(Department, related_name="adjustments", on_delete=models.CASCADE)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES)
+    date = models.DateField(default=datetime.date.today)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                             on_delete=models.SET_NULL, null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+
+    def __str__(self):
+        return f"{self.get_reason_display()} - {self.product.name} ({self.quantity})"
+
+    @property
+    def signed_qty(self):
+        return self.quantity if self.reason == "found" else -self.quantity

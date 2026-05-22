@@ -23,4 +23,5 @@ urlpatterns = [
     path("deliveries/new/", views.delivery_new, name="delivery_new"),
     path("deliveries/scan/", views.delivery_scan, name="delivery_scan"),
     path("deliveries/<int:pk>/", views.delivery_detail, name="delivery_detail"),
+    path("adjustments/", views.adjustments, name="adjustments"),
 ]

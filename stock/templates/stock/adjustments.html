@@ -1,0 +1,52 @@
+{% extends "stock/base.html" %}
+{% block n_adj %}on{% endblock %}
+{% block body %}
+<h2>Adjustments <span class="muted" style="font-size:14px">waste, spillage, corrections</span></h2>
+
+<div class="card"><h3>Log an adjustment</h3>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field" style="flex:1 1 220px"><label>Ingredient *</label>
+    <select name="product" required>
+      <option value="">— pick ingredient —</option>
+      {% for p in products %}<option value="{{ p.pk }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label>Quantity (packs) *</label>
+    <input type="number" step="any" inputmode="decimal" min="0" name="quantity" class="count" required placeholder="0">
+  </div>
+  <div class="field"><label>Reason *</label>
+    <select name="reason" required>
+      {% for k, label in reasons %}<option value="{{ k }}">{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label>Date</label>
+    <input type="date" name="date" value="{{ today }}">
+  </div>
+  <div class="field" style="flex:1 1 200px"><label>Note <span class="muted">(optional)</span></label>
+    <input type="text" name="note" placeholder="dropped a bag, mis-count, …">
+  </div>
+  <button class="btn" type="submit">Log</button>
+</form>
+<p class="muted" style="margin:10px 0 0;font-size:12px">
+  Quantity is always positive. Waste, spillage and corrections reduce stock; "found / other" increases it.
+</p>
+</div>
+
+<div class="card"><h3>Recent activity</h3>
+{% if log %}
+<table style="margin:0">
+  <thead><tr><th>Date</th><th>Ingredient</th><th>Reason</th><th class="num">Qty</th><th>Who</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for a in log %}<tr>
+    <td>{{ a.date|date:"d M Y" }}</td>
+    <td><a href="{% url 'product_detail' a.product.pk %}">{{ a.product.name }}</a> <span class="muted">{{ a.product.code|default:"" }}</span></td>
+    <td>{% if a.reason in reducing %}<span class="tag low">{{ a.get_reason_display }}</span>{% else %}<span class="tag ok">{{ a.get_reason_display }}</span>{% endif %}</td>
+    <td class="num">{% if a.reason in reducing %}−{% else %}+{% endif %}{{ a.quantity|floatformat:0 }}</td>
+    <td class="muted">{% if a.user %}{{ a.user.username }}{% else %}—{% endif %}</td>
+    <td class="muted">{{ a.note|default:"" }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted" style="margin:0">No adjustments logged yet.</p>{% endif %}
+</div>
+{% endblock %}

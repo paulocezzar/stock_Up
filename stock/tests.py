@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -345,6 +345,157 @@ class UsageHistoryTests(TestCase):
         StockLine.objects.create(stocktake=st, product=self.flour,
                                  current=Decimal("10"), carried_over=True)
         self.assertEqual(self.flour.usage_history(), [])
+
+
+class AdjustmentTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept, unit="g", minimum=0)
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def _batch(self, qty):
+        d = Delivery.objects.create(department=self.dept, supplier=self.sup,
+                                    date=datetime.date(2026, 5, 1))
+        return Batch.objects.create(delivery=d, product=self.flour,
+                                    qty_received=Decimal(qty), qty_remaining=Decimal(qty))
+
+    def test_waste_reduces_on_hand(self):
+        self._batch(10)
+        self.assertEqual(self.flour.on_hand_from_batches, Decimal("10"))
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour,
+            quantity=Decimal("3"), reason="waste", user=self.user,
+            date=datetime.date(2026, 5, 10))
+        self.assertEqual(self.flour.on_hand_from_batches, Decimal("10"))  # batches unchanged
+        self.assertEqual(self.flour.on_hand, Decimal("7"))                # adjusted figure
+        self.assertEqual(self.flour.adjustments_net, Decimal("-3"))
+
+    def test_found_increases_on_hand(self):
+        self._batch(5)
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour,
+            quantity=Decimal("2"), reason="found", user=self.user,
+            date=datetime.date(2026, 5, 10))
+        self.assertEqual(self.flour.on_hand, Decimal("7"))
+        self.assertEqual(self.flour.adjustments_net, Decimal("2"))
+
+    def test_waste_in_period_is_excluded_from_usage(self):
+        # Without waste: P=20, D=0, C=14 → usage 6
+        # With waste of 4 in the period: P=20, D=0, C=14, W=4 → real usage 2
+        st1 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 1))
+        StockLine.objects.create(stocktake=st1, product=self.flour,
+                                 current=Decimal("20"), carried_over=False)
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour,
+            quantity=Decimal("4"), reason="waste", user=self.user,
+            date=datetime.date(2026, 5, 5))
+        st2 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 8))
+        StockLine.objects.create(stocktake=st2, product=self.flour,
+                                 current=Decimal("14"), carried_over=False)
+
+        rows = self.flour.usage_history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["adjustments"], Decimal("-4"))
+        self.assertEqual(rows[0]["usage"], Decimal("2"))
+        self.assertFalse(rows[0]["clamped"])
+
+    def test_found_in_period_adds_to_inflows_for_usage(self):
+        # P=10, D=0, F=5 (found), C=12 → real usage 3
+        st1 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 1))
+        StockLine.objects.create(stocktake=st1, product=self.flour,
+                                 current=Decimal("10"), carried_over=False)
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour,
+            quantity=Decimal("5"), reason="found", user=self.user,
+            date=datetime.date(2026, 5, 5))
+        st2 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 8))
+        StockLine.objects.create(stocktake=st2, product=self.flour,
+                                 current=Decimal("12"), carried_over=False)
+        rows = self.flour.usage_history()
+        self.assertEqual(rows[0]["adjustments"], Decimal("5"))
+        self.assertEqual(rows[0]["usage"], Decimal("3"))
+
+    def test_adjustment_outside_period_does_not_affect_usage(self):
+        # Waste on the date of the previous count is "strictly between"-excluded
+        st1 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 1))
+        StockLine.objects.create(stocktake=st1, product=self.flour,
+                                 current=Decimal("10"), carried_over=False)
+        Adjustment.objects.create(  # same day as prev count
+            department=self.dept, product=self.flour,
+            quantity=Decimal("3"), reason="waste", user=self.user,
+            date=datetime.date(2026, 5, 1))
+        st2 = Stocktake.objects.create(department=self.dept,
+                                       date=datetime.date(2026, 5, 8))
+        StockLine.objects.create(stocktake=st2, product=self.flour,
+                                 current=Decimal("7"), carried_over=False)
+        rows = self.flour.usage_history()
+        self.assertEqual(rows[0]["adjustments"], Decimal("0"))
+        self.assertEqual(rows[0]["usage"], Decimal("3"))
+
+    def test_post_creates_adjustment_and_appears_in_log(self):
+        r = self.client.post("/adjustments/", {
+            "product": str(self.flour.pk),
+            "quantity": "2.5",
+            "reason": "waste",
+            "note": "dropped bag",
+        })
+        self.assertEqual(r.status_code, 302)
+        a = Adjustment.objects.get()
+        self.assertEqual(a.product, self.flour)
+        self.assertEqual(a.department, self.dept)
+        self.assertEqual(a.quantity, Decimal("2.5"))
+        self.assertEqual(a.reason, "waste")
+        self.assertEqual(a.user, self.user)
+        self.assertEqual(a.note, "dropped bag")
+
+        r = self.client.get("/adjustments/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("Flour", body)
+        self.assertIn("dropped bag", body)
+        # Waste shows with a minus sign in the qty column
+        self.assertIn("−3", body)  # 2.5 rounded to 3 by floatformat:0 with leading minus
+
+    def test_post_rejects_bad_payload(self):
+        for bad in (
+            {"product": "", "quantity": "1", "reason": "waste"},
+            {"product": str(self.flour.pk), "quantity": "0", "reason": "waste"},
+            {"product": str(self.flour.pk), "quantity": "-3", "reason": "waste"},
+            {"product": str(self.flour.pk), "quantity": "1", "reason": "bogus"},
+        ):
+            r = self.client.post("/adjustments/", bad)
+            self.assertEqual(r.status_code, 302)
+        self.assertFalse(Adjustment.objects.exists())
+
+    def test_adjustment_page_requires_login(self):
+        c = Client()
+        r = c.get("/adjustments/")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/login/", r.headers["Location"])
+
+    def test_adjustment_log_is_department_scoped(self):
+        # Adjustments in another department must not appear here
+        other = Department.objects.create(name="Butchery")
+        other_product = Product.objects.create(
+            name="Beef", department=other, unit="g", minimum=0)
+        Adjustment.objects.create(
+            department=other, product=other_product,
+            quantity=Decimal("3"), reason="waste",
+            date=datetime.date(2026, 5, 5))
+        r = self.client.get("/adjustments/")
+        self.assertNotIn("Beef", r.content.decode())
 
 
 class ReorderTests(TestCase):

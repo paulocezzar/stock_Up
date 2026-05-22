@@ -55,13 +55,14 @@
   <div class="stat"><div class="k">On hand</div><div class="v">{{ on_hand|floatformat:0 }} <span class="muted" style="font-size:13px;font-weight:400">packs</span></div></div>
 </div>
 <table>
-  <thead><tr><th>Between</th><th class="num">Days</th><th class="num">Previous</th><th class="num">Delivered</th><th class="num">This count</th><th class="num">Usage</th></tr></thead>
+  <thead><tr><th>Between</th><th class="num">Days</th><th class="num">Previous</th><th class="num">Delivered</th><th class="num">Adjustments</th><th class="num">This count</th><th class="num">Usage</th></tr></thead>
   <tbody>
   {% for r in usage_rows %}<tr>
     <td>{{ r.previous.date|date:"d M" }} → {{ r.stocktake.date|date:"d M Y" }}</td>
     <td class="num">{{ r.days }}</td>
     <td class="num">{{ r.previous_current|floatformat:0 }}</td>
     <td class="num">{% if r.delivered %}+{{ r.delivered|floatformat:0 }}{% else %}—{% endif %}</td>
+    <td class="num">{% if r.adjustments %}{% if r.adjustments > 0 %}+{% endif %}{{ r.adjustments|floatformat:0 }}{% else %}—{% endif %}</td>
     <td class="num">{{ r.current|floatformat:0 }}</td>
     <td class="num">{{ r.usage|floatformat:0 }}{% if r.clamped %} <span class="tag prov" title="Raw figure was negative — likely an unlogged delivery or miscount; clamped to 0">clamped</span>{% endif %}</td>
   </tr>{% endfor %}

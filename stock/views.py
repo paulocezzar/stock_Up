@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment
 from .ai_extract import extract_lines, auto_match, ExtractError
 
 
@@ -189,7 +189,7 @@ def product_detail(request, pk):
         else:
             messages.error(request, "Supplier, pack weight and price are all required.")
         return redirect("product_detail", pk=pk)
-    on_hand = product.on_hand_from_batches
+    on_hand = product.on_hand
     return render(request, "stock/product_detail.html", {
         "product": product,
         "prices": product.prices.select_related("supplier").all(),
@@ -200,6 +200,8 @@ def product_detail(request, pk):
         "avg_weekly_usage": product.average_weekly_usage(),
         "days_of_cover": product.days_of_cover(on_hand),
         "on_hand": on_hand,
+        "batches_total": product.on_hand_from_batches,
+        "adjustments_net": product.adjustments_net,
     })
 
 
@@ -393,6 +395,44 @@ def deliveries(request):
              .annotate(n_lines=Count("batches"), packs_in=Sum("batches__qty_received"))
              .order_by("-date", "-id"))
     return render(request, "stock/deliveries.html", {"deliveries": deliv})
+
+
+@login_required
+def adjustments(request):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    if request.method == "POST":
+        product_id = request.POST.get("product")
+        qty = _dec(request.POST.get("quantity"))
+        reason = request.POST.get("reason")
+        note = (request.POST.get("note") or "").strip()
+        date_str = (request.POST.get("date") or "").strip()
+        product = dept.products.filter(pk=product_id).first() if product_id else None
+        valid_reasons = {k for k, _ in Adjustment.REASON_CHOICES}
+        if not product or qty is None or qty <= 0 or reason not in valid_reasons:
+            messages.error(request, "Pick an ingredient, a positive quantity, and a reason.")
+            return redirect("adjustments")
+        try:
+            d = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
+        except ValueError:
+            d = datetime.date.today()
+        Adjustment.objects.create(
+            product=product, department=dept, quantity=qty, reason=reason,
+            date=d, user=request.user, note=note,
+        )
+        label = dict(Adjustment.REASON_CHOICES)[reason]
+        messages.success(request, f"Logged {label.lower()} of {qty} for {product.name}.")
+        return redirect("adjustments")
+    log = list(dept.adjustments.select_related("product", "user")
+               .order_by("-date", "-id")[:100])
+    return render(request, "stock/adjustments.html", {
+        "log": log,
+        "products": dept.products.order_by("name"),
+        "reasons": Adjustment.REASON_CHOICES,
+        "reducing": Adjustment.REDUCING_REASONS,
+        "today": datetime.date.today().isoformat(),
+    })
 
 
 @login_required
