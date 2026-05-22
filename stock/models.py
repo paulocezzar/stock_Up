@@ -399,6 +399,13 @@ class Recipe(models.Model):
     how multi-stage bakery formulas (starter -> ferment -> dough -> finished
     loaf) are modelled.
     """
+    ROLE_FINAL = "final_product"
+    ROLE_COMPONENT = "component"
+    ROLE_CHOICES = [
+        (ROLE_FINAL, "Final product"),
+        (ROLE_COMPONENT, "Component"),
+    ]
+
     department = models.ForeignKey("Department", related_name="recipes",
                                    on_delete=models.CASCADE, null=True, blank=True)
     code = models.CharField(max_length=20, unique=True)
@@ -410,6 +417,13 @@ class Recipe(models.Model):
     cook_loss_pct = models.DecimalField(max_digits=6, decimal_places=2,
                                         null=True, blank=True)
     method_text = models.TextField(blank=True)
+    # Auto-derived from RecipeLine.sub_recipe references unless the user has
+    # explicitly set it (role_is_manual=True), in which case recompute_role()
+    # leaves it alone. New recipes default to final_product; recompute will
+    # demote them to component as soon as another recipe references them.
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES,
+                            default=ROLE_FINAL)
+    role_is_manual = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
@@ -418,6 +432,57 @@ class Recipe(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+    # ---- role / parent helpers ----
+
+    def parents(self):
+        """Recipes that reference this one as a sub_recipe (any number).
+
+        Ordered by code for stable presentation; deduped (a parent that
+        uses the same sub-recipe on two lines shows once).
+        """
+        return (Recipe.objects
+                .filter(lines__sub_recipe_id=self.pk)
+                .distinct()
+                .order_by("code"))
+
+    def recompute_role(self, save=True):
+        """Re-derive `role` from current RecipeLine references.
+
+        Used as a sub_recipe anywhere → component, otherwise final_product.
+        No-op if the operator has manually set the role (role_is_manual).
+        Returns the resolved role (after any change).
+        """
+        if self.role_is_manual:
+            return self.role
+        is_referenced = RecipeLine.objects.filter(
+            sub_recipe_id=self.pk).exists()
+        new_role = self.ROLE_COMPONENT if is_referenced else self.ROLE_FINAL
+        if new_role != self.role:
+            self.role = new_role
+            if save:
+                # update_fields keeps `updated` from churning the rest of
+                # the row (and avoids triggering full-row signals callers
+                # may have wired up).
+                self.save(update_fields=["role"])
+        return self.role
+
+    @classmethod
+    def recompute_all_roles(cls):
+        """Refresh `role` on every non-manual recipe in one pass.
+
+        Cheaper than per-recipe queries when called after a bulk import:
+        one query lists all sub_recipe IDs in use, then a single SQL
+        UPDATE flips each non-manual recipe to the right role.
+        """
+        referenced = set(
+            RecipeLine.objects
+            .filter(sub_recipe__isnull=False)
+            .values_list("sub_recipe_id", flat=True))
+        cls.objects.filter(role_is_manual=False, pk__in=referenced).update(
+            role=cls.ROLE_COMPONENT)
+        cls.objects.filter(role_is_manual=False).exclude(
+            pk__in=referenced).update(role=cls.ROLE_FINAL)
 
     def exploded_ingredients(self):
         """Flat list of raw ingredients to make one stated batch of this recipe.

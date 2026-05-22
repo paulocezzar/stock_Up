@@ -2633,6 +2633,19 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertIn("Water", body)
         self.assertIn("40.00", body)
 
+    def test_role_tag_renders_on_detail_page(self):
+        # The main recipe isn't referenced anywhere → final_product.
+        Recipe.recompute_all_roles()
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        self.assertIn("Final product", body)
+        # And the sub-recipe lists its parent (the main) on its detail page
+        r = self.client.get(f"/recipes/{self.sub.pk}/")
+        body = r.content.decode()
+        self.assertIn("Component", body)
+        self.assertIn("Used in:", body)
+        self.assertIn("NPD-R100", body)
+
     def test_flat_view_does_not_list_sub_recipes(self):
         # The flat view is leaves-only — NPD-R sub-recipes themselves
         # should NOT appear as rows (only the raw NPD-I they explode to).
@@ -2646,3 +2659,196 @@ class RecipeDetailLayoutTests(TestCase):
         if end > 0:
             table_section = table_section[:end]
         self.assertNotIn("NPD-R200", table_section)
+
+
+class RecipeRoleTests(TestCase):
+    """Auto-derived role, parents() helper, and the manual override flow."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        for code, name in (
+            ("NPD-I10758", "WILDFARMED BREAD FLOUR (T65)"),
+            ("NPD-I10756", "Water"),
+            ("NPD-I11057", "FLOUR RYE DARK 100%"),
+            ("NPD-I10893", "Dorset Sea Salt"),
+            ("NPD-I10951", "WILDFARMED WHOLEMEAL FLOUR (T150)"),
+            ("NPD-I10759", "WILDFARMED RUSTIC FLOUR (T80)"),
+        ):
+            Product.objects.create(
+                code=code, name=name, department=cls.dept,
+                unit="g", minimum=0)
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX, "--department", "Bakery")
+
+    def test_sample_main_recipe_is_final_product(self):
+        # NPD-R800 isn't referenced as a sub_recipe by anything → final.
+        r800 = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(r800.role, Recipe.ROLE_FINAL)
+        self.assertFalse(r800.role_is_manual)
+
+    def test_sample_sub_recipes_are_components(self):
+        # All other six are referenced somewhere → component.
+        for code in ("NPD-R364", "NPD-R2031", "NPD-R2082",
+                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            r = Recipe.objects.get(code=code)
+            self.assertEqual(r.role, Recipe.ROLE_COMPONENT,
+                             f"{code} should be component")
+
+    def test_parents_lists_recipes_that_use_this_as_sub(self):
+        # NPD-R2029 (Stiff Starter) is used in NPD-R2082 (Ferment).
+        r2029 = Recipe.objects.get(code="NPD-R2029")
+        parents = list(r2029.parents())
+        self.assertEqual([p.code for p in parents], ["NPD-R2082"])
+        # NPD-R800 (the final product) has no parents.
+        r800 = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(list(r800.parents()), [])
+
+    def test_parents_dedupes_when_one_recipe_uses_sub_twice(self):
+        # A parent that lists the same sub-recipe on two lines (e.g. two
+        # additions during the bake) shouldn't appear twice in parents().
+        parent = Recipe.objects.get(code="NPD-R2031")
+        sub = Recipe.objects.get(code="NPD-R2082")
+        # Add a second line referencing the same sub.
+        RecipeLine.objects.create(recipe=parent, sub_recipe=sub,
+                                  weight_g=Decimal("10"), ordering=99)
+        self.assertEqual([p.code for p in sub.parents()], ["NPD-R2031"])
+
+    def test_recompute_role_demotes_to_component_when_referenced(self):
+        # Create a fresh recipe, default role = final.
+        r = Recipe.objects.create(
+            code="NPD-R9001", name="New", department=self.dept,
+            finished_weight_g=Decimal("100"))
+        self.assertEqual(r.role, Recipe.ROLE_FINAL)
+        # Reference it from an existing recipe...
+        parent = Recipe.objects.get(code="NPD-R800")
+        RecipeLine.objects.create(recipe=parent, sub_recipe=r,
+                                  weight_g=Decimal("10"), ordering=99)
+        # ...then recompute: it must flip to component.
+        r.recompute_role()
+        r.refresh_from_db()
+        self.assertEqual(r.role, Recipe.ROLE_COMPONENT)
+
+    def test_recompute_role_promotes_back_to_final_when_unreferenced(self):
+        # A component that loses all parents becomes a final product again.
+        r307 = Recipe.objects.get(code="NPD-R307")
+        self.assertEqual(r307.role, Recipe.ROLE_COMPONENT)
+        # Remove every line that references it
+        RecipeLine.objects.filter(sub_recipe=r307).delete()
+        r307.recompute_role()
+        r307.refresh_from_db()
+        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
+
+    def test_manual_override_is_not_overwritten_by_recompute(self):
+        # The operator marks a component as a final product (e.g. they
+        # also sell the starter as a standalone product). Bulk recompute
+        # — including the post-import call — must leave that alone.
+        r307 = Recipe.objects.get(code="NPD-R307")
+        r307.role = Recipe.ROLE_FINAL
+        r307.role_is_manual = True
+        r307.save(update_fields=["role", "role_is_manual"])
+        # Per-instance recompute respects it
+        r307.recompute_role()
+        r307.refresh_from_db()
+        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
+        # And the bulk class-method respects it too
+        Recipe.recompute_all_roles()
+        r307.refresh_from_db()
+        self.assertEqual(r307.role, Recipe.ROLE_FINAL)
+        self.assertTrue(r307.role_is_manual)
+
+    def test_import_recomputes_roles(self):
+        # Import is set up in setUpTestData; assert R800 is final and the
+        # rest are component, which is precisely what the import-time
+        # recompute is supposed to produce.
+        roles = dict(Recipe.objects.values_list("code", "role"))
+        self.assertEqual(roles["NPD-R800"], Recipe.ROLE_FINAL)
+        for code in ("NPD-R364", "NPD-R2031", "NPD-R2082",
+                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            self.assertEqual(roles[code], Recipe.ROLE_COMPONENT)
+
+
+class RecipesListRoleColumnTests(TestCase):
+    """The list page renders Role + Used-in columns and the override POST works."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Two recipes: parent references sub
+        self.sub = Recipe.objects.create(
+            code="NPD-R301", name="Starter", department=self.dept,
+            finished_weight_g=Decimal("100"))
+        self.parent = Recipe.objects.create(
+            code="NPD-R300", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("400"))
+        RecipeLine.objects.create(recipe=self.parent, sub_recipe=self.sub,
+                                  weight_g=Decimal("100"), ordering=0)
+        Recipe.recompute_all_roles()
+
+    def test_list_page_shows_role_column_with_tags(self):
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        # Both roles render
+        self.assertIn("Final product", body)
+        self.assertIn("Component", body)
+        # Header has Role + Used in
+        self.assertIn(">Role<", body)
+        self.assertIn(">Used in<", body)
+
+    def test_list_page_shows_parent_links_for_components(self):
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        # The sub-recipe row links to its parent
+        sub_row_start = body.find('data-search="npd-r301')
+        self.assertGreater(sub_row_start, 0)
+        row_end = body.find("</tr>", sub_row_start)
+        sub_row = body[sub_row_start:row_end]
+        self.assertIn(f'href="/recipes/{self.parent.pk}/"', sub_row)
+        self.assertIn("NPD-R300", sub_row)
+        # The final product row shows the em-dash placeholder, no parent
+        parent_row_start = body.find('data-search="npd-r300')
+        parent_row = body[parent_row_start:body.find("</tr>", parent_row_start)]
+        self.assertIn("—", parent_row)
+
+    def test_role_override_post_sets_manual_flag(self):
+        # Operator flips the starter to final product.
+        r = self.client.post(f"/recipes/{self.sub.pk}/role/",
+                             {"role": Recipe.ROLE_FINAL})
+        self.assertEqual(r.status_code, 302)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
+        self.assertTrue(self.sub.role_is_manual)
+        # Subsequent bulk recompute (e.g. after import) leaves it alone.
+        Recipe.recompute_all_roles()
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
+
+    def test_role_override_rejects_bad_value(self):
+        r = self.client.post(f"/recipes/{self.sub.pk}/role/",
+                             {"role": "bogus"})
+        self.assertEqual(r.status_code, 302)
+        self.sub.refresh_from_db()
+        # Original auto-derived role retained
+        self.assertEqual(self.sub.role, Recipe.ROLE_COMPONENT)
+        self.assertFalse(self.sub.role_is_manual)
+
+    def test_role_override_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        r = Recipe.objects.create(code="NPD-R900", name="X", department=other)
+        resp = self.client.post(f"/recipes/{r.pk}/role/",
+                                {"role": Recipe.ROLE_FINAL})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_filter_input_still_present(self):
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        # The data-filter hook + data-search on rows is what the existing
+        # filter JS expects — both must survive the column-add refactor.
+        self.assertIn('data-filter="recipes-tbl"', body)
+        self.assertIn('data-search="npd-r300', body)
+        self.assertIn('data-search="npd-r301', body)

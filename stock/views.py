@@ -335,13 +335,53 @@ def recipes_home(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
-    recipes = (Recipe.objects.filter(department=dept)
-               .annotate(n_lines=Count("lines"))
-               .order_by("code"))
+    qs = (Recipe.objects.filter(department=dept)
+          .annotate(n_lines=Count("lines"))
+          .prefetch_related("used_in_lines__recipe")
+          .order_by("code"))
+    rows = []
+    for r in qs:
+        # Dedupe parents (a parent that uses the sub-recipe on two lines
+        # would otherwise show twice).
+        seen = set()
+        parents = []
+        for line in r.used_in_lines.all():
+            p = line.recipe
+            if p.pk in seen:
+                continue
+            seen.add(p.pk)
+            parents.append(p)
+        parents.sort(key=lambda p: p.code)
+        rows.append({"r": r, "parents": parents})
     return render(request, "stock/recipes.html", {
-        "recipes": recipes,
-        "n_recipes": recipes.count(),
+        "rows": rows,
+        "n_recipes": qs.count(),
+        "role_choices": Recipe.ROLE_CHOICES,
     })
+
+
+@require_POST
+@login_required
+def recipe_set_role(request, pk):
+    """Manual role override from the recipe list page.
+
+    Setting this flips `role_is_manual` so the next bulk recompute_all_roles
+    (e.g. after another import) won't overwrite the operator's choice.
+    """
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    role = request.POST.get("role")
+    valid = {k for k, _ in Recipe.ROLE_CHOICES}
+    if role not in valid:
+        messages.error(request, "Pick a valid role.")
+        return redirect("recipes")
+    recipe.role = role
+    recipe.role_is_manual = True
+    recipe.save(update_fields=["role", "role_is_manual"])
+    messages.success(request,
+                     f"Marked {recipe.code} as {recipe.get_role_display().lower()}.")
+    return redirect("recipes")
 
 
 @login_required
@@ -426,6 +466,7 @@ def recipe_detail(request, pk):
         context["flat_ingredients"] = recipe.exploded_ingredients()
     else:
         context["tree"] = _recipe_tree(recipe)
+    context["parents"] = list(recipe.parents())
     return render(request, "stock/recipe_detail.html", context)
 
 

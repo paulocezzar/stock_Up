@@ -453,6 +453,11 @@ def save_recipes(parsed, department):
                     weight_g=weight, ordering=i,
                 )
 
+    # After the lines are written, refresh which recipes are final products
+    # vs components based on the new reference graph. Manual overrides
+    # (role_is_manual=True) are preserved.
+    Recipe.recompute_all_roles()
+
     return {
         "created": created,
         "updated": updated,

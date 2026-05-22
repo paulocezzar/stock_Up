@@ -13,6 +13,7 @@ urlpatterns = [
     path("recipes/upload/preview/", views.recipe_upload_preview, name="recipe_upload_preview"),
     path("recipes/<int:pk>/", views.recipe_detail, name="recipe_detail"),
     path("recipes/<int:pk>/delete/", views.recipe_delete, name="recipe_delete"),
+    path("recipes/<int:pk>/role/", views.recipe_set_role, name="recipe_set_role"),
     path("production/", views.production_home, name="production"),
     path("rota/", views.rota_home, name="rota"),
     path("notes/", views.notes_home, name="notes"),

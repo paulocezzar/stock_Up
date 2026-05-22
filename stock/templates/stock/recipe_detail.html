@@ -63,7 +63,21 @@
   .view-toggle a.on{background:var(--amber);color:#111}
 </style>
 
-<h2>{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span></h2>
+<style>
+  .role-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;display:inline-block;margin-left:8px;vertical-align:middle}
+  .role-tag.final{color:var(--amber);border-color:var(--amber)}
+  .role-tag.component{color:var(--muted);border-color:var(--muted)}
+  .role-tag.manual{border-style:dashed}
+</style>
+
+<h2>{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span>
+  <span class="role-tag {% if recipe.role == 'final_product' %}final{% else %}component{% endif %}{% if recipe.role_is_manual %} manual{% endif %}"
+        title="{% if recipe.role_is_manual %}Manually set{% else %}Auto from references{% endif %}">{{ recipe.get_role_display }}{% if recipe.role_is_manual %} ·M{% endif %}</span>
+</h2>
+{% if parents %}
+<p class="muted" style="margin:-10px 0 14px;font-size:12px">Used in: {% for p in parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+{% endif %}
 
 <div class="stats">
   {% if recipe.deposit_weight_g is not None %}<div class="stat"><div class="k">Deposit weight</div><div class="v">{{ recipe.deposit_weight_g|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">g</span></div></div>{% endif %}
