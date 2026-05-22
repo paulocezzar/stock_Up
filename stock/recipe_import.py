@@ -118,6 +118,52 @@ def _rightmost_text(row):
     return None
 
 
+def _find_col(row, *labels):
+    """Index of the first cell whose normalised text matches any of `labels`.
+
+    Case-insensitive; trailing colons ignored. Returns None when not found.
+    """
+    targets = {_norm_label(n) for n in labels}
+    for i, c in enumerate(row):
+        if c is None:
+            continue
+        if _norm_label(c) in targets:
+            return i
+    return None
+
+
+# Labels used by the two known layouts for the *weight* column of an
+# ingredient/component table:
+#   - "Weight (g)"  — top-level recipe tables in both files
+#   - "g"           — sub-recipe tables in both files
+# Packaging tables sit alongside ingredient tables and share Code/Description
+# headers, but use "Quantity" / "UOM" instead — never "g" or "Weight (g)".
+# Distinguishing on the weight-column header is what stops the packaging
+# rows from clobbering the parent recipe's actual ingredient lines.
+_WEIGHT_HEADER_LABELS = ("g", "weight (g)", "weight")
+
+
+def _classify_ingredient_header(row):
+    """If this row is a Code/Description/.../weight ingredient-table header,
+    return ``(code_col, desc_col, weight_col)``. Otherwise return ``None``.
+
+    Recognises both column layouts seen in production exports:
+        Code | Description | (...) | Weight (g)   (top-level tables)
+        Code | Description | State | g            (sub-recipe tables, newer)
+    A header with Code+Description but no weight column (e.g. a Packaging
+    table with Quantity/UOM) deliberately returns None so we don't enter
+    ingredient-reading mode for it.
+    """
+    code_col = _find_col(row, "Code")
+    desc_col = _find_col(row, "Description")
+    if code_col is None or desc_col is None:
+        return None
+    weight_col = _find_col(row, *_WEIGHT_HEADER_LABELS)
+    if weight_col is None:
+        return None
+    return code_col, desc_col, weight_col
+
+
 def parse_recipe_workbook(file_or_path):
     """Walk the workbook and return a list of recipe dicts.
 
@@ -191,6 +237,11 @@ def parse_recipe_workbook(file_or_path):
         return r
 
     state = "idle"  # idle | ingredients | method
+    # Column indices recorded the last time we saw an ingredient-table
+    # header — used so subsequent line rows pull from the right cells
+    # regardless of how the exporter spaced its columns. Reset on every
+    # new header (which may have a different layout for sub-recipes).
+    ing_cols = {"code": None, "desc": None, "weight": None}
 
     for row in rows:
         cells_non_empty = _non_empty_cells(row)
@@ -201,19 +252,19 @@ def parse_recipe_workbook(file_or_path):
                 state = "idle"
             continue
 
-        # New section heading "NPD-R\d+ - Name"?
+        # New section heading "NPD-R\d+ - Name". Anchored to single-cell rows
+        # so a method "Materials" blob that lists "NPD-R123 - ..." as plain
+        # text (with sibling lines in the same cell) can't trigger a section
+        # change. Real headings are always alone in their row.
         heading = None
-        for c in row:
-            if c is None:
-                continue
-            s = str(c).strip()
-            m = HEADING_RE.match(s)
+        if len(cells_non_empty) == 1:
+            m = HEADING_RE.match(cells_non_empty[0])
             if m:
                 heading = m
-                break
         if heading:
             _start(heading.group(1), heading.group(2))
             state = "idle"
+            ing_cols = {"code": None, "desc": None, "weight": None}
             continue
 
         # "Method" section start (only when "Method" is the lone label in B,
@@ -224,58 +275,41 @@ def parse_recipe_workbook(file_or_path):
             method_state["stage_name"] = None
             continue
 
-        # Start of an ingredient block (Code / Description / ... / Weight header).
-        if _row_has(row, "Code") and _row_has(row, "Description"):
+        # Start of an ingredient block. Only count rows that ALSO carry a
+        # weight column header ("g" or "Weight (g)") — packaging/quantity
+        # tables share the Code/Description header but use Quantity/UOM,
+        # so they must not flip us into ingredient-reading mode.
+        cls = _classify_ingredient_header(row)
+        if cls is not None:
             if current["r"] is None and main_code:
                 _start(main_code, main_name, units=main_units)
             if current["r"]:
                 current["r"]["lines"] = []
+            ing_cols["code"], ing_cols["desc"], ing_cols["weight"] = cls
             state = "ingredients"
             continue
 
         # Ingredient row (in or near an ingredients block).
         if state == "ingredients":
+            code_col = ing_cols["code"]
+            desc_col = ing_cols["desc"]
+            weight_col = ing_cols["weight"]
             code_cell = None
-            code_idx = None
-            for i, c in enumerate(row):
-                if c is None:
-                    continue
-                s = str(c).strip()
-                if INGREDIENT_CODE_RE.match(s):
-                    code_cell = s.upper()
-                    code_idx = i
-                    break
+            if code_col is not None and code_col < len(row) and row[code_col] is not None:
+                cand = str(row[code_col]).strip()
+                if INGREDIENT_CODE_RE.match(cand):
+                    code_cell = cand.upper()
             if code_cell and current["r"] is not None:
-                # Description: first significant non-numeric, non-state text
-                # to the right of the code.
+                # Description from the recorded column (fall back to blank
+                # if the cell is empty or out of range).
                 desc = ""
-                for k in range(code_idx + 1, len(row)):
-                    c = row[k]
-                    if c is None:
-                        continue
-                    s = str(c).strip()
-                    if not s or s.lower() in _STATE_WORDS:
-                        continue
-                    try:
-                        Decimal(s)
-                        continue
-                    except (InvalidOperation, ValueError):
-                        pass
-                    desc = s
-                    break
-                # Weight: rightmost numeric cell.
+                if desc_col is not None and desc_col < len(row) and row[desc_col] is not None:
+                    desc = str(row[desc_col]).strip()
+                # Weight from the recorded column. Tolerate both numeric
+                # cells and "660g"-style strings via _parse_weight.
                 weight = None
-                for c in reversed(row):
-                    if c is None:
-                        continue
-                    if isinstance(c, (int, float, Decimal)):
-                        weight = Decimal(str(c))
-                        break
-                    try:
-                        weight = Decimal(str(c).strip())
-                        break
-                    except (InvalidOperation, ValueError):
-                        continue
+                if weight_col is not None and weight_col < len(row):
+                    weight = _parse_weight(row[weight_col])
                 if weight is not None:
                     current["r"]["lines"].append({
                         "code": code_cell,

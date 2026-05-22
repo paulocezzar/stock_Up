@@ -2001,6 +2001,7 @@ class ResetStockDataTests(TestCase):
 # ----------------------------------------------------------------------
 
 SAMPLE_RECIPE_XLSX = "data/recipe_sample.xlsx"
+SAMPLE_MINCEPIE_XLSX = "data/recipe_sample_mincepie.xlsx"
 
 
 class RecipeModelTests(TestCase):
@@ -2162,6 +2163,134 @@ class RecipeImportIdempotencyTests(TestCase):
         # Same row, not a new one (same PK; updated timestamp may change)
         second_main = Recipe.objects.get(code="NPD-R800")
         self.assertEqual(second_main.pk, first_main.pk)
+
+
+class RecipeMincePieImportTests(TestCase):
+    """The newer "Simplified Kitchen Report" layout (NPD-R655).
+
+    This export differs from the sourdough sample on three fronts:
+    - Sub-recipe tables use the header ``Code | Description | State | g``
+      (4 columns; weight header is just "g", not "Weight (g)").
+    - Each recipe is followed by a "Packaging" table whose header is also
+      ``Code | Description | ... | Quantity | UOM`` — same Code/Description
+      labels, NO weight column. The parser must NOT treat this as an
+      ingredient block (the old code clobbered the parent's lines with
+      packaging rows).
+    - Method "Materials" cells carry multi-line blobs like
+      ``"NPD-R413 - Mince Pie Dough\\nNPD-R412 - ..."``. These are prose
+      lists for the operator, not structural links — the parser must not
+      mistake them for recipe headings or ingredient lines.
+
+    R655 → R568 → (R412, R413, R567, R223) must nest correctly.
+    """
+
+    def test_mince_pie_import_nests_sub_recipes_under_r568(self):
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX)
+        # All six recipes present
+        codes = set(Recipe.objects.values_list("code", flat=True))
+        self.assertEqual(codes,
+                         {"NPD-R655", "NPD-R568", "NPD-R412",
+                          "NPD-R413", "NPD-R567", "NPD-R223"})
+        # R655 → R568 (one sub-recipe line, full weight)
+        r655 = Recipe.objects.get(code="NPD-R655")
+        line = r655.lines.get()
+        self.assertEqual(line.sub_recipe.code, "NPD-R568")
+        # Must be the 83.82g real weight from the ingredient block, NOT
+        # the 0.894 from the packaging table (the old bug).
+        self.assertAlmostEqual(float(line.weight_g), 83.824, places=2)
+
+    def test_r568_links_all_four_components_as_sub_recipes(self):
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX)
+        r568 = Recipe.objects.get(code="NPD-R568")
+        # Four sub-recipe lines, in order: R412 (50g), R413 (28g), R567 (15g), R223 (2g)
+        lines = list(r568.lines.select_related("sub_recipe", "ingredient")
+                     .order_by("ordering"))
+        self.assertEqual(len(lines), 4)
+        for line in lines:
+            self.assertIsNone(line.ingredient,
+                              "every R568 line should be a sub-recipe, not a raw ingredient")
+            self.assertIsNotNone(line.sub_recipe)
+        codes_weights = [(ln.sub_recipe.code, float(ln.weight_g)) for ln in lines]
+        self.assertEqual(codes_weights, [
+            ("NPD-R412", 50.0),
+            ("NPD-R413", 28.0),
+            ("NPD-R567", 15.0),
+            ("NPD-R223", 2.0),
+        ])
+
+    def test_mince_pie_components_are_components_not_top_level_products(self):
+        # The bug report: R412/R413/R567/R223 were importing as standalone
+        # top-level recipes (sold_as_product=True) instead of components.
+        # After the fix they must be is_used_as_component=True and the
+        # default-from-references sold flag should be False.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX)
+        for code in ("NPD-R568", "NPD-R412", "NPD-R413",
+                     "NPD-R567", "NPD-R223"):
+            r = Recipe.objects.get(code=code)
+            self.assertTrue(r.is_used_as_component,
+                            f"{code} should be flagged as a component")
+            self.assertFalse(r.sold_as_product,
+                             f"{code} default sold flag should be False (it's used by another)")
+        # Only the root R655 should default to sold_as_product=True
+        r655 = Recipe.objects.get(code="NPD-R655")
+        self.assertTrue(r655.sold_as_product)
+        self.assertFalse(r655.is_used_as_component)
+
+    def test_packaging_table_does_not_clobber_parent_lines(self):
+        # Specific regression: the parent (R655) and R412 each have a
+        # Packaging table immediately after their ingredient block. The
+        # parser must skip those rows entirely; the parent's lines should
+        # be the real ingredient/sub-recipe rows.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX)
+        r412 = Recipe.objects.get(code="NPD-R412")
+        # R412 has 16 raw ingredients in the spec — no packaging row should
+        # appear, and weights must be the in-recipe values, not the
+        # "50g" packaging quantity.
+        self.assertEqual(r412.lines.count(), 16)
+        for ln in r412.lines.all():
+            self.assertIsNotNone(ln.ingredient_id)
+            self.assertIsNone(ln.sub_recipe_id)
+            # No line weight should be the bogus packaging value
+            self.assertNotEqual(ln.weight_g, Decimal("50"))
+
+    def test_method_section_code_blobs_are_not_parsed_as_links(self):
+        # R568's Stage 1 method cell holds a 4-line "Materials" blob that
+        # references R412/R413/R567/R223 inside the text. Those must not
+        # add extra sub-recipe lines to R568 or to anyone else; the only
+        # structural links come from the ingredient TABLE.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX)
+        # R568 has exactly 4 lines from the table (verified separately);
+        # the method blob mentions the same 4 codes — easy to double up.
+        self.assertEqual(RecipeLine.objects.filter(
+            recipe__code="NPD-R568").count(), 4)
+        # And R655 has exactly one sub-recipe line (R568), nothing else
+        # leaked through from method blobs anywhere in the workbook.
+        self.assertEqual(RecipeLine.objects.filter(
+            recipe__code="NPD-R655").count(), 1)
+        # The method text on R568 should still capture the prose.
+        r568 = Recipe.objects.get(code="NPD-R568")
+        self.assertIn("Fill the cases", r568.method_text)
+        self.assertIn("Bake at", r568.method_text)
+
+    def test_sourdough_sample_still_imports_after_layout_fix(self):
+        # Guard against regressions in the older 3-column layout.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX)
+        self.assertEqual(Recipe.objects.count(), 7)
+        # R2031 still has its 6-line breakdown (5 ingredients + 1 sub).
+        r2031 = Recipe.objects.get(code="NPD-R2031")
+        self.assertEqual(r2031.lines.count(), 6)
+        sub = r2031.lines.filter(sub_recipe__isnull=False).get()
+        self.assertEqual(sub.sub_recipe.code, "NPD-R2082")
+        self.assertEqual(sub.weight_g, Decimal("63.208"))
+        # And the chain still bottoms out at NPD-R307
+        r307 = Recipe.objects.get(code="NPD-R307")
+        self.assertEqual(r307.lines.count(), 3)
 
 
 class RecipeUnknownIngredientTests(TestCase):
