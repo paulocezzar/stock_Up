@@ -1344,7 +1344,16 @@ class IngredientImportTests(TestCase):
     The fixture workbook is built in-memory so tests don't depend on data/.
     """
 
-    def _make_workbook(self, path, ingredients, uoms):
+    def _make_workbook(self, path, ingredients, uoms,
+                       suppliers=None, supplier_names=None):
+        """Build a four-tab fixture workbook.
+
+        suppliers: list of {code, supplier_code, is_primary} dicts. Defaults
+                   to a generated primary supplier per ingredient so tests
+                   that don't care about supplier wiring still get prices.
+        supplier_names: {supplier_code: name} for the Reference lookup.
+                   Defaults to a generated name per supplier_code seen.
+        """
         from openpyxl import Workbook
         wb = Workbook()
         ing_ws = wb.active
@@ -1372,6 +1381,34 @@ class IngredientImportTests(TestCase):
         for u in uoms:
             uom_ws.append([u["code"], None, u["uom"], u.get("quantity", 1),
                            u["ruom"], u["ref_quantity"], "No"])
+
+        if suppliers is None:
+            suppliers = [
+                {"code": ing["code"], "supplier_code": f"S{900 + i}", "is_primary": True}
+                for i, ing in enumerate(ingredients, start=1)
+            ]
+        if supplier_names is None:
+            supplier_names = {}
+            for s in suppliers:
+                supplier_names.setdefault(s["supplier_code"],
+                                          f"Supplier {s['supplier_code']}")
+
+        sup_ws = wb.create_sheet("Suppliers")
+        sup_ws.append(["Code", "Description", "Supplier Code", "Supplier",
+                       "Supplier Address", "Is Primary Supplier"])
+        for s in suppliers:
+            sup_ws.append([s["code"], None, s["supplier_code"], None, "",
+                           "Yes" if s.get("is_primary") else "No"])
+
+        # Reference tab mirrors the real shape: the first row is a wide list
+        # of section labels, third row is sub-headers per section. We only
+        # need the "Suppliers" section so put it at column 0.
+        ref_ws = wb.create_sheet("Reference")
+        ref_ws.append(["Suppliers"])             # row 1
+        ref_ws.append([])                        # row 2 (blank)
+        ref_ws.append(["Supplier Code", "Description"])  # row 3 sub-headers
+        for code, name in supplier_names.items():
+            ref_ws.append([code, name])
         wb.save(path)
 
     def test_import_creates_products_with_code_name_category(self):
@@ -1541,6 +1578,171 @@ class IngredientImportTests(TestCase):
         call_command("import_ingredients", path, "--department", "Pastry")
         p = Product.objects.get(code="NPD-I001")
         self.assertEqual(p.department.name, "Pastry")
+
+    # --- supplier wiring -------------------------------------------------
+
+    def _tmp(self, name="ing.xlsx"):
+        import tempfile, os
+        return os.path.join(tempfile.mkdtemp(), name)
+
+    def test_primary_supplier_s_code_resolves_to_name_and_gets_the_price(self):
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I100", "name": "Bread Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I100", "uom": "Trade Paper Sack",
+                 "ruom": "Kilograms", "ref_quantity": 16},
+            ],
+            suppliers=[
+                {"code": "NPD-I100", "supplier_code": "S31", "is_primary": True},
+            ],
+            supplier_names={"S31": "Wildfarmed"})
+        call_command("import_ingredients", path)
+        # Master Catalog must NOT be created — supplier comes from data.
+        self.assertFalse(Supplier.objects.filter(name="Master Catalog").exists())
+        # Real supplier created with the resolved name
+        sup = Supplier.objects.get(name="Wildfarmed")
+        flour = Product.objects.get(code="NPD-I100")
+        sp = flour.prices.get()
+        self.assertEqual(sp.supplier, sup)
+        self.assertEqual(sp.pack_weight, Decimal("16000"))
+        self.assertEqual(sp.pack_price, Decimal("18.40"))
+
+    def test_primary_row_wins_over_other_supplier_rows(self):
+        # An ingredient with several supplier rows: only the primary one is
+        # used; secondary rows must not produce extra prices.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I200", "name": "Milk", "cost": 2.39,
+                 "supply_unit": "2 Litres", "category": "Dairy & Eggs"},
+            ],
+            uoms=[
+                {"code": "NPD-I200", "uom": "2 Litres",
+                 "ruom": "Kilograms", "ref_quantity": 2},
+            ],
+            suppliers=[
+                {"code": "NPD-I200", "supplier_code": "S5", "is_primary": True},
+                {"code": "NPD-I200", "supplier_code": "S3", "is_primary": False},
+            ],
+            supplier_names={"S5": "Bruton Dairies", "S3": "Wellocks"})
+        call_command("import_ingredients", path)
+        milk = Product.objects.get(code="NPD-I200")
+        sp = milk.prices.get()  # exactly one price
+        self.assertEqual(sp.supplier.name, "Bruton Dairies")
+
+    def test_fallback_to_first_row_when_no_primary(self):
+        # Edge case: nothing marked primary - take whichever row appears first.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I300", "name": "Salt", "cost": 8.93,
+                 "supply_unit": "Bag", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I300", "uom": "Bag",
+                 "ruom": "Kilograms", "ref_quantity": 10},
+            ],
+            suppliers=[
+                {"code": "NPD-I300", "supplier_code": "S3", "is_primary": False},
+                {"code": "NPD-I300", "supplier_code": "S14", "is_primary": False},
+            ],
+            supplier_names={"S3": "Wellocks", "S14": "The Fine Food Company"})
+        call_command("import_ingredients", path)
+        salt = Product.objects.get(code="NPD-I300")
+        self.assertEqual(salt.prices.get().supplier.name, "Wellocks")
+
+    def test_unresolvable_supplier_code_uses_code_as_name_and_flags(self):
+        # An S-code that doesn't appear in the Reference lookup: name the
+        # supplier after the code itself and surface it in the output.
+        from django.core.management import call_command
+        from io import StringIO
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I400", "name": "X", "cost": 1.0,
+                 "supply_unit": "Bag", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I400", "uom": "Bag",
+                 "ruom": "Kilograms", "ref_quantity": 1},
+            ],
+            suppliers=[
+                {"code": "NPD-I400", "supplier_code": "S999", "is_primary": True},
+            ],
+            supplier_names={})  # S999 not present
+        out = StringIO()
+        call_command("import_ingredients", path, stdout=out)
+        # Supplier was created using the S-code as a fallback name
+        sup = Supplier.objects.get(name="S999")
+        self.assertEqual(Product.objects.get(code="NPD-I400").prices.get().supplier, sup)
+        # And the run reports it
+        self.assertIn("Unresolved supplier codes", out.getvalue())
+        self.assertIn("S999", out.getvalue())
+
+    def test_ingredient_with_no_supplier_row_is_flagged(self):
+        # No row in Suppliers tab → no price (we can't pick a supplier).
+        from django.core.management import call_command
+        from io import StringIO
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I500", "name": "Orphan", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[],
+            suppliers=[],          # Suppliers tab has the header but no rows
+            supplier_names={})
+        out = StringIO()
+        call_command("import_ingredients", path, stdout=out)
+        p = Product.objects.get(code="NPD-I500")
+        self.assertFalse(p.prices.exists())
+        self.assertIn("no supplier", out.getvalue())
+
+    def test_supplier_idempotent_on_rerun(self):
+        # Re-running shouldn't create a duplicate Supplier OR a second price
+        # row for the same (product, supplier).
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I600", "name": "Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I600", "uom": "Trade Paper Sack",
+                 "ruom": "Kilograms", "ref_quantity": 16},
+            ],
+            suppliers=[
+                {"code": "NPD-I600", "supplier_code": "S31", "is_primary": True},
+            ],
+            supplier_names={"S31": "Wildfarmed"})
+        call_command("import_ingredients", path)
+        call_command("import_ingredients", path)
+        self.assertEqual(Supplier.objects.filter(name="Wildfarmed").count(), 1)
+        flour = Product.objects.get(code="NPD-I600")
+        self.assertEqual(flour.prices.count(), 1)
+        self.assertEqual(flour.prices.get().pack_price, Decimal("18.40"))
+
+    def test_no_master_catalog_supplier_created(self):
+        # The old "Master Catalog" placeholder must never appear, even when
+        # the workbook has no usable supplier data at all.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I700", "name": "X", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[])
+        call_command("import_ingredients", path)
+        self.assertFalse(Supplier.objects.filter(name="Master Catalog").exists())
 
 
 class ResetStockDataTests(TestCase):
