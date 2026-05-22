@@ -117,9 +117,9 @@
     <span class="badge">{{ urgent_count }}</span>
     <h3>Urgent Tasks</h3>
     <p class="sub">Requires immediate action</p>
-    {% if urgent_alerts %}
+    {% if urgent_tasks %}
     <ul class="alerts">
-      {% for a in urgent_alerts %}<li><a href="{{ a.href }}"><span>{{ a.title }}</span><span class="view">view →</span></a></li>{% endfor %}
+      {% for t in urgent_tasks %}<li><a href="{{ t.url }}"><span>{{ t.label }}{% if t.count %} <span class="muted" style="font-size:11px">— {{ t.count }} item{{ t.count|pluralize }}</span>{% endif %}</span><span class="view">do →</span></a></li>{% endfor %}
     </ul>
     {% else %}
     <div class="calm">✓ All caught up!</div>

@@ -116,6 +116,63 @@ def _packs(d):
     return format(d.normalize(), "f")
 
 
+def _stock_tasks_for_home(dept, today):
+    """Build the actionable tasks shown on the Home Urgent Tasks card from
+    stock data. Returns a list of {label, count, url} dicts.
+
+    Structured so other sources (manual user-added tasks, recipe / production
+    prompts, etc.) can extend the same list later. To plug in a new source,
+    write another helper that returns the same shape and append its result
+    in home().
+    """
+    tasks = []
+    if dept is None:
+        return tasks
+
+    below = 0
+    low_cover = 0
+    for p in dept.products.prefetch_related("prices__supplier"):
+        line = p.latest_line
+        cur = line.current if line else None
+        if cur is None:
+            continue
+        if cur < p.minimum:
+            below += 1
+        else:
+            cover = p.days_of_cover(cur)
+            if cover is not None and cover < 14:
+                low_cover += 1
+
+    if below:
+        tasks.append({"label": "Ordering", "count": below, "url": "/reorder/"})
+
+    expiring = Batch.objects.filter(
+        delivery__department=dept,
+        use_by__isnull=False,
+        use_by__gte=today,
+        use_by__lte=today + datetime.timedelta(days=7),
+        qty_remaining__gt=0,
+    ).count()
+    if expiring:
+        tasks.append({"label": "Use expiring stock", "count": expiring,
+                      "url": "/deliveries/"})
+
+    last_st = dept.stocktakes.first()
+    needs_count = False
+    if last_st is None and dept.products.exists():
+        needs_count = True
+    elif last_st is not None and (today - last_st.date).days > 7:
+        needs_count = True
+    if needs_count:
+        tasks.append({"label": "Stocktake due", "count": None,
+                      "url": "/stocktakes/"})
+
+    if low_cover:
+        tasks.append({"label": "Running low", "count": low_cover, "url": "/reorder/"})
+
+    return tasks
+
+
 def fetch_weather(lat=51.1485, lon=-2.7137, timeout=3.0):
     """Open-Meteo current weather for Glastonbury. No API key required.
 
@@ -165,22 +222,14 @@ def home(request):
     else:
         greeting = "Good evening"
 
-    urgent_alerts = []
     stock_alerts = []
-    stock_below = 0
-    expiring_count = 0
-    low_cover_count = 0
-    days_since_count = None
-
     if dept is not None:
-        products = list(dept.products.prefetch_related("prices__supplier"))
-        for p in products:
+        for p in dept.products.prefetch_related("prices__supplier"):
             line = p.latest_line
             cur = line.current if line else None
             if cur is None:
                 continue
             if cur < p.minimum:
-                stock_below += 1
                 stock_alerts.append({
                     "ingredient": p,
                     "alert": "Below minimum",
@@ -191,7 +240,6 @@ def home(request):
             else:
                 cover = p.days_of_cover(cur)
                 if cover is not None and cover < 14:
-                    low_cover_count += 1
                     stock_alerts.append({
                         "ingredient": p,
                         "alert": "Low days of cover",
@@ -200,16 +248,14 @@ def home(request):
                         "kind": "low_cover",
                     })
 
-        soon = today + datetime.timedelta(days=7)
         expiring_batches = (Batch.objects
             .filter(delivery__department=dept,
                     use_by__isnull=False,
                     use_by__gte=today,
-                    use_by__lte=soon,
+                    use_by__lte=today + datetime.timedelta(days=7),
                     qty_remaining__gt=0)
             .select_related("product", "delivery"))
         for b in expiring_batches:
-            expiring_count += 1
             stock_alerts.append({
                 "ingredient": b.product,
                 "alert": "Expires soon",
@@ -218,39 +264,9 @@ def home(request):
                 "kind": "expiring",
             })
 
-        if stock_below:
-            urgent_alerts.append({
-                "title": (f"{stock_below} ingredient"
-                          f"{'s' if stock_below != 1 else ''} below minimum"),
-                "href": "/reorder/",
-            })
-        if expiring_count:
-            urgent_alerts.append({
-                "title": (f"{expiring_count} batch"
-                          f"{'es' if expiring_count != 1 else ''} "
-                          f"expiring within 7 days"),
-                "href": "/deliveries/",
-            })
-        last_st = dept.stocktakes.first()
-        if last_st:
-            days_since_count = (today - last_st.date).days
-            if days_since_count > 7:
-                urgent_alerts.append({
-                    "title": f"Last stocktake {days_since_count} days ago",
-                    "href": "/stocktakes/",
-                })
-        elif products:
-            urgent_alerts.append({
-                "title": "No stocktake recorded yet",
-                "href": "/stocktakes/",
-            })
-        if low_cover_count:
-            urgent_alerts.append({
-                "title": (f"{low_cover_count} item"
-                          f"{'s' if low_cover_count != 1 else ''} "
-                          f"with <14 days cover"),
-                "href": "/",
-            })
+    # Urgent tasks list. Single list of {label, count, url} dicts; new
+    # sources (e.g. manual user-added tasks) can be appended here later.
+    urgent_tasks = _stock_tasks_for_home(dept, today)
 
     try:
         weather = fetch_weather()
@@ -259,8 +275,8 @@ def home(request):
     return render(request, "stock/home.html", {
         "greeting": greeting,
         "today": today,
-        "urgent_alerts": urgent_alerts,
-        "urgent_count": len(urgent_alerts),
+        "urgent_tasks": urgent_tasks,
+        "urgent_count": len(urgent_tasks),
         "stock_alerts": stock_alerts,
         "has_dept": dept is not None,
         "weather": weather,

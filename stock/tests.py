@@ -1053,8 +1053,10 @@ class SectionNavigationTests(TestCase):
         body = r.content.decode()
 
         urgent = body[body.index('class="panel strip urgent"'):body.index('id="stock-alerts"')]
-        # Aggregate line in the urgent card + link to /reorder/
-        self.assertIn("1 ingredient below minimum", urgent)
+        # Below-minimum stock now surfaces as an actionable "Ordering" task
+        # with the item count, linking to /reorder/
+        self.assertIn("Ordering", urgent)
+        self.assertIn("1 item", urgent)
         self.assertIn('href="/reorder/"', urgent)
         # Badge shows the urgent count
         self.assertRegex(urgent, r'class="badge">\s*1\s*<')
@@ -1114,6 +1116,57 @@ class SectionNavigationTests(TestCase):
         self.assertIn("All caught up", urgent)
         table = body[body.index('id="stock-alerts"'):]
         self.assertIn("Stock looks healthy", table)
+
+    def test_home_urgent_tasks_use_action_labels(self):
+        # Expiring batch + overdue stocktake should produce "Use expiring
+        # stock" and "Stocktake due" tasks respectively. Each task line is a
+        # link to where the work is done.
+        sup = Supplier.objects.create(name="Mill")
+        flour = Product.objects.create(
+            name="Flour", department=self.dept, unit="g", minimum=0)
+        delivery = Delivery.objects.create(
+            department=self.dept, supplier=sup,
+            date=datetime.date.today() - datetime.timedelta(days=2))
+        Batch.objects.create(
+            delivery=delivery, product=flour, batch_code="A1",
+            use_by=datetime.date.today() + datetime.timedelta(days=3),
+            qty_received=Decimal("4"), qty_remaining=Decimal("4"))
+        # An old stocktake makes the count overdue
+        Stocktake.objects.create(
+            department=self.dept,
+            date=datetime.date.today() - datetime.timedelta(days=10))
+
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        urgent = body[body.index('class="panel strip urgent"'):body.index('id="stock-alerts"')]
+        # Action labels, not status observations
+        self.assertIn("Use expiring stock", urgent)
+        self.assertIn("Stocktake due", urgent)
+        # Links to where the user does the work
+        self.assertIn('href="/deliveries/"', urgent)
+        self.assertIn('href="/stocktakes/"', urgent)
+        # Badge counts both
+        self.assertRegex(urgent, r'class="badge">\s*2\s*<')
+
+    def test_urgent_task_helper_returns_extendable_list(self):
+        # _stock_tasks_for_home returns a list of {label, count, url} dicts
+        # so other sources (manual tasks etc.) can append to the same list.
+        from stock.views import _stock_tasks_for_home
+        flour = Product.objects.create(
+            name="Flour", department=self.dept, unit="g",
+            minimum=Decimal("10"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date.today())
+        StockLine.objects.create(stocktake=st, product=flour,
+                                 current=Decimal("2"), carried_over=False)
+        tasks = _stock_tasks_for_home(self.dept, datetime.date.today())
+        # Each entry is a {label, count, url} dict
+        self.assertGreaterEqual(len(tasks), 1)
+        first = tasks[0]
+        self.assertEqual(set(first.keys()), {"label", "count", "url"})
+        self.assertEqual(first["label"], "Ordering")
+        self.assertEqual(first["count"], 1)
+        self.assertEqual(first["url"], "/reorder/")
 
     def test_stock_section_landing_renders_with_stock_submenu(self):
         # /stock/ is a Stock section page — its navbar carries the Stock
