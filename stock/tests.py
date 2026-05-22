@@ -1019,39 +1019,48 @@ class SectionNavigationTests(TestCase):
         assert self.client.login(username="alice", password="pw")
         self.client.get(f"/switch/{self.dept.pk}/")
 
-    def test_home_page_renders_minimal_body_with_top_navbar(self):
-        # Home body is minimal — a welcome heading, no card grid.
+    def test_home_renders_for_logged_in_user(self):
         r = self.client.get("/home/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        self.assertIn("Welcome", body)
-        # No <h3> cards on Home
-        page = body[body.index("<main>"):body.index("</main>")]
-        self.assertNotIn("<h3>", page)
+        self.assertIn("alice", body)
+        # Hero cards present
+        self.assertIn("Needs attention", body)
+        # Section grid: cards for each of the six sections
+        for label in ("Stock", "Recipes", "Production", "Rota", "Notes", "Profile"):
+            self.assertIn(f"<h3>{label}</h3>", body)
+        for url in ("/stock/", "/recipes/", "/production/", "/rota/",
+                    "/notes/", "/profile/"):
+            self.assertIn(f'href="{url}"', body)
 
-    def test_home_status_line_shows_below_minimum_and_last_count(self):
-        # Home keeps a small status line for the current department, but it's
-        # rendered as inline text, not a card.
+    def test_home_needs_attention_flags_below_minimum_ingredient(self):
+        # An ingredient counted below its minimum should produce an alert
+        # linking to /reorder/.
         flour = Product.objects.create(
             name="Flour", department=self.dept, unit="g",
             minimum=Decimal("10"))
-        sugar = Product.objects.create(
-            name="Sugar", department=self.dept, unit="g",
-            minimum=Decimal("5"))
-        salt = Product.objects.create(
-            name="Salt", department=self.dept, unit="g",
-            minimum=Decimal("1"))
         st = Stocktake.objects.create(department=self.dept,
-                                      date=datetime.date(2026, 5, 20))
-        StockLine.objects.create(stocktake=st, product=flour, current=Decimal("2"))
-        StockLine.objects.create(stocktake=st, product=sugar, current=Decimal("1"))
-        StockLine.objects.create(stocktake=st, product=salt, current=Decimal("5"))
-
+                                      date=datetime.date.today())
+        StockLine.objects.create(stocktake=st, product=flour,
+                                 current=Decimal("2"), carried_over=False)
         r = self.client.get("/home/")
         body = r.content.decode()
-        self.assertIn("2 below minimum", body)
-        self.assertIn("20 May 2026", body)
-        self.assertIn("Bakery", body)
+        # Pull just the needs-attention card block to assert against
+        start = body.index("Needs attention")
+        end = body.index("home-grid", start)
+        card = body[start:end]
+        self.assertIn("1 ingredient below minimum", card)
+        self.assertIn('href="/reorder/"', card)
+        # And not the calm state
+        self.assertNotIn("All caught up", card)
+
+    def test_home_calm_state_when_nothing_is_urgent(self):
+        # Department exists but nothing alarming — the calm "all caught up"
+        # message should appear instead of any alert links.
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        self.assertIn("All caught up", body)
+        self.assertNotIn("below minimum</span>", body[body.index("Needs attention"):body.index("home-grid")])
 
     def test_stock_section_landing_renders_with_stock_submenu(self):
         # /stock/ is a Stock section page — its navbar carries the Stock
@@ -1092,18 +1101,16 @@ class SectionNavigationTests(TestCase):
         r = c.get("/profile/")
         self.assertIn("/admin/", r.content.decode())
 
-    def _topnav_labels(self, body):
+    def _nav(self, body):
         nav = body[body.index("<nav>"):body.index("</nav>")]
         return nav, [m.group(1) for m in re.finditer(r">([A-Za-z]+)<", nav)]
 
-    def test_home_navbar_has_seven_top_sections(self):
+    def test_home_page_navbar_is_empty(self):
+        # On the Home hub the contextual navbar has no links — the cards on
+        # the page are the navigation.
         r = self.client.get("/home/")
-        nav, labels = self._topnav_labels(r.content.decode())
-        for label in ("Home", "Stock", "Recipes", "Production",
-                      "Rota", "Notes", "Profile"):
-            self.assertIn(label, labels)
-        # Home itself is highlighted
-        self.assertRegex(nav, r'href="/home/"\s+class="on"')
+        nav, _ = self._nav(r.content.decode())
+        self.assertEqual(nav.count("<a "), 0)
 
     def test_stock_section_nav_shows_sub_items(self):
         # Any Stock page (e.g. the dashboard) renders the Stock contextual
@@ -1136,56 +1143,40 @@ class SectionNavigationTests(TestCase):
                 f"{path} should highlight its own sub-nav link",
             )
 
-    def test_placeholder_navbars_show_seven_top_sections_with_current_indicated(self):
-        for path, current_url, label in (
-            ("/recipes/", "/recipes/", "Recipes"),
-            ("/production/", "/production/", "Production"),
-            ("/rota/", "/rota/", "Rota"),
-            ("/notes/", "/notes/", "Notes"),
-        ):
+    def test_placeholder_navbars_have_home_plus_section(self):
+        for path, label in (("/recipes/", "Recipes"),
+                            ("/production/", "Production"),
+                            ("/rota/", "Rota"),
+                            ("/notes/", "Notes")):
             r = self.client.get(path)
-            nav, labels = self._topnav_labels(r.content.decode())
-            for top in ("Home", "Stock", "Recipes", "Production",
-                        "Rota", "Notes", "Profile"):
-                self.assertIn(top, labels)
-            self.assertRegex(nav, r'href="' + current_url + r'"\s+class="on"',
-                             f"{path} should mark its own top-nav link active")
+            nav, labels = self._nav(r.content.decode())
+            self.assertEqual(nav.count("<a "), 2,
+                             f"{path} navbar should be Home + section (2 links)")
+            self.assertIn("Home", labels)
+            self.assertIn(label, labels)
+            self.assertRegex(nav, r'class="on"[^>]*>' + label)
 
-    def test_profile_navbar_shows_seven_top_sections_with_profile_active(self):
+    def test_profile_navbar_has_home_and_profile(self):
         r = self.client.get("/profile/")
-        nav, labels = self._topnav_labels(r.content.decode())
-        for top in ("Home", "Stock", "Recipes", "Production",
-                    "Rota", "Notes", "Profile"):
-            self.assertIn(top, labels)
-        self.assertRegex(nav, r'href="/profile/"\s+class="on"')
+        nav, labels = self._nav(r.content.decode())
+        self.assertEqual(nav.count("<a "), 2)
+        self.assertIn("Home", labels)
+        self.assertIn("Profile", labels)
 
-    def test_admin_link_in_top_navbar_only_for_superusers(self):
-        # Home (top navbar) is gated; alice (non-superuser) shouldn't see it.
-        nav, _ = self._topnav_labels(self.client.get("/home/").content.decode())
-        self.assertNotIn("/admin/", nav)
-
-        U = get_user_model()
-        boss = U.objects.create_superuser("boss", password="pw")
-        c = Client()
-        c.login(username="boss", password="pw")
-        nav, _ = self._topnav_labels(c.get("/home/").content.decode())
-        self.assertIn("/admin/", nav)
-
-    def test_admin_link_in_stock_nav_only_for_superusers(self):
-        r = self.client.get("/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertNotIn("/admin/", nav)
+    def test_admin_link_in_header_only_for_superusers(self):
+        # The Admin link lives in the header's right cluster (not the
+        # contextual navbar), so superusers see it from every section.
+        r = self.client.get("/home/")
+        self.assertNotIn('href="/admin/"', r.content.decode())
 
         U = get_user_model()
         boss = U.objects.create_superuser("boss", password="pw")
         c = Client()
         c.login(username="boss", password="pw")
-        c.get(f"/switch/{self.dept.pk}/")
-        r = c.get("/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertIn("/admin/", nav)
+        # Visible on home, profile and a stock page alike
+        for path in ("/home/", "/profile/", "/"):
+            self.assertIn('href="/admin/"', c.get(path).content.decode(),
+                          f"{path} should expose /admin/ to a superuser")
 
     def test_login_redirects_to_home(self):
         c = Client()

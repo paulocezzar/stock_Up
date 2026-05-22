@@ -1,0 +1,8 @@
+{% extends "stock/base.html" %}
+{% block section_nav %}
+<a href="{% url 'home' %}">Home</a>
+{% if section == "recipes" %}<a href="{% url 'recipes' %}" class="on">Recipes</a>
+{% elif section == "production" %}<a href="{% url 'production' %}" class="on">Production</a>
+{% elif section == "rota" %}<a href="{% url 'rota' %}" class="on">Rota</a>
+{% elif section == "notes" %}<a href="{% url 'notes' %}" class="on">Notes</a>{% endif %}
+{% endblock %}

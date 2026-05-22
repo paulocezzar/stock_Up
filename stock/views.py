@@ -67,22 +67,100 @@ def current_department(request):
 
 @login_required
 def home(request):
-    """Top-level landing page — the post-login destination."""
+    """Card-hub landing page — the post-login destination.
+
+    Builds an alert list for the "needs attention" hero card from existing
+    Stock data: below-minimum ingredients, batches expiring within 7 days,
+    a stale stocktake (>7 days old), and items projected to run out within
+    14 days based on the burn-rate calc.
+    """
     dept = current_department(request)
+    today = datetime.date.today()
+    hour = datetime.datetime.now().hour
+    if hour < 12:
+        greeting = "Good morning"
+    elif hour < 17:
+        greeting = "Good afternoon"
+    else:
+        greeting = "Good evening"
+
+    alerts = []
     stock_below = 0
-    stock_last_count = None
+    expiring_count = 0
+    low_cover_count = 0
+    days_since_count = None
+
     if dept is not None:
-        for p in dept.products.prefetch_related("prices__supplier"):
+        products = list(dept.products.prefetch_related("prices__supplier"))
+        for p in products:
             line = p.latest_line
             cur = line.current if line else None
             if cur is not None and cur < p.minimum:
                 stock_below += 1
-        st = dept.stocktakes.first()
-        stock_last_count = st.date if st else None
+            if cur is not None:
+                cover = p.days_of_cover(cur)
+                if cover is not None and cover < 14 and (cur >= p.minimum):
+                    # already-below-minimum items are reported separately
+                    low_cover_count += 1
+        if stock_below:
+            alerts.append({
+                "kind": "below_min",
+                "title": (f"{stock_below} ingredient"
+                          f"{'s' if stock_below != 1 else ''} below minimum"),
+                "href": "/reorder/",
+            })
+
+        soon = today + datetime.timedelta(days=7)
+        expiring_count = Batch.objects.filter(
+            delivery__department=dept,
+            use_by__isnull=False,
+            use_by__gte=today,
+            use_by__lte=soon,
+            qty_remaining__gt=0,
+        ).count()
+        if expiring_count:
+            alerts.append({
+                "kind": "expiring",
+                "title": (f"{expiring_count} batch"
+                          f"{'es' if expiring_count != 1 else ''} "
+                          f"expiring within 7 days"),
+                "href": "/deliveries/",
+            })
+
+        last_st = dept.stocktakes.first()
+        if last_st:
+            days_since_count = (today - last_st.date).days
+            if days_since_count > 7:
+                alerts.append({
+                    "kind": "stale_count",
+                    "title": f"Last stocktake {days_since_count} days ago",
+                    "href": "/stocktakes/",
+                })
+        elif products:
+            alerts.append({
+                "kind": "no_count",
+                "title": "No stocktake recorded yet",
+                "href": "/stocktakes/",
+            })
+
+        if low_cover_count:
+            alerts.append({
+                "kind": "low_cover",
+                "title": (f"{low_cover_count} item"
+                          f"{'s' if low_cover_count != 1 else ''} "
+                          f"with <14 days cover"),
+                "href": "/",
+            })
+
     return render(request, "stock/home.html", {
-        "stock_below": stock_below,
-        "stock_last_count": stock_last_count,
+        "greeting": greeting,
+        "today": today,
+        "alerts": alerts,
         "has_dept": dept is not None,
+        "stock_below": stock_below,
+        "expiring_count": expiring_count,
+        "days_since_count": days_since_count,
+        "low_cover_count": low_cover_count,
     })
 
 

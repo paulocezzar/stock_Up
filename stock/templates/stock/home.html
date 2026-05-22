@@ -1,16 +1,99 @@
-{% extends "stock/_section_topnav.html" %}
-{% block n_home %}on{% endblock %}
+{% extends "stock/base.html" %}{% load humanize %}
+{% block section_nav %}{% endblock %}
 {% block body %}
-<h2>Welcome{% if user.username %}, {{ user.username }}{% endif %}</h2>
-<p class="muted" style="margin-top:-6px">Use the navbar above to jump into a section.</p>
+<style>
+  .home-hero{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:0 0 22px}
+  .home-hero .card{margin:0;padding:18px;display:flex;flex-direction:column;gap:8px;border-left:3px solid var(--amber)}
+  .home-hero .card .sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .home-hero .welcome h2{margin:0;font-family:var(--disp);font-size:22px;line-height:1.2}
+  .home-hero .needs .alerts{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+  .home-hero .needs .alerts a{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    padding:9px 12px;background:var(--panel2);border-left:2px solid var(--red);
+    text-decoration:none;color:var(--ink);font-size:13px}
+  .home-hero .needs .alerts a:hover{border-left-color:var(--amber)}
+  .home-hero .needs .alerts a .view{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}
+  .home-hero .needs .calm{font-family:var(--disp);font-size:18px;color:var(--green);margin-top:2px}
 
-{% if has_dept %}
-<p class="muted" style="font-size:12px;margin-top:18px">
-  Current department: <b style="color:var(--ink)">{{ current_dept.name }}</b>
-  {% if stock_last_count %} &nbsp;·&nbsp; last stock count {{ stock_last_count|date:"d M Y" }}{% endif %}
-  {% if stock_below %} &nbsp;·&nbsp; <span style="color:var(--red)">{{ stock_below }} below minimum</span>{% endif %}
-</p>
-{% else %}
-<p class="muted" style="font-size:12px;margin-top:18px">No department assigned yet — ask an administrator to add you.</p>
-{% endif %}
+  .home-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .home-grid .card{margin:0;padding:16px;display:flex;flex-direction:column;gap:6px;
+    text-decoration:none;color:inherit;border-left:3px solid var(--line);transition:border-color .12s}
+  .home-grid .card:hover{border-color:var(--amber);border-left-color:var(--amber)}
+  .home-grid .card .icon{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);color:var(--amber);font-family:var(--disp);font-size:14px;font-weight:600;
+    letter-spacing:.5px}
+  .home-grid .card h3{margin:6px 0 0;color:var(--ink);font-size:14px}
+  .home-grid .card .desc{margin:0;color:var(--muted);font-size:12px;flex:1}
+  .home-grid .card .footer{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:6px}
+  .home-grid .card .footer.warn{color:var(--red)}
+  .home-grid .card .open{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--amber);margin-top:4px}
+
+  @media (max-width:768px){
+    .home-hero{grid-template-columns:1fr}
+  }
+</style>
+
+<div class="home-hero">
+  <div class="card welcome">
+    <span class="sub">{{ today|date:"l, d M Y" }}</span>
+    <h2>{{ greeting }}{% if user.username %}, {{ user.username }}{% endif %}</h2>
+    <p class="muted" style="margin:0;font-size:13px">Here's what's happening today.</p>
+  </div>
+  <div class="card needs">
+    <span class="sub">Needs attention</span>
+    {% if alerts %}
+    <div class="alerts">
+      {% for a in alerts %}<a href="{{ a.href }}"><span>{{ a.title }}</span><span class="view">view →</span></a>{% endfor %}
+    </div>
+    {% else %}
+    <div class="calm">✓ All caught up</div>
+    <p class="muted" style="margin:0;font-size:12px">No critical alerts in {% if has_dept and current_dept %}{{ current_dept.name }}{% else %}your department{% endif %} right now.</p>
+    {% endif %}
+  </div>
+  {# weather card slot — intentionally empty; can be added as a 3rd column later #}
+</div>
+
+<div class="home-grid">
+  <a class="card" href="{% url 'stock_home' %}">
+    <span class="icon">ST</span>
+    <h3>Stock</h3>
+    <p class="desc">Counts, deliveries, reorder list, ingredient prices.</p>
+    <span class="footer{% if stock_below %} warn{% endif %}">{{ stock_below|default:0 }} below minimum</span>
+    <span class="open">Open →</span>
+  </a>
+  <a class="card" href="{% url 'recipes' %}">
+    <span class="icon">RC</span>
+    <h3>Recipes</h3>
+    <p class="desc">Recipe cards, ingredients, scaling and yields.</p>
+    <span class="footer">Coming soon</span>
+    <span class="open">Open →</span>
+  </a>
+  <a class="card" href="{% url 'production' %}">
+    <span class="icon">PR</span>
+    <h3>Production</h3>
+    <p class="desc">Daily production plans, batch schedules, outputs.</p>
+    <span class="footer">Coming soon</span>
+    <span class="open">Open →</span>
+  </a>
+  <a class="card" href="{% url 'rota' %}">
+    <span class="icon">RO</span>
+    <h3>Rota</h3>
+    <p class="desc">Staff schedules, shifts, time-off requests.</p>
+    <span class="footer">Coming soon</span>
+    <span class="open">Open →</span>
+  </a>
+  <a class="card" href="{% url 'notes' %}">
+    <span class="icon">NT</span>
+    <h3>Notes</h3>
+    <p class="desc">Shared team notes — handover, reminders, ideas.</p>
+    <span class="footer">Coming soon</span>
+    <span class="open">Open →</span>
+  </a>
+  <a class="card" href="{% url 'profile' %}">
+    <span class="icon">PF</span>
+    <h3>Profile</h3>
+    <p class="desc">Your account, departments and session.</p>
+    <span class="footer">{{ user.username }}</span>
+    <span class="open">Open →</span>
+  </a>
+</div>
 {% endblock %}
