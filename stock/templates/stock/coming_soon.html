@@ -1,4 +1,8 @@
-{% extends "stock/_section_placeholder.html" %}
+{% extends "stock/_section_topnav.html" %}
+{% block n_recipes %}{% if section == "recipes" %}on{% endif %}{% endblock %}
+{% block n_production %}{% if section == "production" %}on{% endif %}{% endblock %}
+{% block n_rota %}{% if section == "rota" %}on{% endif %}{% endblock %}
+{% block n_notes %}{% if section == "notes" %}on{% endif %}{% endblock %}
 {% block body %}
 <h2>{{ title }} <span class="muted" style="font-size:14px">coming soon</span></h2>
 <div class="card" style="border-left:3px solid var(--amber)">

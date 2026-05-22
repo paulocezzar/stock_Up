@@ -1,4 +1,5 @@
 import datetime
+import re
 from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
@@ -1018,25 +1019,25 @@ class SectionNavigationTests(TestCase):
         assert self.client.login(username="alice", password="pw")
         self.client.get(f"/switch/{self.dept.pk}/")
 
-    def test_home_page_renders_with_section_cards(self):
+    def test_home_page_renders_minimal_body_with_top_navbar(self):
+        # Home body is minimal — a welcome heading, no card grid.
         r = self.client.get("/home/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        for label in ("Stock", "Recipes", "Production", "Rota", "Notes", "Profile"):
-            self.assertIn(f">{label}</h3>", body)
-        for url in ("/stock/", "/recipes/", "/production/", "/rota/",
-                    "/notes/", "/profile/"):
-            self.assertIn(f'href="{url}"', body)
+        self.assertIn("Welcome", body)
+        # No <h3> cards on Home
+        page = body[body.index("<main>"):body.index("</main>")]
+        self.assertNotIn("<h3>", page)
 
-    def test_home_stock_card_shows_below_minimum_and_last_count(self):
-        # 2 below-minimum products + a stocktake gives the home stat numbers.
+    def test_home_status_line_shows_below_minimum_and_last_count(self):
+        # Home keeps a small status line for the current department, but it's
+        # rendered as inline text, not a card.
         flour = Product.objects.create(
             name="Flour", department=self.dept, unit="g",
             minimum=Decimal("10"))
         sugar = Product.objects.create(
             name="Sugar", department=self.dept, unit="g",
             minimum=Decimal("5"))
-        # And one that's NOT below minimum
         salt = Product.objects.create(
             name="Salt", department=self.dept, unit="g",
             minimum=Decimal("1"))
@@ -1048,17 +1049,20 @@ class SectionNavigationTests(TestCase):
 
         r = self.client.get("/home/")
         body = r.content.decode()
-        self.assertIn(">2<", body)            # below-minimum count
-        self.assertIn("below minimum", body)
-        self.assertIn("20 May 2026", body)    # last count date
+        self.assertIn("2 below minimum", body)
+        self.assertIn("20 May 2026", body)
+        self.assertIn("Bakery", body)
 
-    def test_stock_section_landing_links_to_existing_pages(self):
+    def test_stock_section_landing_renders_with_stock_submenu(self):
+        # /stock/ is a Stock section page — its navbar carries the Stock
+        # sub-menu (Dashboard / Stocktakes / Deliveries / ...). Body is minimal.
         r = self.client.get("/stock/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
         for url in ("/", "/stocktakes/", "/deliveries/", "/adjustments/",
                     "/reorder/", "/products/", "/suppliers/"):
-            self.assertIn(f'href="{url}"', body)
+            self.assertIn(f'href="{url}"', nav)
 
     def test_placeholder_sections_render_with_coming_soon(self):
         for path, title in (("/recipes/", "Recipes"), ("/production/", "Production"),
@@ -1088,14 +1092,18 @@ class SectionNavigationTests(TestCase):
         r = c.get("/profile/")
         self.assertIn("/admin/", r.content.decode())
 
-    def test_home_page_section_nav_is_minimal(self):
-        # On Home the page itself is the section picker, so the contextual
-        # nav is empty (no sub-menu to show).
-        r = self.client.get("/home/")
-        body = r.content.decode()
+    def _topnav_labels(self, body):
         nav = body[body.index("<nav>"):body.index("</nav>")]
-        # No <a> links inside the <nav> on Home
-        self.assertEqual(nav.count("<a "), 0)
+        return nav, [m.group(1) for m in re.finditer(r">([A-Za-z]+)<", nav)]
+
+    def test_home_navbar_has_seven_top_sections(self):
+        r = self.client.get("/home/")
+        nav, labels = self._topnav_labels(r.content.decode())
+        for label in ("Home", "Stock", "Recipes", "Production",
+                      "Rota", "Notes", "Profile"):
+            self.assertIn(label, labels)
+        # Home itself is highlighted
+        self.assertRegex(nav, r'href="/home/"\s+class="on"')
 
     def test_stock_section_nav_shows_sub_items(self):
         # Any Stock page (e.g. the dashboard) renders the Stock contextual
@@ -1128,25 +1136,40 @@ class SectionNavigationTests(TestCase):
                 f"{path} should highlight its own sub-nav link",
             )
 
-    def test_placeholder_section_nav_shows_home_and_section_only(self):
-        for path, label in (("/recipes/", ">Recipes<"),
-                            ("/production/", ">Production<"),
-                            ("/rota/", ">Rota<"),
-                            ("/notes/", ">Notes<")):
+    def test_placeholder_navbars_show_seven_top_sections_with_current_indicated(self):
+        for path, current_url, label in (
+            ("/recipes/", "/recipes/", "Recipes"),
+            ("/production/", "/production/", "Production"),
+            ("/rota/", "/rota/", "Rota"),
+            ("/notes/", "/notes/", "Notes"),
+        ):
             r = self.client.get(path)
-            body = r.content.decode()
-            nav = body[body.index("<nav>"):body.index("</nav>")]
-            self.assertEqual(nav.count("<a "), 2, f"{path} nav should have 2 links")
-            self.assertIn(">Home<", nav)
-            self.assertIn(label, nav)
+            nav, labels = self._topnav_labels(r.content.decode())
+            for top in ("Home", "Stock", "Recipes", "Production",
+                        "Rota", "Notes", "Profile"):
+                self.assertIn(top, labels)
+            self.assertRegex(nav, r'href="' + current_url + r'"\s+class="on"',
+                             f"{path} should mark its own top-nav link active")
 
-    def test_profile_section_nav_has_home_and_profile(self):
+    def test_profile_navbar_shows_seven_top_sections_with_profile_active(self):
         r = self.client.get("/profile/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertEqual(nav.count("<a "), 2)
-        self.assertIn(">Home<", nav)
-        self.assertIn(">Profile<", nav)
+        nav, labels = self._topnav_labels(r.content.decode())
+        for top in ("Home", "Stock", "Recipes", "Production",
+                    "Rota", "Notes", "Profile"):
+            self.assertIn(top, labels)
+        self.assertRegex(nav, r'href="/profile/"\s+class="on"')
+
+    def test_admin_link_in_top_navbar_only_for_superusers(self):
+        # Home (top navbar) is gated; alice (non-superuser) shouldn't see it.
+        nav, _ = self._topnav_labels(self.client.get("/home/").content.decode())
+        self.assertNotIn("/admin/", nav)
+
+        U = get_user_model()
+        boss = U.objects.create_superuser("boss", password="pw")
+        c = Client()
+        c.login(username="boss", password="pw")
+        nav, _ = self._topnav_labels(c.get("/home/").content.decode())
+        self.assertIn("/admin/", nav)
 
     def test_admin_link_in_stock_nav_only_for_superusers(self):
         r = self.client.get("/")
