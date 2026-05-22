@@ -68,12 +68,13 @@
     padding:3px 8px;border:1px solid;display:inline-block;margin-left:8px;vertical-align:middle}
   .role-tag.final{color:var(--amber);border-color:var(--amber)}
   .role-tag.component{color:var(--muted);border-color:var(--muted)}
-  .role-tag.manual{border-style:dashed}
 </style>
 
+{# Role derives from actual RecipeLine.sub_recipe references (via the #}
+{# `parents` list the view passes in) so a stale stored Recipe.role can't #}
+{# mislabel a recipe — used by anything else = component. #}
 <h2>{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span>
-  <span class="role-tag {% if recipe.role == 'final_product' %}final{% else %}component{% endif %}{% if recipe.role_is_manual %} manual{% endif %}"
-        title="{% if recipe.role_is_manual %}Manually set{% else %}Auto from references{% endif %}">{{ recipe.get_role_display }}{% if recipe.role_is_manual %} ·M{% endif %}</span>
+  {% if parents %}<span class="role-tag component" title="Used by {{ parents|length }} recipe{{ parents|length|pluralize }}">Component</span>{% else %}<span class="role-tag final" title="Not used by any other recipe">Final product</span>{% endif %}
 </h2>
 {% if parents %}
 <p class="muted" style="margin:-10px 0 14px;font-size:12px">Used in: {% for p in parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>

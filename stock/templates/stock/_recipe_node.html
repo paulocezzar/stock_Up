@@ -1,9 +1,11 @@
-{# Recursive renderer for one recipe in the nested tree.
-   Expects `node = {recipe, depth, lines, cycle}`. Layout for each block:
-       header → ingredients (sub-recipes are collapsed rows you expand
-       inline) → "show method" toggle (collapsed). Sub-recipes never
-       auto-expand, so deep formulas stay readable. #}
-<div class="recipe-block depth-{{ node.depth }}">
+{% comment %}
+Recursive renderer for one recipe in the nested tree.
+
+Expects ``node = {recipe, depth, lines, cycle}``. Layout for each block:
+header -> ingredients (sub-recipes are collapsed rows you expand inline)
+-> "show method" toggle (collapsed). Sub-recipes never auto-expand, so
+deep formulas stay readable.
+{% endcomment %}<div class="recipe-block depth-{{ node.depth }}">
   <div class="rec-head">
     <span class="rec-code">{{ node.recipe.code }}</span>
     <span class="rec-name">{{ node.recipe.name }}</span>

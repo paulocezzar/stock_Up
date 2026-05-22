@@ -2646,6 +2646,51 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertIn("Used in:", body)
         self.assertIn("NPD-R100", body)
 
+    def test_no_template_comment_text_on_detail_page(self):
+        # _recipe_node.html previously used a multi-line {# ... #} block,
+        # which Django renders verbatim — "Recursive renderer..." was
+        # leaking into the nested-breakdown section. After the fix to
+        # {% comment %}{% endcomment %} the text must not appear.
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        self.assertNotIn("Recursive renderer", body)
+        self.assertNotIn("{# ", body)
+        self.assertNotIn(" #}", body)
+        self.assertNotIn("{% comment %}", body)
+        self.assertNotIn("{% endcomment %}", body)
+
+    def test_detail_role_tag_derives_from_references_not_stored_role(self):
+        # The exact bug: a sub-recipe whose stored Recipe.role says
+        # final_product (e.g. role_is_manual=True after a manual override,
+        # or because recompute hasn't run) must still show "Component"
+        # on its detail page because it IS used by another recipe.
+        self.sub.role = Recipe.ROLE_FINAL
+        self.sub.role_is_manual = True
+        self.sub.save(update_fields=["role", "role_is_manual"])
+        # Sanity: the stored field is final_product, but parents() lists
+        # the main recipe — i.e. it's actually a component.
+        self.assertEqual(self.sub.role, Recipe.ROLE_FINAL)
+        self.assertTrue(list(self.sub.parents()))
+        # The displayed tag derives from references, so "Component" wins.
+        r = self.client.get(f"/recipes/{self.sub.pk}/")
+        body = r.content.decode()
+        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        self.assertIn("Component", header)
+        self.assertNotIn("Final product", header)
+
+    def test_detail_final_tag_when_not_referenced_even_if_stored_says_component(self):
+        # The mirror case: stored role is "component" but nothing actually
+        # references this recipe — the tag must say "Final product".
+        # (No existing references to self.main; just push a stale stored role.)
+        self.main.role = Recipe.ROLE_COMPONENT
+        self.main.role_is_manual = True
+        self.main.save(update_fields=["role", "role_is_manual"])
+        r = self.client.get(f"/recipes/{self.main.pk}/")
+        body = r.content.decode()
+        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        self.assertIn("Final product", header)
+        self.assertNotIn("Component", header)
+
     def test_flat_view_does_not_list_sub_recipes(self):
         # The flat view is leaves-only — NPD-R sub-recipes themselves
         # should NOT appear as rows (only the raw NPD-I they explode to).
@@ -2853,6 +2898,33 @@ class RecipesListRoleColumnTests(TestCase):
         self.assertIn('data-filter="recipes-tbl"', body)
         self.assertIn('data-search="npd-r300', body)
         self.assertIn('data-search="npd-r301', body)
+
+    def test_flat_role_tag_derives_from_references_not_stored_role(self):
+        # Same bug as the detail page, on the All-recipes flat table:
+        # a recipe referenced by another must render as "Component" even
+        # if its stored Recipe.role is final_product (stale or manually
+        # overridden). And vice versa for a final product whose stored
+        # role is component.
+        self.sub.role = Recipe.ROLE_FINAL
+        self.sub.role_is_manual = True
+        self.sub.save(update_fields=["role", "role_is_manual"])
+        self.parent.role = Recipe.ROLE_COMPONENT
+        self.parent.role_is_manual = True
+        self.parent.save(update_fields=["role", "role_is_manual"])
+
+        r = self.client.get("/recipes/?view=flat")
+        body = r.content.decode()
+        # The displayed tag is wrapped in <span class="role-tag {final|component}">;
+        # the override dropdown carries both labels as <option>s, so anchor
+        # on the role-tag span class to avoid false matches.
+        sub_row_start = body.find('data-search="npd-r301')
+        sub_row = body[sub_row_start:body.find("</tr>", sub_row_start)]
+        self.assertIn('class="role-tag component"', sub_row)
+        self.assertNotIn('class="role-tag final"', sub_row)
+        parent_row_start = body.find('data-search="npd-r300')
+        parent_row = body[parent_row_start:body.find("</tr>", parent_row_start)]
+        self.assertIn('class="role-tag final"', parent_row)
+        self.assertNotIn('class="role-tag component"', parent_row)
 
 
 class RecipesByProductTreeTests(TestCase):
