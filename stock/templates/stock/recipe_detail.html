@@ -1,0 +1,47 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<style>
+  .recipe-node{margin:0 0 4px;padding:0}
+  .recipe-node summary{cursor:pointer;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);
+    list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .recipe-node summary::-webkit-details-marker{display:none}
+  .recipe-node summary::before{content:"▸";color:var(--muted);font-size:11px;margin-right:4px}
+  .recipe-node[open] > summary::before{content:"▾"}
+  .recipe-node .rec-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px}
+  .recipe-node .rec-name{flex:1;min-width:0}
+  .recipe-node .rec-weight{font-size:12px}
+  .recipe-node .rec-open{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
+  .rec-lines{margin:8px 0 14px;width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--line)}
+  .rec-lines th,.rec-lines td{padding:6px 10px;border-bottom:1px solid var(--line)}
+  .rec-lines .sub-row > td{padding:0 0 0 22px;background:transparent;border-bottom:0}
+  .recipe-node.depth-1 > summary{border-left-color:var(--amber);background:var(--panel2)}
+  .recipe-node.depth-2 > summary, .recipe-node.depth-3 > summary,
+  .recipe-node.depth-4 > summary, .recipe-node.depth-5 > summary{background:var(--panel2)}
+  .rec-method{padding:10px 12px;border:1px solid var(--line);border-top:0;background:var(--panel2)}
+  .rec-method h4{margin:0 0 6px;font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500}
+  .rec-method pre{margin:0;font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:var(--ink)}
+</style>
+
+<h2>{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span></h2>
+
+<div class="stats">
+  {% if recipe.deposit_weight_g is not None %}<div class="stat"><div class="k">Deposit weight</div><div class="v">{{ recipe.deposit_weight_g|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">g</span></div></div>{% endif %}
+  {% if recipe.finished_weight_g is not None %}<div class="stat"><div class="k">Finished weight</div><div class="v">{{ recipe.finished_weight_g|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">g</span></div></div>{% endif %}
+  {% if recipe.cook_loss_pct is not None %}<div class="stat"><div class="k">Cook loss</div><div class="v">{{ recipe.cook_loss_pct|floatformat:2 }}%</div></div>{% endif %}
+  <div class="stat"><div class="k">Lines</div><div class="v">{{ recipe.lines.count }}</div></div>
+</div>
+
+<div class="card"><h3>Nested breakdown</h3>
+{% include "stock/_recipe_node.html" with node=tree %}
+</div>
+
+<p>
+  <a href="{% url 'recipes' %}">← all recipes</a>
+  &nbsp;·&nbsp;
+  <form method="post" action="{% url 'recipe_delete' recipe.pk %}" style="display:inline"
+        onsubmit="return confirm('Delete recipe {{ recipe.code }}? Its lines will be removed but ingredient products are kept.')">{% csrf_token %}
+    <button class="btn ghost" style="padding:4px 12px">delete recipe</button>
+  </form>
+</p>
+{% endblock %}

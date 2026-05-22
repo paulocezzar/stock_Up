@@ -6,8 +6,12 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError
 from .ai_extract import extract_lines, auto_match, ExtractError
+from .recipe_import import (
+    parse_recipe_workbook, save_recipes, summarize_parse,
+    serialize_parsed, deserialize_parsed, RecipeParseError,
+)
 
 
 def _carry_over_value(dept, product_id, exclude_stocktake_id=None):
@@ -290,7 +294,6 @@ def stock_home(request):
 
 
 _COMING_SOON = {
-    "recipes": ("Recipes", "Recipe cards, ingredients, scaling and yields will live here."),
     "production": ("Production", "Daily production plans, batch schedules and outputs."),
     "rota": ("Rota", "Staff schedules, shift assignments and time-off requests."),
     "notes": ("Notes", "Shared notes for the team — handover, reminders, ideas."),
@@ -303,9 +306,132 @@ def _placeholder(request, key):
                   {"title": title, "blurb": blurb, "section": key})
 
 
+# ---- recipes (per department) ----
+def _recipe_tree(recipe, depth=0, seen=None):
+    """Build a nested {recipe, depth, lines:[{line, subtree?, cycle?}]} dict.
+
+    `seen` tracks recipe IDs on the current path so a cycle in the data
+    (which the import refuses, but might exist via admin edits) is
+    represented as a leaf with cycle=True instead of recursing infinitely.
+    """
+    if seen is None:
+        seen = set()
+    node = {"recipe": recipe, "depth": depth, "lines": [], "cycle": False}
+    seen = seen | {recipe.pk}
+    for line in (recipe.lines.select_related("ingredient", "sub_recipe")
+                 .order_by("ordering", "id")):
+        entry = {"line": line, "subtree": None, "cycle": False}
+        if line.sub_recipe_id:
+            if line.sub_recipe_id in seen:
+                entry["cycle"] = True
+            else:
+                entry["subtree"] = _recipe_tree(line.sub_recipe, depth + 1, seen)
+        node["lines"].append(entry)
+    return node
+
+
 @login_required
 def recipes_home(request):
-    return _placeholder(request, "recipes")
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    recipes = (Recipe.objects.filter(department=dept)
+               .annotate(n_lines=Count("lines"))
+               .order_by("code"))
+    return render(request, "stock/recipes.html", {
+        "recipes": recipes,
+        "n_recipes": recipes.count(),
+    })
+
+
+@login_required
+def recipe_upload(request):
+    """Step 1 of import: pick a workbook; parse and stash for preview."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    if request.method == "POST":
+        upload = request.FILES.get("file")
+        if not upload:
+            messages.error(request, "Pick a recipe .xlsx file to upload.")
+            return redirect("recipe_upload")
+        if upload.size > 20 * 1024 * 1024:
+            messages.error(request, "That file is over 20 MB.")
+            return redirect("recipe_upload")
+        try:
+            parsed = parse_recipe_workbook(upload)
+        except RecipeParseError as e:
+            messages.error(request, str(e))
+            return redirect("recipe_upload")
+        except Exception as e:
+            messages.error(request, f"Could not parse the workbook: {e}")
+            return redirect("recipe_upload")
+        request.session["pending_recipe_import"] = serialize_parsed(parsed)
+        return redirect("recipe_upload_preview")
+    return render(request, "stock/recipe_upload.html", {})
+
+
+@login_required
+def recipe_upload_preview(request):
+    """Step 2: show the parsed tree + summary; POST to commit."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    raw = request.session.get("pending_recipe_import")
+    if not raw:
+        messages.info(request, "Upload a recipe workbook first.")
+        return redirect("recipe_upload")
+    parsed = deserialize_parsed(raw)
+
+    if request.method == "POST":
+        try:
+            stats = save_recipes(parsed, dept)
+        except RecipeCycleError as e:
+            messages.error(request, f"Refused to save: {e}")
+            return redirect("recipe_upload_preview")
+        request.session.pop("pending_recipe_import", None)
+        main = parsed[0]
+        msg = (f"Imported {main['code']} ({main['name']}): "
+               f"{len(stats['created'])} created, {len(stats['updated'])} updated.")
+        if stats["stub_products"]:
+            msg += f" {len(stats['stub_products'])} unknown ingredient(s) stubbed."
+        messages.success(request, msg)
+        # Land on the main recipe's detail page so the user can see the result.
+        main_recipe = Recipe.objects.get(code=main["code"])
+        return redirect("recipe_detail", pk=main_recipe.pk)
+
+    summary = summarize_parse(parsed)
+    return render(request, "stock/recipe_upload_preview.html", {
+        "parsed": parsed,
+        "summary": summary,
+    })
+
+
+@login_required
+def recipe_detail(request, pk):
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    tree = _recipe_tree(recipe)
+    return render(request, "stock/recipe_detail.html", {
+        "recipe": recipe,
+        "tree": tree,
+    })
+
+
+@require_POST
+@login_required
+def recipe_delete(request, pk):
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    code = recipe.code
+    recipe.delete()
+    messages.success(request, f"Deleted recipe {code}.")
+    return redirect("recipes")
 
 
 @login_required

@@ -1,0 +1,57 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_upload %}on{% endblock %}
+{% block body %}
+{% with main=summary.main %}
+<h2>Preview: {{ main.code }} <span class="muted" style="font-size:14px">{{ main.name }}</span></h2>
+
+<div class="stats">
+  <div class="stat"><div class="k">Recipes parsed</div><div class="v">{{ parsed|length }}</div></div>
+  <div class="stat"><div class="k">Sub-recipes</div><div class="v">{{ summary.subs|length }}</div></div>
+  {% if summary.unknown_ingredients %}<div class="stat warn"><div class="k">Unknown ingredients</div><div class="v">{{ summary.unknown_ingredients|length }}</div></div>{% endif %}
+  {% if summary.stub_subrecipes %}<div class="stat warn"><div class="k">Sub-recipe stubs</div><div class="v">{{ summary.stub_subrecipes|length }}</div></div>{% endif %}
+</div>
+
+<div class="card"><h3>Recipe tree</h3>
+<table>
+  <thead><tr><th>Code</th><th>Name</th><th class="num">Deposit (g)</th><th class="num">Finished (g)</th><th class="num">Cook loss</th><th class="num">Lines</th></tr></thead>
+  <tbody>
+  {% for r in parsed %}<tr>
+    <td>{{ r.code }}{% if forloop.first %} <span class="tag ok">main</span>{% endif %}</td>
+    <td>{{ r.name }}</td>
+    <td class="num">{% if r.deposit_weight_g is not None %}{{ r.deposit_weight_g|floatformat:1 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.finished_weight_g is not None %}{{ r.finished_weight_g|floatformat:1 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{{ r.lines|length }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if summary.unknown_ingredients %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>Unknown ingredient codes</h3>
+  <p class="muted" style="margin:0 0 10px">These NPD-I codes aren't in your ingredient master. They'll be created as stub Products so the recipe lines still save — you'll want to add a supplier price for each one.</p>
+  <ul style="margin:0;padding-left:20px">
+  {% for code in summary.unknown_ingredients %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if summary.stub_subrecipes %}
+<div class="card" style="border-left:3px solid var(--amber)">
+  <h3>Stub sub-recipes</h3>
+  <p class="muted" style="margin:0 0 10px">These NPD-R codes are referenced but don't have their own section in this workbook. They'll be created as empty shell recipes so the parent's lines still save.</p>
+  <ul style="margin:0;padding-left:20px">
+  {% for code in summary.stub_subrecipes %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post">{% csrf_token %}
+<p>
+  <button class="btn" type="submit">Confirm and save</button>
+  &nbsp;<a href="{% url 'recipe_upload' %}" class="muted">cancel and re-upload</a>
+</p>
+</form>
+{% endwith %}
+{% endblock %}

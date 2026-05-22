@@ -385,3 +385,98 @@ class Adjustment(models.Model):
     @property
     def signed_qty(self):
         return self.quantity if self.reason == "found" else -self.quantity
+
+
+class RecipeCycleError(Exception):
+    """A recipe would (transitively) contain itself."""
+
+
+class Recipe(models.Model):
+    """A recipe / sub-recipe / bill-of-materials.
+
+    Codes match the Excel export (e.g. NPD-R800). A recipe's lines may point
+    at raw ingredients (Product) or at other Recipes (sub-recipes), which is
+    how multi-stage bakery formulas (starter -> ferment -> dough -> finished
+    loaf) are modelled.
+    """
+    department = models.ForeignKey("Department", related_name="recipes",
+                                   on_delete=models.CASCADE, null=True, blank=True)
+    code = models.CharField(max_length=20, unique=True)
+    name = models.CharField(max_length=200)
+    finished_weight_g = models.DecimalField(max_digits=12, decimal_places=3,
+                                            null=True, blank=True)
+    deposit_weight_g = models.DecimalField(max_digits=12, decimal_places=3,
+                                           null=True, blank=True)
+    cook_loss_pct = models.DecimalField(max_digits=6, decimal_places=2,
+                                        null=True, blank=True)
+    method_text = models.TextField(blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    def contains_cycle(self, candidate_child_id):
+        """Would adding `candidate_child_id` as a sub-recipe create a cycle?
+
+        Walks the candidate's transitive sub-recipes; returns True iff this
+        recipe is reachable from there (or *is* the candidate). Use before
+        saving a new RecipeLine to refuse self-references and deeper loops.
+        """
+        if candidate_child_id is None:
+            return False
+        if candidate_child_id == self.pk:
+            return True
+        seen = set()
+        stack = [candidate_child_id]
+        while stack:
+            rid = stack.pop()
+            if rid in seen:
+                continue
+            seen.add(rid)
+            if rid == self.pk:
+                return True
+            for child_id in (RecipeLine.objects
+                             .filter(recipe_id=rid, sub_recipe__isnull=False)
+                             .values_list("sub_recipe_id", flat=True)):
+                stack.append(child_id)
+        return False
+
+
+class RecipeLine(models.Model):
+    """One ingredient row of a recipe.
+
+    Exactly one of `ingredient` (a raw Product) or `sub_recipe` (another
+    Recipe) is set, enforced by a DB check constraint. `weight_g` is the
+    quantity of that component used in the parent recipe.
+    """
+    recipe = models.ForeignKey(Recipe, related_name="lines", on_delete=models.CASCADE)
+    ingredient = models.ForeignKey(Product, related_name="recipe_lines",
+                                   on_delete=models.PROTECT, null=True, blank=True)
+    sub_recipe = models.ForeignKey(Recipe, related_name="used_in_lines",
+                                   on_delete=models.PROTECT, null=True, blank=True)
+    weight_g = models.DecimalField(max_digits=12, decimal_places=3)
+    ordering = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["ordering", "id"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (Q(ingredient__isnull=False) & Q(sub_recipe__isnull=True)) |
+                    (Q(ingredient__isnull=True) & Q(sub_recipe__isnull=False))
+                ),
+                name="recipeline_xor_ingredient_subrecipe",
+            ),
+        ]
+
+    def __str__(self):
+        target = self.ingredient or self.sub_recipe
+        return f"{self.recipe.code}: {target} ({self.weight_g}g)"
+
+    @property
+    def component(self):
+        return self.ingredient or self.sub_recipe

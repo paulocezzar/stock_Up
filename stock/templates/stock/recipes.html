@@ -1,0 +1,35 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2>Recipes <span class="muted" style="font-size:14px">{{ n_recipes }} in this department</span></h2>
+
+<div class="card" style="border-left:3px solid var(--amber)">
+  <h3>Import a recipe</h3>
+  <p style="margin:0 0 10px">Upload a Recipe Breakdown <code>.xlsx</code> export. The main recipe and every sub-recipe section get imported, nested in the order the workbook references them.</p>
+  <p style="margin:0"><a href="{% url 'recipe_upload' %}" class="btn">Upload recipe →</a></p>
+</div>
+
+{% if recipes %}
+<div class="filter">
+  <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="recipes-tbl">
+  <thead><tr><th>Code</th><th>Name</th><th class="num">Lines</th><th class="num">Finished (g)</th><th class="num">Cook loss</th><th></th></tr></thead>
+  <tbody>
+  {% for r in recipes %}
+    <tr data-search="{{ r.code|lower }} {{ r.name|lower }}">
+      <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
+      <td>{{ r.name }}</td>
+      <td class="num">{{ r.n_lines }}</td>
+      <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><a href="{% url 'recipe_detail' r.pk %}">open →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
+{% endif %}
+{% endblock %}

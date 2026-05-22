@@ -4,8 +4,9 @@ from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -1180,7 +1181,9 @@ class SectionNavigationTests(TestCase):
             self.assertIn(f'href="{url}"', nav)
 
     def test_placeholder_sections_render_with_coming_soon(self):
-        for path, title in (("/recipes/", "Recipes"), ("/production/", "Production"),
+        # Recipes is no longer a placeholder — it has its own list/import flow,
+        # tested separately. The other three are still "coming soon".
+        for path, title in (("/production/", "Production"),
                             ("/rota/", "Rota"), ("/notes/", "Notes")):
             r = self.client.get(path)
             self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
@@ -1254,8 +1257,9 @@ class SectionNavigationTests(TestCase):
             )
 
     def test_placeholder_navbars_have_home_plus_section(self):
-        for path, label in (("/recipes/", "Recipes"),
-                            ("/production/", "Production"),
+        # Recipes now has Home + Recipes + Import sub-nav (tested elsewhere);
+        # the other three placeholders remain Home + section.
+        for path, label in (("/production/", "Production"),
                             ("/rota/", "Rota"),
                             ("/notes/", "Notes")):
             r = self.client.get(path)
@@ -1990,3 +1994,353 @@ class ResetStockDataTests(TestCase):
         self.assertTrue(self.dept.members.filter(username="alice").exists())
         # Summary lists what was cleared
         self.assertIn("Products: 1 deleted", out.getvalue())
+
+
+# ----------------------------------------------------------------------
+# Stage C1 — recipes
+# ----------------------------------------------------------------------
+
+SAMPLE_RECIPE_XLSX = "data/recipe_sample.xlsx"
+
+
+class RecipeModelTests(TestCase):
+    """The bare model contracts: XOR constraint + cycle detection helper."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.product = Product.objects.create(
+            name="Flour", code="NPD-I001", department=self.dept,
+            unit="g", minimum=0)
+
+    def test_recipeline_requires_exactly_one_target_neither(self):
+        # Neither ingredient nor sub_recipe set → DB-level check refuses.
+        from django.db.utils import IntegrityError
+        r = Recipe.objects.create(code="NPD-R001", name="Bread", department=self.dept)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RecipeLine.objects.create(recipe=r, weight_g=Decimal("100"))
+
+    def test_recipeline_requires_exactly_one_target_both(self):
+        # Both set → DB-level check refuses.
+        from django.db.utils import IntegrityError
+        r = Recipe.objects.create(code="NPD-R002", name="Bread", department=self.dept)
+        sub = Recipe.objects.create(code="NPD-R003", name="Starter", department=self.dept)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RecipeLine.objects.create(
+                    recipe=r, ingredient=self.product, sub_recipe=sub,
+                    weight_g=Decimal("100"))
+
+    def test_recipeline_with_ingredient_only_saves(self):
+        r = Recipe.objects.create(code="NPD-R010", name="X", department=self.dept)
+        line = RecipeLine.objects.create(
+            recipe=r, ingredient=self.product, weight_g=Decimal("50"))
+        self.assertEqual(line.ingredient, self.product)
+        self.assertIsNone(line.sub_recipe)
+
+    def test_recipeline_with_sub_recipe_only_saves(self):
+        r = Recipe.objects.create(code="NPD-R020", name="X", department=self.dept)
+        sub = Recipe.objects.create(code="NPD-R021", name="Sub", department=self.dept)
+        line = RecipeLine.objects.create(
+            recipe=r, sub_recipe=sub, weight_g=Decimal("50"))
+        self.assertEqual(line.sub_recipe, sub)
+        self.assertIsNone(line.ingredient)
+
+    def test_cycle_detection_rejects_self_reference(self):
+        # A recipe must not directly contain itself.
+        r = Recipe.objects.create(code="NPD-R100", name="Self", department=self.dept)
+        self.assertTrue(r.contains_cycle(r.pk))
+
+    def test_cycle_detection_rejects_transitive(self):
+        # R1 -> R2 -> R3; adding R1 as a sub of R3 would loop.
+        r1 = Recipe.objects.create(code="NPD-R201", name="A", department=self.dept)
+        r2 = Recipe.objects.create(code="NPD-R202", name="B", department=self.dept)
+        r3 = Recipe.objects.create(code="NPD-R203", name="C", department=self.dept)
+        RecipeLine.objects.create(recipe=r1, sub_recipe=r2, weight_g=Decimal("10"))
+        RecipeLine.objects.create(recipe=r2, sub_recipe=r3, weight_g=Decimal("10"))
+        # Adding r1 as a sub-recipe of r3 must be detected
+        self.assertTrue(r3.contains_cycle(r1.pk))
+        # But adding an unrelated recipe is fine
+        r4 = Recipe.objects.create(code="NPD-R204", name="D", department=self.dept)
+        self.assertFalse(r3.contains_cycle(r4.pk))
+
+
+class RecipeImportSampleTests(TestCase):
+    """Importing the committed sample workbook produces the expected tree."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        # Pre-create the NPD-I products that the sample references so the
+        # ingredient-link assertions can use them.
+        for code, name in (
+            ("NPD-I10758", "WILDFARMED BREAD FLOUR (T65)"),
+            ("NPD-I10756", "Water"),
+            ("NPD-I11057", "FLOUR RYE DARK 100%"),
+            ("NPD-I10893", "Dorset Sea Salt"),
+            ("NPD-I10951", "WILDFARMED WHOLEMEAL FLOUR (T150)"),
+            ("NPD-I10759", "WILDFARMED RUSTIC FLOUR (T80)"),
+        ):
+            Product.objects.create(
+                code=code, name=name, department=cls.dept,
+                unit="g", minimum=0)
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX, "--department", "Bakery")
+
+    def test_main_recipe_imported_with_code_name_and_weights(self):
+        r = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(r.name, "Apple Waste Sourdough (Loose)")
+        self.assertEqual(r.finished_weight_g, Decimal("600.000"))
+        # Main has no separate Deposit row, falls back to Total
+        self.assertEqual(r.deposit_weight_g, Decimal("600.000"))
+        self.assertEqual(r.cook_loss_pct, Decimal("0.00"))
+
+    def test_all_seven_sub_recipes_exist(self):
+        codes = set(Recipe.objects.values_list("code", flat=True))
+        for code in ("NPD-R800", "NPD-R364", "NPD-R2031",
+                     "NPD-R2082", "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            self.assertIn(code, codes)
+        self.assertEqual(Recipe.objects.count(), 7)
+
+    def test_npd_r_lines_link_to_subrecipes(self):
+        # NPD-R800 references NPD-R364 as a sub-recipe (600g).
+        main = Recipe.objects.get(code="NPD-R800")
+        line = main.lines.get()  # exactly one line
+        self.assertIsNone(line.ingredient)
+        self.assertEqual(line.sub_recipe.code, "NPD-R364")
+        self.assertEqual(line.weight_g, Decimal("600.000"))
+
+    def test_npd_i_lines_link_to_existing_ingredients_by_code(self):
+        # NPD-R307 contains three NPD-I lines, all pre-created in setUpTestData.
+        r307 = Recipe.objects.get(code="NPD-R307")
+        codes_in_lines = {ln.ingredient.code for ln in r307.lines.all()
+                          if ln.ingredient_id}
+        self.assertEqual(codes_in_lines,
+                         {"NPD-I10756", "NPD-I10759", "NPD-I10951"})
+        # All three are the same Product rows we pre-created (no duplicates)
+        for ln in r307.lines.all():
+            self.assertTrue(ln.ingredient.pk)
+            self.assertIsNone(ln.sub_recipe)
+
+    def test_nested_subrecipe_weight_for_deep_chain(self):
+        # NPD-R2031 has 6 lines; the sub_recipe one is NPD-R2082 at 63.2083g
+        r2031 = Recipe.objects.get(code="NPD-R2031")
+        self.assertEqual(r2031.lines.count(), 6)
+        sub_line = r2031.lines.filter(sub_recipe__isnull=False).get()
+        self.assertEqual(sub_line.sub_recipe.code, "NPD-R2082")
+        self.assertEqual(sub_line.weight_g, Decimal("63.208"))
+
+    def test_method_text_captured_for_recipes_that_have_it(self):
+        r364 = Recipe.objects.get(code="NPD-R364")
+        # The single Stage 1 instruction is captured
+        self.assertIn("Take 660g of dough", r364.method_text)
+        self.assertIn("Stage 1:", r364.method_text)
+        # The main recipe has no Method section
+        main = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(main.method_text, "")
+
+    def test_total_recipeline_count_is_21(self):
+        # Sample: 1 (main) + 1 (R364) + 6 (R2031) + 3 (R2082)
+        # + 3 (R2029) + 4 (R1823) + 3 (R307) = 21 lines
+        self.assertEqual(RecipeLine.objects.count(), 21)
+
+
+class RecipeImportIdempotencyTests(TestCase):
+    """Re-running the importer updates rather than duplicating."""
+
+    def test_re_import_same_workbook_is_idempotent(self):
+        from django.core.management import call_command
+        Department.objects.create(name="Bakery")
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX)
+        first_recipes = Recipe.objects.count()
+        first_lines = RecipeLine.objects.count()
+        first_main = Recipe.objects.get(code="NPD-R800")
+        # Run again
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX)
+        self.assertEqual(Recipe.objects.count(), first_recipes)
+        self.assertEqual(RecipeLine.objects.count(), first_lines)
+        # Same row, not a new one (same PK; updated timestamp may change)
+        second_main = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(second_main.pk, first_main.pk)
+
+
+class RecipeUnknownIngredientTests(TestCase):
+    """Unknown NPD-I codes get stubbed and flagged in the summary."""
+
+    def test_unknown_ingredient_creates_stub_and_flags(self):
+        from django.core.management import call_command
+        from io import StringIO
+        # No pre-existing NPD-I products — the parser will create stubs.
+        out = StringIO()
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX, stdout=out)
+        # Six distinct NPD-I codes in the sample
+        stubs = Product.objects.filter(code__startswith="NPD-I").count()
+        self.assertEqual(stubs, 6)
+        # The summary reports them
+        self.assertIn("unknown ingredient", out.getvalue().lower())
+
+
+class RecipeSaveCycleProtectionTests(TestCase):
+    """save_recipes() must refuse a workbook that describes a cyclic recipe."""
+
+    def test_self_referential_recipe_refused(self):
+        from stock.recipe_import import save_recipes
+        dept = Department.objects.create(name="Bakery")
+        parsed = [{
+            "code": "NPD-R900", "name": "Self-ref",
+            "units_requested": None,
+            "finished_weight_g": Decimal("100"),
+            "deposit_weight_g": Decimal("100"),
+            "cook_loss_pct": Decimal("0"),
+            "method_text": "",
+            "lines": [{
+                "code": "NPD-R900", "name": "Self-ref",
+                "weight_g": Decimal("50"), "is_subrecipe": True,
+            }],
+        }]
+        with self.assertRaises(RecipeCycleError):
+            save_recipes(parsed, dept)
+
+
+class RecipesSectionViewTests(TestCase):
+    """List page, upload form, preview-then-confirm flow, detail view."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_list_page_replaces_coming_soon(self):
+        r = self.client.get("/recipes/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertNotIn("coming soon", body.lower())
+        self.assertIn("Recipes", body)
+        # Import CTA visible
+        self.assertIn('href="/recipes/upload/"', body)
+
+    def test_list_navbar_has_home_recipes_import(self):
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn(">Home<", nav)
+        self.assertIn(">Recipes<", nav)
+        self.assertIn(">Import<", nav)
+
+    def test_list_page_shows_imported_recipes(self):
+        Recipe.objects.create(
+            code="NPD-R100", name="Sample", department=self.dept,
+            finished_weight_g=Decimal("500"))
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        self.assertIn("NPD-R100", body)
+        self.assertIn("Sample", body)
+
+    def test_upload_form_renders(self):
+        r = self.client.get("/recipes/upload/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("Import recipe", body)
+        self.assertIn('name="file"', body)
+        self.assertIn('enctype="multipart/form-data"', body)
+
+    def test_upload_then_preview_then_confirm_creates_recipes(self):
+        # Pre-create some of the NPD-I products so unknowns are minimal.
+        for code, name in (("NPD-I10758", "Bread Flour"),
+                           ("NPD-I10756", "Water")):
+            Product.objects.create(
+                code=code, name=name, department=self.dept,
+                unit="g", minimum=0)
+
+        with open(SAMPLE_RECIPE_XLSX, "rb") as f:
+            upload = SimpleUploadedFile(
+                "recipe_sample.xlsx", f.read(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        r = self.client.post("/recipes/upload/", {"file": upload})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes/upload/preview/")
+
+        # Preview page renders the parsed tree (nothing saved yet)
+        self.assertEqual(Recipe.objects.count(), 0)
+        r = self.client.get("/recipes/upload/preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("NPD-R800", body)
+        self.assertIn("NPD-R364", body)
+        # Unknown ingredients block surfaced (4 of 6 NPD-I codes are missing)
+        self.assertIn("Unknown ingredient", body)
+
+        # Confirm — commits the import
+        r = self.client.post("/recipes/upload/preview/", {})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(Recipe.objects.count(), 7)
+        # Lands on main recipe's detail page
+        main = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(r.headers["Location"], f"/recipes/{main.pk}/")
+
+    def test_preview_without_pending_redirects_to_upload(self):
+        r = self.client.get("/recipes/upload/preview/")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes/upload/")
+
+    def test_recipe_detail_shows_nested_tree(self):
+        # Two-level recipe: main has one sub-recipe with two ingredients.
+        flour = Product.objects.create(
+            code="NPD-I10758", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        water = Product.objects.create(
+            code="NPD-I10756", name="Water", department=self.dept,
+            unit="g", minimum=0)
+        sub = Recipe.objects.create(
+            code="NPD-R200", name="Starter", department=self.dept,
+            finished_weight_g=Decimal("100"))
+        RecipeLine.objects.create(recipe=sub, ingredient=flour,
+                                  weight_g=Decimal("60"), ordering=0)
+        RecipeLine.objects.create(recipe=sub, ingredient=water,
+                                  weight_g=Decimal("40"), ordering=1)
+        main = Recipe.objects.create(
+            code="NPD-R100", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("400"), cook_loss_pct=Decimal("5"))
+        RecipeLine.objects.create(recipe=main, sub_recipe=sub,
+                                  weight_g=Decimal("100"), ordering=0)
+
+        r = self.client.get(f"/recipes/{main.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Main recipe header
+        self.assertIn("NPD-R100", body)
+        self.assertIn("Loaf", body)
+        # Sub-recipe shown nested with the right weight
+        self.assertIn("NPD-R200", body)
+        self.assertIn("Starter", body)
+        # Raw ingredients reached via the sub-recipe tree
+        self.assertIn("NPD-I10758", body)
+        self.assertIn("NPD-I10756", body)
+        # Weights rendered
+        self.assertIn("100.0g", body)
+        self.assertIn("60.0g", body)
+        # Sub-recipe tag rendered
+        self.assertIn("sub-recipe", body)
+
+    def test_recipe_detail_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        r = Recipe.objects.create(code="NPD-R900", name="X", department=other)
+        resp = self.client.get(f"/recipes/{r.pk}/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_recipe_pages_require_login(self):
+        c = Client()
+        for path in ("/recipes/", "/recipes/upload/", "/recipes/upload/preview/"):
+            r = c.get(path)
+            self.assertEqual(r.status_code, 302)
+            self.assertIn("/login/", r.headers["Location"])
+
+    def test_recipe_delete_removes_recipe(self):
+        r = Recipe.objects.create(code="NPD-R999", name="Gone", department=self.dept)
+        resp = self.client.post(f"/recipes/{r.pk}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Recipe.objects.filter(code="NPD-R999").exists())
