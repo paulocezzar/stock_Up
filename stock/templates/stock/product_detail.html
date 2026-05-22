@@ -21,19 +21,20 @@
 {% else %}<p class="muted">No batches recorded — log a delivery to start tracking.</p>{% endif %}
 </div>
 
-<div class="card"><h3>Supplier prices</h3>
+<div class="card"><h3>Supplier prices <span class="muted" style="font-size:11px">current</span></h3>
 <table>
-  <thead><tr><th>Supplier</th><th class="num">Pack size</th><th class="num">Pack price</th><th class="num">£/1000</th><th></th></tr></thead>
+  <thead><tr><th>Supplier</th><th class="num">Pack size</th><th class="num">Pack price</th><th class="num">£/1000</th><th class="muted">since</th><th></th></tr></thead>
   <tbody>
-  {% for pr in prices %}
+  {% for pr in latest_prices %}
     <tr>
-      <td>{{ pr.supplier.name }}{% if pr == product.cheapest_price %} <span class="tag ok">cheapest</span>{% endif %}</td>
+      <td>{{ pr.supplier.name }}{% if cheapest and pr.id == cheapest.id %} <span class="tag ok">cheapest</span>{% endif %}</td>
       <td class="num">{{ pr.pack_weight|pack_size:product.unit }}</td>
       <td class="num">£{{ pr.pack_price|floatformat:2 }}</td>
       <td class="num">{{ pr.per_1000|floatformat:2 }}</td>
+      <td class="muted">{{ pr.effective_date|date:"d M Y" }}</td>
       <td><form method="post" action="{% url 'price_delete' pr.id %}" style="display:inline">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">remove</button></form></td>
     </tr>
-  {% empty %}<tr><td colspan="5" class="muted">No prices yet — add one below.</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="6" class="muted">No prices yet — add one below.</td></tr>{% endfor %}
   </tbody>
 </table>
 <form method="post" class="row">{% csrf_token %}
@@ -45,7 +46,27 @@
   <div class="field"><label>Pack price (£)</label><input type="number" step="any" name="pack_price" class="count" required></div>
   <button class="btn" type="submit">Save price</button>
 </form>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Saving a new price keeps the old one as history below — prices are dated, not overwritten.</p>
 </div>
+
+{% if price_history %}
+<div class="card"><h3>Price history</h3>
+<table style="margin:0">
+  <thead><tr><th>Supplier</th><th>Date</th><th class="num">Pack size</th><th class="num">Pack price</th><th class="num">vs prev</th></tr></thead>
+  <tbody>
+  {% for g in price_history %}{% for e in g.entries %}
+    <tr>
+      <td>{% if forloop.first %}<b>{{ g.supplier.name }}</b>{% else %}<span class="muted">{{ g.supplier.name }}</span>{% endif %}</td>
+      <td>{{ e.price.effective_date|date:"d M Y" }}{% if forloop.first %} <span class="tag ok" style="font-size:9px;padding:1px 5px">current</span>{% endif %}</td>
+      <td class="num">{{ e.price.pack_weight|pack_size:product.unit }}</td>
+      <td class="num">£{{ e.price.pack_price|floatformat:2 }}</td>
+      <td class="num">{% if e.delta_pct is not None %}{% if e.notable %}<span class="tag low" title="More than 10% change from the previous price">{% if e.delta_pct > 0 %}+{% endif %}{{ e.delta_pct }}%</span>{% else %}<span class="muted">{% if e.delta_pct > 0 %}+{% endif %}{{ e.delta_pct }}%</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 
 <div class="card"><h3>Usage <span class="muted" style="font-size:11px">(rough estimate)</span></h3>
 {% if usage_rows %}

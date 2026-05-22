@@ -69,10 +69,17 @@ class Command(BaseCommand):
             )
             if supplier_name and price is not None and weight:
                 supplier, _ = Supplier.objects.get_or_create(name=supplier_name)
-                SupplierPrice.objects.update_or_create(
-                    product=product, supplier=supplier,
-                    defaults={"pack_weight": weight, "pack_price": price},
-                )
+                existing = (SupplierPrice.objects
+                            .filter(product=product, supplier=supplier)
+                            .order_by("-effective_date", "-id").first())
+                if existing:
+                    existing.pack_weight = weight
+                    existing.pack_price = price
+                    existing.save()
+                else:
+                    SupplierPrice.objects.create(
+                        product=product, supplier=supplier,
+                        pack_weight=weight, pack_price=price)
             StockLine.objects.update_or_create(
                 stocktake=st, product=product, defaults={"current": current},
             )
@@ -99,9 +106,16 @@ class Command(BaseCommand):
             if not product:
                 continue
             supplier, _ = Supplier.objects.get_or_create(name=supplier_name)
-            _, created = SupplierPrice.objects.update_or_create(
-                product=product, supplier=supplier,
-                defaults={"pack_weight": weight, "pack_price": price},
-            )
-            added += created
+            existing = (SupplierPrice.objects
+                        .filter(product=product, supplier=supplier)
+                        .order_by("-effective_date", "-id").first())
+            if existing:
+                existing.pack_weight = weight
+                existing.pack_price = price
+                existing.save()
+            else:
+                SupplierPrice.objects.create(
+                    product=product, supplier=supplier,
+                    pack_weight=weight, pack_price=price)
+                added += 1
         self.stdout.write(f"  Prices: {added} extra supplier prices added")

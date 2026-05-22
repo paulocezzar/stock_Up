@@ -860,7 +860,8 @@ class PackUnitConversionTests(TestCase):
             "quantity": "500", "unit": "g",
             "supplier": "Mill", "cost": "1",
         })
-        # Re-add same code with kg - update_or_create path
+        # Re-add same code with kg - product is updated in place; the price
+        # save creates a new dated history row instead of overwriting.
         self.client.post("/products/", {
             "name": "Flour", "code": "FLR9",
             "quantity": "25", "unit": "kg",
@@ -868,8 +869,143 @@ class PackUnitConversionTests(TestCase):
         })
         p = Product.objects.get(code="FLR9")
         self.assertEqual(p.unit, "g")
-        sp = SupplierPrice.objects.get(product=p, supplier__name="Mill")
-        self.assertEqual(sp.pack_weight, Decimal("25000"))
+        prices = SupplierPrice.objects.filter(product=p, supplier__name="Mill")
+        self.assertEqual(prices.count(), 2)
+        latest = prices.order_by("-effective_date", "-id").first()
+        self.assertEqual(latest.pack_weight, Decimal("25000"))
+        # old row is preserved as history
+        self.assertTrue(prices.filter(pack_weight=Decimal("500")).exists())
+
+
+class PriceHistoryTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Mill")
+        self.other_sup = Supplier.objects.create(name="Acme")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="g", minimum=Decimal("5"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def _price(self, supplier, pack_price, pack_weight=Decimal("25000"), date=None):
+        return SupplierPrice.objects.create(
+            product=self.flour, supplier=supplier,
+            pack_weight=pack_weight, pack_price=pack_price,
+            effective_date=date or datetime.date.today())
+
+    def test_saving_a_second_price_creates_a_new_record(self):
+        # Old then new price for the same supplier should leave two rows.
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 1, 1))
+        r = self.client.post(f"/products/{self.flour.pk}/", {
+            "supplier": "Mill", "pack_weight": "25", "pack_unit": "kg",
+            "pack_price": "30.00",
+        })
+        self.assertEqual(r.status_code, 302)
+        prices = SupplierPrice.objects.filter(product=self.flour, supplier=self.sup)
+        self.assertEqual(prices.count(), 2)
+        # Both prices preserved
+        self.assertTrue(prices.filter(pack_price=Decimal("25.00")).exists())
+        self.assertTrue(prices.filter(pack_price=Decimal("30.00")).exists())
+
+    def test_latest_price_is_used_by_cheapest_value_and_reorder(self):
+        # Mill has an old £25 price; today saves £30. Acme is at £28 today.
+        # Today's latest for Mill (£30) loses to Acme's £28 — even though
+        # the old £25 row exists in history.
+        self._price(self.sup, Decimal("25.00"),
+                    pack_weight=Decimal("25000"),
+                    date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("30.00"),
+                    pack_weight=Decimal("25000"),
+                    date=datetime.date(2026, 5, 22))
+        self._price(self.other_sup, Decimal("28.00"),
+                    pack_weight=Decimal("25000"),
+                    date=datetime.date(2026, 5, 22))
+
+        cheapest = self.flour.cheapest_price
+        self.assertEqual(cheapest.supplier, self.other_sup)
+        self.assertEqual(cheapest.pack_price, Decimal("28.00"))
+
+        # StockLine.value uses cheapest_price.pack_price -> latest cheapest
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 5, 22))
+        line = StockLine.objects.create(stocktake=st, product=self.flour,
+                                        current=Decimal("3"), carried_over=False)
+        self.assertEqual(line.value, Decimal("84.00"))  # 3 * £28
+
+        # Reorder est cost also uses latest cheapest
+        r = self.client.get("/reorder/")
+        body = r.content.decode()
+        self.assertIn("Acme", body)
+        # minimum 5, on-hand 3 -> order 2 packs @ £28 = £56
+        self.assertIn("£56.00", body)
+
+    def test_old_price_is_retained_and_shown_in_history(self):
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("30.00"), date=datetime.date(2026, 5, 22))
+        r = self.client.get(f"/products/{self.flour.pk}/")
+        body = r.content.decode()
+        self.assertIn("Price history", body)
+        # both prices appear in the history
+        self.assertIn("£25.00", body)
+        self.assertIn("£30.00", body)
+        # current is tagged on the newest row
+        self.assertIn("current", body)
+        # old date present
+        self.assertIn("01 Jan 2026", body)
+
+    def test_more_than_10_percent_jump_is_flagged(self):
+        self._price(self.sup, Decimal("20.00"), date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 5, 22))
+        history = self.flour.price_history()
+        latest_entry = history[0]["entries"][0]
+        # +25% jump
+        self.assertEqual(latest_entry["delta_pct"], Decimal("25.0"))
+        self.assertTrue(latest_entry["notable"])
+        # Template renders the notable tag
+        r = self.client.get(f"/products/{self.flour.pk}/")
+        body = r.content.decode()
+        self.assertIn("+25.0%", body)
+
+    def test_small_change_is_not_flagged(self):
+        self._price(self.sup, Decimal("20.00"), date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("21.00"), date=datetime.date(2026, 5, 22))
+        latest = self.flour.price_history()[0]["entries"][0]
+        # +5%
+        self.assertEqual(latest["delta_pct"], Decimal("5.0"))
+        self.assertFalse(latest["notable"])
+
+    def test_latest_prices_returns_one_per_supplier(self):
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("30.00"), date=datetime.date(2026, 5, 22))
+        self._price(self.other_sup, Decimal("28.00"), date=datetime.date(2026, 5, 22))
+        latest = self.flour.latest_prices()
+        self.assertEqual(len(latest), 2)
+        by_sup = {sp.supplier_id: sp for sp in latest}
+        self.assertEqual(by_sup[self.sup.pk].pack_price, Decimal("30.00"))
+        self.assertEqual(by_sup[self.other_sup.pk].pack_price, Decimal("28.00"))
+
+    def test_first_entry_has_no_delta(self):
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 5, 22))
+        entries = self.flour.price_history()[0]["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertIsNone(entries[0]["delta_pct"])
+
+    def test_deliveries_supplier_filter_dedupes_history(self):
+        # Two prices for (flour, sup) shouldn't make the delivery form think
+        # the supplier stocks the ingredient twice.
+        self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 1, 1))
+        self._price(self.sup, Decimal("30.00"), date=datetime.date(2026, 5, 22))
+        r = self.client.get("/deliveries/new/")
+        # Page renders; supplier_ids list on the product is deduped
+        p = (Product.objects.filter(pk=self.flour.pk)
+             .prefetch_related("prices").first())
+        ids = sorted({sp.supplier_id for sp in p.prices.all()})
+        self.assertEqual(ids, [self.sup.pk])
 
 
 class PackSizeFilterTests(SimpleTestCase):

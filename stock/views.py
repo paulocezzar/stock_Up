@@ -149,9 +149,10 @@ def products(request):
         cost = _dec(request.POST.get("cost"))
         if sup and stored_qty and cost is not None:
             supplier, _ = Supplier.objects.get_or_create(name=sup)
-            SupplierPrice.objects.update_or_create(
+            SupplierPrice.objects.create(
                 product=product, supplier=supplier,
-                defaults={"pack_weight": stored_qty, "pack_price": cost})
+                pack_weight=stored_qty, pack_price=cost,
+                effective_date=datetime.date.today())
             messages.success(request, f"Saved '{name}' with {sup} price.")
         else:
             messages.success(request, f"Saved '{name}'.")
@@ -182,17 +183,27 @@ def product_detail(request, pk):
         pr = _dec(request.POST.get("pack_price"))
         if sup and wt and pr is not None:
             supplier, _ = Supplier.objects.get_or_create(name=sup)
-            SupplierPrice.objects.update_or_create(
+            SupplierPrice.objects.create(
                 product=product, supplier=supplier,
-                defaults={"pack_weight": wt, "pack_price": pr})
+                pack_weight=wt, pack_price=pr,
+                effective_date=datetime.date.today())
             messages.success(request, f"Price from {sup} saved.")
         else:
             messages.error(request, "Supplier, pack weight and price are all required.")
         return redirect("product_detail", pk=pk)
     on_hand = product.on_hand
+    # latest price per supplier (current) + full history with deltas, both
+    # built from a single prefetch so we don't issue a query per supplier.
+    product = (Product.objects.prefetch_related("prices__supplier")
+               .get(pk=product.pk))
+    latest_prices = sorted(product.latest_prices(),
+                           key=lambda p: p.supplier.name.lower())
+    cheapest = product.cheapest_price
     return render(request, "stock/product_detail.html", {
         "product": product,
-        "prices": product.prices.select_related("supplier").all(),
+        "latest_prices": latest_prices,
+        "cheapest": cheapest,
+        "price_history": product.price_history(),
         "suppliers": Supplier.objects.all(),
         "history": product.history(),
         "batches": product.batches.select_related("delivery__supplier").order_by("use_by", "-created"),

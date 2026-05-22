@@ -55,7 +55,59 @@ class Product(models.Model):
 
     @property
     def cheapest_price(self):
-        return self.prices.annotate(p1000=PER_1000).order_by("p1000").first()
+        """Lowest £/1000 among the *latest* price for each supplier.
+
+        Compares one row per supplier so old (overwritten) history rows can't
+        masquerade as a cheaper offer.
+        """
+        best, best_p1000 = None, None
+        for sp in self.latest_prices():
+            if not sp.pack_weight:
+                continue
+            p1000 = sp.pack_price / sp.pack_weight * 1000
+            if best is None or p1000 < best_p1000:
+                best, best_p1000 = sp, p1000
+        return best
+
+    def latest_prices(self):
+        """The most recent SupplierPrice per supplier (by effective_date, id).
+
+        Iterates self.prices.all() so prefetch_related("prices__supplier") on
+        the calling queryset is preserved.
+        """
+        latest = {}
+        for sp in self.prices.all():
+            cur = latest.get(sp.supplier_id)
+            if cur is None or (sp.effective_date, sp.id) > (cur.effective_date, cur.id):
+                latest[sp.supplier_id] = sp
+        return list(latest.values())
+
+    def price_history(self):
+        """All price rows grouped by supplier, newest first, with per-row
+        delta vs the prior price for that supplier. Notable = abs(delta) > 10%.
+        """
+        groups = {}
+        for sp in self.prices.all():
+            groups.setdefault(sp.supplier_id, []).append(sp)
+        out = []
+        for prices in groups.values():
+            prices.sort(key=lambda s: (s.effective_date, s.id), reverse=True)
+            entries = []
+            for i, sp in enumerate(prices):
+                prev = prices[i + 1] if i + 1 < len(prices) else None
+                delta = None
+                notable = False
+                if prev and prev.pack_price:
+                    delta = ((sp.pack_price - prev.pack_price) / prev.pack_price
+                             * Decimal(100)).quantize(Decimal("0.1"))
+                    notable = abs(delta) > Decimal("10")
+                entries.append({
+                    "price": sp, "previous": prev,
+                    "delta_pct": delta, "notable": notable,
+                })
+            out.append({"supplier": prices[0].supplier, "entries": entries})
+        out.sort(key=lambda g: g["supplier"].name.lower())
+        return out
 
     @property
     def latest_line(self):
@@ -151,15 +203,20 @@ class Product(models.Model):
 
 
 class SupplierPrice(models.Model):
+    """A supplier's price for a product, dated.
+
+    Multiple rows per (product, supplier) are allowed; the most recent by
+    effective_date (ties broken by id) is the "current" price. Past rows are
+    retained as price history.
+    """
     product = models.ForeignKey(Product, related_name="prices", on_delete=models.CASCADE)
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
     pack_weight = models.DecimalField(max_digits=12, decimal_places=2)
     pack_price = models.DecimalField(max_digits=12, decimal_places=2)
-    effective_date = models.DateField(auto_now=True)
+    effective_date = models.DateField(default=datetime.date.today)
 
     class Meta:
-        ordering = ["product", "pack_price"]
-        unique_together = ("product", "supplier")
+        ordering = ["product", "-effective_date", "-id"]
 
     @property
     def per_1000(self):
