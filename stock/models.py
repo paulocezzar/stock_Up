@@ -210,6 +210,28 @@ class Product(models.Model):
         return int((Decimal(on_hand) / avg * Decimal(7)).quantize(Decimal("1")))
 
 
+class IngredientAllergen(models.Model):
+    """One allergen declaration per ingredient.
+
+    Sourced from the supplier-spec Allergens tab. An ingredient may have many
+    rows (one per allergen). "contains" = the ingredient declares it; "may
+    contain" = cross-contamination risk. Both flags can be False (a row that
+    just records the allergen was checked and ruled out is uncommon in our
+    data but harmless to store).
+    """
+    product = models.ForeignKey(Product, related_name="allergens", on_delete=models.CASCADE)
+    name = models.CharField(max_length=80)
+    contains = models.BooleanField(default=False)
+    may_contain = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("product", "name")
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.product.name} — {self.name}"
+
+
 class SupplierPrice(models.Model):
     """A supplier's price for a product, dated.
 

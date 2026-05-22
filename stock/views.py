@@ -463,6 +463,7 @@ def product_detail(request, pk):
     latest_prices = sorted(product.latest_prices(),
                            key=lambda p: p.supplier.name.lower())
     cheapest = product.cheapest_price
+    allergen_rows = list(product.allergens.all())
     return render(request, "stock/product_detail.html", {
         "product": product,
         "latest_prices": latest_prices,
@@ -477,6 +478,8 @@ def product_detail(request, pk):
         "on_hand": on_hand,
         "batches_total": product.on_hand_from_batches,
         "adjustments_net": product.adjustments_net,
+        "allergens_contains": [a for a in allergen_rows if a.contains],
+        "allergens_may_contain": [a for a in allergen_rows if a.may_contain and not a.contains],
     })
 
 

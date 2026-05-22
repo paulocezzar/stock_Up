@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -1345,14 +1345,16 @@ class IngredientImportTests(TestCase):
     """
 
     def _make_workbook(self, path, ingredients, uoms,
-                       suppliers=None, supplier_names=None):
-        """Build a four-tab fixture workbook.
+                       suppliers=None, supplier_names=None, allergens=None):
+        """Build a four/five-tab fixture workbook.
 
         suppliers: list of {code, supplier_code, is_primary} dicts. Defaults
                    to a generated primary supplier per ingredient so tests
                    that don't care about supplier wiring still get prices.
         supplier_names: {supplier_code: name} for the Reference lookup.
                    Defaults to a generated name per supplier_code seen.
+        allergens: optional list of {code, allergen, contains, may_contain}.
+                   Omitted → no Allergens tab is written.
         """
         from openpyxl import Workbook
         wb = Workbook()
@@ -1409,6 +1411,17 @@ class IngredientImportTests(TestCase):
         ref_ws.append(["Supplier Code", "Description"])  # row 3 sub-headers
         for code, name in supplier_names.items():
             ref_ws.append([code, name])
+
+        if allergens is not None:
+            alg_ws = wb.create_sheet("Allergens")
+            alg_ws.append(["Code", "Description", "Allergen",
+                           "Parts Per Million", "Contains", "May Contain"])
+            for a in allergens:
+                alg_ws.append([
+                    a["code"], None, a["allergen"], "0",
+                    "Yes" if a.get("contains") else "No",
+                    "Yes" if a.get("may_contain") else "No",
+                ])
         wb.save(path)
 
     def test_import_creates_products_with_code_name_category(self):
@@ -1730,6 +1743,110 @@ class IngredientImportTests(TestCase):
         self.assertEqual(flour.prices.count(), 1)
         self.assertEqual(flour.prices.get().pack_price, Decimal("18.40"))
 
+    # --- allergens --------------------------------------------------------
+
+    def test_allergens_attached_with_contains_and_may_contain(self):
+        # WildFarmed flour shape: "Cereals containing gluten" (contains) +
+        # "Soya" (may contain). Both must land on the product as separate
+        # IngredientAllergen rows with the right flags.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I100", "name": "Bread Flour", "cost": 18.4,
+                 "supply_unit": "Trade Paper Sack", "category": "Dry Goods"},
+            ],
+            uoms=[
+                {"code": "NPD-I100", "uom": "Trade Paper Sack",
+                 "ruom": "Kilograms", "ref_quantity": 16},
+            ],
+            allergens=[
+                {"code": "NPD-I100", "allergen": "Cereals containing gluten",
+                 "contains": True, "may_contain": False},
+                {"code": "NPD-I100", "allergen": "Soya",
+                 "contains": False, "may_contain": True},
+            ])
+        call_command("import_ingredients", path)
+        p = Product.objects.get(code="NPD-I100")
+        gluten = p.allergens.get(name="Cereals containing gluten")
+        self.assertTrue(gluten.contains)
+        self.assertFalse(gluten.may_contain)
+        soya = p.allergens.get(name="Soya")
+        self.assertFalse(soya.contains)
+        self.assertTrue(soya.may_contain)
+        self.assertEqual(p.allergens.count(), 2)
+
+    def test_allergen_import_is_idempotent(self):
+        # Re-running must not duplicate rows or flip the flags.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I101", "name": "Milk", "cost": 2.0,
+                 "supply_unit": "Kilograms", "category": "Dairy & Eggs"},
+            ],
+            uoms=[],
+            allergens=[
+                {"code": "NPD-I101", "allergen": "Milk",
+                 "contains": True, "may_contain": False},
+            ])
+        call_command("import_ingredients", path)
+        call_command("import_ingredients", path)
+        p = Product.objects.get(code="NPD-I101")
+        self.assertEqual(p.allergens.count(), 1)
+        self.assertEqual(IngredientAllergen.objects.filter(
+            product=p, name="Milk").count(), 1)
+
+    def test_ingredient_with_no_allergen_rows_has_none(self):
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I102", "name": "Salt", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[],
+            allergens=[
+                {"code": "NPD-I999", "allergen": "Milk",  # different ingredient
+                 "contains": True, "may_contain": False},
+            ])
+        call_command("import_ingredients", path)
+        p = Product.objects.get(code="NPD-I102")
+        self.assertEqual(p.allergens.count(), 0)
+
+    def test_allergen_rows_for_unknown_ingredient_are_ignored(self):
+        # An allergen row that points at a code not in the Ingredients tab
+        # must not crash and must not create a phantom IngredientAllergen.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I103", "name": "Salt", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[],
+            allergens=[
+                {"code": "NPD-I999", "allergen": "Milk",
+                 "contains": True, "may_contain": False},
+            ])
+        call_command("import_ingredients", path)
+        self.assertEqual(IngredientAllergen.objects.count(), 0)
+
+    def test_workbook_without_allergens_tab_still_imports(self):
+        # Existing data files / partial fixtures without the Allergens tab
+        # must keep working.
+        from django.core.management import call_command
+        path = self._tmp()
+        self._make_workbook(path,
+            ingredients=[
+                {"code": "NPD-I104", "name": "Salt", "cost": 1.0,
+                 "supply_unit": "Kilograms", "category": "Dry Goods"},
+            ],
+            uoms=[])  # allergens=None → no Allergens tab written
+        call_command("import_ingredients", path)
+        self.assertTrue(Product.objects.filter(code="NPD-I104").exists())
+        self.assertEqual(IngredientAllergen.objects.count(), 0)
+
     def test_no_master_catalog_supplier_created(self):
         # The old "Master Catalog" placeholder must never appear, even when
         # the workbook has no usable supplier data at all.
@@ -1743,6 +1860,71 @@ class IngredientImportTests(TestCase):
             uoms=[])
         call_command("import_ingredients", path)
         self.assertFalse(Supplier.objects.filter(name="Master Catalog").exists())
+
+
+class AllergenDisplayTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_contains_and_may_contain_render_in_separate_groups(self):
+        flour = Product.objects.create(
+            name="Bread Flour", code="NPD-I100", department=self.dept,
+            unit="g", minimum=0)
+        IngredientAllergen.objects.create(
+            product=flour, name="Cereals containing gluten",
+            contains=True, may_contain=False)
+        IngredientAllergen.objects.create(
+            product=flour, name="Soya", contains=False, may_contain=True)
+        r = self.client.get(f"/products/{flour.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Section header present
+        self.assertIn(">Allergens<", body)
+        # Both labelled groups present in the right order
+        contains_idx = body.find("Contains")
+        may_idx = body.find("May contain")
+        self.assertGreater(contains_idx, 0)
+        self.assertGreater(may_idx, contains_idx)
+        # The two allergens are tagged with the right CSS class
+        contains_section = body[contains_idx:may_idx]
+        self.assertIn('class="tag low"', contains_section)
+        self.assertIn("Cereals containing gluten", contains_section)
+        may_section = body[may_idx:]
+        self.assertIn('class="tag prov"', may_section)
+        self.assertIn("Soya", may_section)
+
+    def test_no_allergens_shows_placeholder(self):
+        salt = Product.objects.create(
+            name="Salt", code="SLT1", department=self.dept,
+            unit="g", minimum=0)
+        r = self.client.get(f"/products/{salt.pk}/")
+        body = r.content.decode()
+        self.assertIn(">Allergens<", body)
+        self.assertIn("No declared allergens", body)
+
+    def test_contains_takes_precedence_over_may_contain(self):
+        # An allergen with both flags shouldn't appear in both lists - it's
+        # declared, so the firm tag wins and the soft one is suppressed.
+        flour = Product.objects.create(
+            name="Mixed", code="MIX1", department=self.dept,
+            unit="g", minimum=0)
+        IngredientAllergen.objects.create(
+            product=flour, name="Milk", contains=True, may_contain=True)
+        r = self.client.get(f"/products/{flour.pk}/")
+        body = r.content.decode()
+        contains_idx = body.find("Contains")
+        may_idx = body.find("May contain")
+        # No "May contain" group should render at all
+        self.assertEqual(may_idx, -1)
+        # Milk shows in the contains group
+        self.assertIn('class="tag low"', body[contains_idx:])
+        self.assertIn("Milk", body[contains_idx:])
 
 
 class ResetStockDataTests(TestCase):

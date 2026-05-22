@@ -3,6 +3,22 @@
 {% block body %}
 <h2>{{ product.name }} <span class="muted" style="font-size:14px">{% if product.code %}{{ product.code }} · {% endif %}min {{ product.minimum|floatformat:0 }}{% with c=product.cheapest_price %}{% if c %} (×{{ c.pack_weight|pack_size:product.unit }}){% endif %}{% endwith %}</span></h2>
 
+<div class="card"><h3>Allergens</h3>
+{% if allergens_contains or allergens_may_contain %}
+  {% if allergens_contains %}<div style="margin:0 0 10px">
+    <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-right:10px">Contains</span>
+    {% for a in allergens_contains %}<span class="tag low" style="margin-right:6px">{{ a.name }}</span>{% endfor %}
+  </div>{% endif %}
+  {% if allergens_may_contain %}<div>
+    <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-right:10px">May contain</span>
+    {% for a in allergens_may_contain %}<span class="tag prov" style="margin-right:6px">{{ a.name }}</span>{% endfor %}
+    <span class="muted" style="font-size:11px;margin-left:6px">(cross-contamination risk)</span>
+  </div>{% endif %}
+{% else %}
+  <p class="muted" style="margin:0">No declared allergens.</p>
+{% endif %}
+</div>
+
 <div class="card"><h3>On hand (from batches)</h3>
 <p style="font-family:var(--disp);font-size:24px;font-weight:600;margin:0 0 12px">{{ product.on_hand_from_batches|floatformat:0 }} <span class="muted" style="font-size:13px;font-weight:400">packs across {{ batches|length }} batch{{ batches|length|pluralize:"es" }}</span></p>
 {% if batches %}

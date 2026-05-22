@@ -4,24 +4,26 @@ Usage:
     python manage.py import_ingredients data/ingredients.xlsx
     python manage.py import_ingredients data/ingredients.xlsx --department Bakery
 
-Reads four tabs:
+Reads up to five tabs:
   Ingredients       master row per ingredient (NPD-I code, name, cost, supply unit, category)
   Units Of Measure  converts a supply unit to a reference weight (e.g. Trade Paper Sack = 16 Kilograms)
   Suppliers         per-ingredient supplier rows; one is flagged "Is Primary Supplier = Yes"
   Reference         lookup table whose "Suppliers" section maps Supplier Code → real name
+  Allergens         per-ingredient allergen rows (Contains Yes/No, May Contain Yes/No); optional
 
 For each ingredient row a Product is created/updated keyed on code. The pack weight comes
 from the matching UOM row, normalised to base units (g for kg/grams, ml for litres). The
 ingredient's primary supplier (Is Primary = Yes; first row if none flagged primary) drives
 which Supplier the SupplierPrice is attached to; the supplier name is resolved via the
-Reference tab. Ingredients with no usable UOM row or no supplier row are still imported,
-but with no price - the command prints them at the end so they can be addressed manually.
+Reference tab. Allergen rows are upserted per (product, allergen) so re-runs don't duplicate.
+Ingredients with no usable UOM row or no supplier row are still imported, but with no price -
+the command prints them at the end so they can be addressed manually.
 """
 from decimal import Decimal, InvalidOperation
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from openpyxl import load_workbook
-from stock.models import Department, Supplier, Product, SupplierPrice
+from stock.models import Department, Supplier, Product, SupplierPrice, IngredientAllergen
 
 
 CATEGORY_MAP = {
@@ -208,11 +210,17 @@ class Command(BaseCommand):
                     reasons.append("no supplier")
                 flagged.append((code, name, supply_unit, ", ".join(reasons) or "skipped"))
 
+        allergens_touched = 0
+        if "Allergens" in wb.sheetnames:
+            allergens_touched = self._import_allergens(wb["Allergens"])
+
         self.stdout.write(self.style.SUCCESS(
             f"Imported ingredients into '{dept.name}':"))
         self.stdout.write(f"  {created} created, {updated} updated")
         self.stdout.write(
             f"  {priced} with pack weight + price, {len(flagged)} flagged (no pack info)")
+        if allergens_touched:
+            self.stdout.write(f"  {allergens_touched} allergen declarations imported")
         if unresolved_codes:
             self.stdout.write(self.style.WARNING(
                 f"  Unresolved supplier codes (used the code as the name): "
@@ -290,6 +298,36 @@ class Command(BaseCommand):
                 continue
             lookup[sc] = str(nm).strip()
         return lookup
+
+    def _import_allergens(self, ws):
+        """Upsert IngredientAllergen rows from the Allergens tab.
+
+        Columns: 0=Code, 2=Allergen, 4=Contains (Yes/No), 5=May Contain (Yes/No).
+        Rows whose ingredient code isn't a Product we just imported are ignored.
+        Returns the number of allergen rows touched.
+        """
+        # Index products by code once - cheaper than a query per row.
+        product_by_code = {p.code: p for p in Product.objects.exclude(code__isnull=True)}
+        touched = 0
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            code = row[0]
+            if not code:
+                continue
+            code = str(code).strip()
+            product = product_by_code.get(code)
+            if not product:
+                continue
+            allergen = (row[2] or "").strip() if row[2] is not None else ""
+            if not allergen:
+                continue
+            contains = norm(row[4]) == "yes"
+            may_contain = norm(row[5]) == "yes"
+            IngredientAllergen.objects.update_or_create(
+                product=product, name=allergen,
+                defaults={"contains": contains, "may_contain": may_contain},
+            )
+            touched += 1
+        return touched
 
     def _read_ingredient_suppliers(self, ws):
         """Return {ingredient code → supplier code} preferring the primary row.
