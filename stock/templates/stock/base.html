@@ -114,15 +114,7 @@
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 <header>
   <h1>STOCK<span class="dot">.</span>UP</h1>
-  <nav>
-    <a href="{% url 'home' %}" class="{% block n_home %}{% endblock %}">Home</a>
-    <a href="{% url 'stock_home' %}" class="{% block n_stock %}{% endblock %}">Stock</a>
-    <a href="{% url 'recipes' %}" class="{% block n_recipes %}{% endblock %}">Recipes</a>
-    <a href="{% url 'production' %}" class="{% block n_production %}{% endblock %}">Production</a>
-    <a href="{% url 'rota' %}" class="{% block n_rota %}{% endblock %}">Rota</a>
-    <a href="{% url 'notes' %}" class="{% block n_notes %}{% endblock %}">Notes</a>
-    <a href="{% url 'profile' %}" class="{% block n_profile %}{% endblock %}">Profile</a>
-  </nav>
+  <nav>{% block section_nav %}<a href="{% url 'home' %}">Home</a>{% endblock %}</nav>
   <div class="hdr-right">
     {% if departments %}
     <select onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"

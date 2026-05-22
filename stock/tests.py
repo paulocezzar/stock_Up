@@ -1088,17 +1088,81 @@ class SectionNavigationTests(TestCase):
         r = c.get("/profile/")
         self.assertIn("/admin/", r.content.decode())
 
-    def test_top_nav_has_seven_sections(self):
+    def test_home_page_section_nav_is_minimal(self):
+        # On Home the page itself is the section picker, so the contextual
+        # nav is empty (no sub-menu to show).
         r = self.client.get("/home/")
         body = r.content.decode()
-        # Extract the <nav>…</nav> block so we count exactly the top-level links.
-        nav_start = body.index("<nav>")
-        nav_end = body.index("</nav>", nav_start)
-        nav = body[nav_start:nav_end]
-        self.assertEqual(nav.count("<a "), 7)
-        for label in (">Home<", ">Stock<", ">Recipes<", ">Production<",
-                      ">Rota<", ">Notes<", ">Profile<"):
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        # No <a> links inside the <nav> on Home
+        self.assertEqual(nav.count("<a "), 0)
+
+    def test_stock_section_nav_shows_sub_items(self):
+        # Any Stock page (e.g. the dashboard) renders the Stock contextual
+        # sub-menu in the top nav: Home + Dashboard / Stocktakes / Deliveries
+        # / Adjustments / Reorder / Ingredients / Suppliers.
+        r = self.client.get("/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        for label in (">Home<", ">Dashboard<", ">Stocktakes<", ">Deliveries<",
+                      ">Adjustments<", ">Reorder<", ">Ingredients<", ">Suppliers<"):
             self.assertIn(label, nav)
+        # The Stock top-level link is NOT shown — the nav is contextual.
+        self.assertNotIn('href="/stock/"', nav)
+
+    def test_stock_sub_pages_highlight_themselves_not_a_top_link(self):
+        for path, link in (
+            ("/", '/'),
+            ("/stocktakes/", '/stocktakes/'),
+            ("/deliveries/", '/deliveries/'),
+            ("/adjustments/", '/adjustments/'),
+            ("/reorder/", '/reorder/'),
+            ("/products/", '/products/'),
+            ("/suppliers/", '/suppliers/'),
+        ):
+            r = self.client.get(path)
+            body = r.content.decode()
+            nav = body[body.index("<nav>"):body.index("</nav>")]
+            self.assertRegex(
+                nav, r'href="' + link + r'"\s+class="on"',
+                f"{path} should highlight its own sub-nav link",
+            )
+
+    def test_placeholder_section_nav_shows_home_and_section_only(self):
+        for path, label in (("/recipes/", ">Recipes<"),
+                            ("/production/", ">Production<"),
+                            ("/rota/", ">Rota<"),
+                            ("/notes/", ">Notes<")):
+            r = self.client.get(path)
+            body = r.content.decode()
+            nav = body[body.index("<nav>"):body.index("</nav>")]
+            self.assertEqual(nav.count("<a "), 2, f"{path} nav should have 2 links")
+            self.assertIn(">Home<", nav)
+            self.assertIn(label, nav)
+
+    def test_profile_section_nav_has_home_and_profile(self):
+        r = self.client.get("/profile/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertEqual(nav.count("<a "), 2)
+        self.assertIn(">Home<", nav)
+        self.assertIn(">Profile<", nav)
+
+    def test_admin_link_in_stock_nav_only_for_superusers(self):
+        r = self.client.get("/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertNotIn("/admin/", nav)
+
+        U = get_user_model()
+        boss = U.objects.create_superuser("boss", password="pw")
+        c = Client()
+        c.login(username="boss", password="pw")
+        c.get(f"/switch/{self.dept.pk}/")
+        r = c.get("/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn("/admin/", nav)
 
     def test_login_redirects_to_home(self):
         c = Client()
@@ -1113,14 +1177,11 @@ class SectionNavigationTests(TestCase):
             r = self.client.get(path)
             self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
 
-    def test_existing_stock_pages_highlight_stock_in_nav(self):
-        r = self.client.get("/")  # dashboard
+    def test_stock_card_links_into_section(self):
+        # Home's Stock card should land the user inside the Stock section.
+        r = self.client.get("/home/")
         body = r.content.decode()
-        nav_start = body.index("<nav>")
-        nav_end = body.index("</nav>", nav_start)
-        nav = body[nav_start:nav_end]
-        # Stock link gets class="on" when on a stock sub-page
-        self.assertRegex(nav, r'href="/stock/"\s+class="on"')
+        self.assertIn('href="/stock/"', body)
 
 
 class PackSizeFilterTests(SimpleTestCase):

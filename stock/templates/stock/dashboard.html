@@ -1,5 +1,5 @@
-{% extends "stock/base.html" %}{% load humanize pack_format %}
-{% block n_stock %}on{% endblock %}
+{% extends "stock/_section_stock.html" %}{% load humanize pack_format %}
+{% block n_dash %}on{% endblock %}
 {% block body %}
 <div class="stats">
   <div class="stat"><div class="k">Ingredients</div><div class="v">{{ n_products }}</div></div>

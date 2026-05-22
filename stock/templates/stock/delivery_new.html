@@ -1,5 +1,5 @@
-{% extends "stock/base.html" %}
-{% block n_stock %}on{% endblock %}
+{% extends "stock/_section_stock.html" %}
+{% block n_deliv %}on{% endblock %}
 {% block body %}
 <h2>New delivery</h2>
 <form method="post" action="{% url 'delivery_new' %}">{% csrf_token %}

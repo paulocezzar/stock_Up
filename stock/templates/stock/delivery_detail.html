@@ -1,5 +1,5 @@
-{% extends "stock/base.html" %}
-{% block n_stock %}on{% endblock %}
+{% extends "stock/_section_stock.html" %}
+{% block n_deliv %}on{% endblock %}
 {% block body %}
 <h2>{{ delivery.supplier.name }} <span class="muted" style="font-size:14px">· {{ delivery.date|date:"d M Y" }}</span></h2>
 
