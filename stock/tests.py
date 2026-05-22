@@ -2982,6 +2982,113 @@ class RecipesByProductTreeTests(TestCase):
         # And the tree css/markup is NOT rendered in flat mode
         self.assertNotIn('class="tree-list"', body)
 
+    def test_template_comment_text_does_not_leak_into_html(self):
+        # Django's {# ... #} comment is single-line only — a multi-line
+        # block of that shape renders verbatim. The partial uses
+        # {% comment %}{% endcomment %} now, so none of the explanatory
+        # text inside should appear in the response.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        self.assertNotIn("Recursive node", body)
+        self.assertNotIn("{# ", body)
+        self.assertNotIn(" #}", body)
+        # And the {% comment %} tags themselves are stripped by the engine
+        self.assertNotIn("{% comment %}", body)
+        self.assertNotIn("{% endcomment %}", body)
+
+    def test_tree_is_collapsed_by_default(self):
+        # Each node with children is wrapped in <details> without `open`,
+        # so the browser hides the inner <ul>. Only the roots' summary
+        # rows are visible until the user expands one.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        self.assertIn('<details class="tree-details">', body)
+        # No `open` attribute on any details element — fully collapsed.
+        self.assertNotRegex(body, r'<details class="tree-details"\s+open\b')
+        self.assertNotRegex(body, r'<details[^>]*\bopen\b[^>]*class="tree-details"')
+        # The chevron is rendered (an .tree-chevron span inside the summary)
+        self.assertIn('class="tree-chevron"', body)
+
+    def test_only_root_rows_are_outside_a_details_body(self):
+        # Verify the structural promise: only top-level final products
+        # render as standalone <li>s in the outer .tree-list; every other
+        # node lives inside a <details> body (i.e. inside a parent's
+        # collapsed children <ul>). Cheap way to confirm: split the body
+        # at <details>/</details> boundaries and check that the
+        # OUT-OF-DETAILS section contains the root code(s) but none of
+        # the sub-recipe codes.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        out = []
+        depth = 0
+        i = 0
+        while i < len(body):
+            open_i = body.find("<details", i)
+            close_i = body.find("</details>", i)
+            if open_i == -1 and close_i == -1:
+                if depth == 0:
+                    out.append(body[i:])
+                break
+            if open_i != -1 and (close_i == -1 or open_i < close_i):
+                if depth == 0:
+                    out.append(body[i:open_i])
+                depth += 1
+                i = open_i + len("<details")
+            else:
+                depth -= 1
+                i = close_i + len("</details>")
+        outside_details = "".join(out)
+        # The root (NPD-R800) appears outside any <details> *body* — well,
+        # actually it's inside its own <details>, so it sits in the SUMMARY.
+        # Easier check: every non-root code appears only inside a <details>
+        # body (i.e. NOT in the outside_details slice).
+        for code in ("NPD-R364", "NPD-R2031", "NPD-R2082",
+                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            self.assertNotIn(code, outside_details,
+                             f"{code} should be hidden inside a collapsed <details> by default")
+
+    def test_expanding_root_reveals_children_in_markup(self):
+        # The children's HTML is in the response (so a click-to-expand
+        # immediately reveals them with no extra fetch). Structural check:
+        # the root's <details> wraps the first child's row.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        # The root's <summary> contains NPD-R800
+        summary_idx = body.index('<summary class="tree-row tree-row--expandable">')
+        # NPD-R800 appears soon after the summary opener
+        r800_in_summary = body.index("NPD-R800", summary_idx)
+        # NPD-R364 (the first child) appears AFTER the root summary
+        r364_idx = body.index("NPD-R364", r800_in_summary)
+        # And before the root's closing </details>
+        # Walk to find the matching </details> for the root's <details>:
+        depth = 1  # we're inside the root <details>
+        scan = body.find("<details", summary_idx) + 1  # skip the opening
+        # actually let's just confirm </details> appears after R364, AND
+        # R364 appears strictly after R800-in-summary — the recursive
+        # nest guarantees both.
+        self.assertGreater(r364_idx, r800_in_summary)
+        # And the whole chain is reachable in document order
+        positions = []
+        for code in ("NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
+                     "NPD-R2029", "NPD-R1823", "NPD-R307"):
+            positions.append(body.index(code))
+        self.assertEqual(positions, sorted(positions))
+
+    def test_leaf_recipes_render_as_plain_row_not_details(self):
+        # NPD-R307 has no sub-recipes — it should render without a
+        # surrounding <details>/<summary> (just a tree-row), and its
+        # chevron is hidden (tree-chevron--leaf) so the column lines up.
+        r = self.client.get("/recipes/")
+        body = r.content.decode()
+        r307_idx = body.index("NPD-R307")
+        # Walk back to the enclosing <li> open
+        li_start = body.rfind("<li", 0, r307_idx)
+        # The slice from <li to NPD-R307 should NOT contain <details>
+        slice_ = body[li_start:r307_idx]
+        self.assertNotIn("<details", slice_)
+        # And it should contain the leaf chevron marker
+        self.assertIn("tree-chevron--leaf", slice_)
+
     def test_cycle_in_data_does_not_hang_the_page(self):
         # Wire up a cycle directly in the DB (the import refuses one, but
         # an admin edit could land one). The forest builder must terminate.

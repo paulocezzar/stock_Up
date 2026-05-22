@@ -25,14 +25,26 @@
   .tree-node{margin:0;padding:0}
   .tree-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;
     border-bottom:1px solid var(--line)}
-  .tree-node > .tree-row{border-left:3px solid transparent}
-  /* Final products: solid amber left edge marks the roots */
-  .tree-list > .tree-node > .tree-row{border-left-color:var(--amber);background:var(--panel2)}
+  .tree-node > .tree-row,
+  .tree-node > .tree-details > .tree-row{border-left:3px solid transparent}
+  /* Final products (roots): solid amber left edge + slight contrast */
+  .tree-list > .tree-node > .tree-row,
+  .tree-list > .tree-node > .tree-details > .tree-row{border-left-color:var(--amber);background:var(--panel2)}
   .tree-row .tree-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px;
     min-width:90px}
   .tree-row .tree-name{flex:1;min-width:0}
   .tree-row .tree-meta{font-size:12px}
   .tree-empty{padding:14px;color:var(--muted)}
+  /* expand/collapse chevron via <details>/<summary> */
+  .tree-details{margin:0}
+  .tree-details > summary{list-style:none;cursor:pointer;outline:none}
+  .tree-details > summary::-webkit-details-marker{display:none}
+  .tree-details > summary:hover{background:var(--low-bg)}
+  .tree-chevron{display:inline-flex;align-items:center;justify-content:center;width:12px;
+    color:var(--amber);font-size:11px;line-height:1}
+  .tree-chevron--leaf{visibility:hidden}
+  .tree-details > summary > .tree-chevron::before{content:"\25B8"}     /* ▸ */
+  .tree-details[open] > summary > .tree-chevron::before{content:"\25BE"} /* ▾ */
 </style>
 
 <h2>Recipes <span class="muted" style="font-size:14px">{{ n_recipes }} in this department</span></h2>

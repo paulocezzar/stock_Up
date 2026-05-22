@@ -1,20 +1,35 @@
-{# Recursive node for the by-product tree.
-   Expects `node = {recipe, depth, children, cycle}`. Renders as a <li>
-   so siblings line up; depth indentation + guide line is handled by .tree-list
-   in the parent CSS. #}
-<li class="tree-node">
+{% comment %}
+Recursive node for the by-product tree. Renders as an <li> so siblings
+line up; depth indentation and the guide line are handled by .tree-list
+in the parent CSS. A node with children becomes a <details>/<summary> so
+the tree is collapsed by default — only the top-level final products
+show until the user expands one. Cycles render as a leaf (no <details>)
+with the "cycle — stops here" tag so an admin-edited loop can't blow up
+the page.
+
+Expects ``node = {recipe, depth, children, cycle}``.
+{% endcomment %}<li class="tree-node">
+{% if node.children and not node.cycle %}
+  <details class="tree-details">
+    <summary class="tree-row tree-row--expandable">
+      <span class="tree-chevron" aria-hidden="true"></span>
+      <a class="tree-code" href="{% url 'recipe_detail' node.recipe.pk %}">{{ node.recipe.code }}</a>
+      <span class="tree-name">{{ node.recipe.name }}</span>
+      {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
+      {% if node.depth == 0 %}<span class="role-tag final">final product</span>{% endif %}
+    </summary>
+    <ul class="tree-list">
+      {% for child in node.children %}{% include "stock/_recipe_forest_node.html" with node=child %}{% endfor %}
+    </ul>
+  </details>
+{% else %}
   <div class="tree-row">
+    <span class="tree-chevron tree-chevron--leaf" aria-hidden="true"></span>
     <a class="tree-code" href="{% url 'recipe_detail' node.recipe.pk %}">{{ node.recipe.code }}</a>
     <span class="tree-name">{{ node.recipe.name }}</span>
     {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
     {% if node.depth == 0 %}<span class="role-tag final">final product</span>{% endif %}
     {% if node.cycle %}<span class="tag low">cycle — stops here</span>{% endif %}
   </div>
-  {% if node.children and not node.cycle %}
-  <ul class="tree-list">
-    {% for child in node.children %}
-      {% include "stock/_recipe_forest_node.html" with node=child %}
-    {% endfor %}
-  </ul>
-  {% endif %}
+{% endif %}
 </li>
