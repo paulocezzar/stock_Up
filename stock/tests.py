@@ -7210,15 +7210,18 @@ class OrdersTests(TestCase):
     def test_week_summary_totals_match_line_values(self):
         # Week A: a_mon = 3 × 2.20 = 6.60; a_wed = 1 × 18.00 = 18.00
         # → 2 orders, £24.60. Per-day totals: Mon £6.60, Wed £18.00.
+        # The week's at-a-glance totals all live in the compact
+        # day-strip now (the separate stats block was redundant and
+        # has been removed); the trailing "Week" tile rolls Mon..Sun
+        # into the grand total.
         self._seed_two_weeks()
         body = self.client.get("/orders/?week=2026-05-04").content.decode()
-        # Week totals in the .stats block.
-        self.assertIn("Orders this week", body)
-        self.assertIn(">2<", body)             # 2 orders this week
-        self.assertIn("£24.60", body)
-        # Per-day strip totals.
+        # Per-day tile totals appear in the strip.
         self.assertIn("£6.60", body)
         self.assertIn("£18.00", body)
+        # The trailing Week-total tile shows the 2-order, £24.60 roll-up.
+        self.assertIn("2 orders", body)
+        self.assertIn("£24.60", body)
 
     def test_week_filter_combines_with_customer_filter(self):
         # Alice in Week A → the grid renders for her. Bob's a_wed order
@@ -7559,25 +7562,28 @@ class OrdersTests(TestCase):
     # ---- summary placement (top of page, no bottom duplicate) ----
 
     def test_week_summary_blocks_sit_at_top_of_page(self):
-        # Both summary blocks live near the top of the page, in this
-        # order: stats → day-strip → customer list / grid. The day
-        # strip appears immediately under the stats so the whole
-        # week's shape is visible without scrolling.
+        # The day-strip is the single at-a-glance summary now (the
+        # earlier two-box stats block was redundant with the strip's
+        # trailing "Week total" tile and has been removed). The strip
+        # sits between the filter form and the customer list / grid.
         Order.objects.create(
             customer=self.alice_cust, department=self.dept,
             order_date=datetime.date(2026, 5, 18))
         body = self.client.get("/orders/?week=2026-05-18").content.decode()
-        i_stats = body.find('class="stats"')
+        i_filter = body.find('<form method="get" class="card"')
         i_strip = body.find('class="day-strip"')
         i_cust = body.find('class="cust-list"')
-        self.assertGreater(i_stats, -1, "stats block missing")
+        self.assertGreater(i_filter, -1, "filter form missing")
         self.assertGreater(i_strip, -1, "day-strip block missing")
         self.assertGreater(i_cust, -1, "customer list missing")
-        # Order: stats → day-strip → customer list.
-        self.assertLess(i_stats, i_strip,
-                        "day-strip should come after the stats block")
+        # Order: filter form → day-strip → customer list.
+        self.assertLess(i_filter, i_strip,
+                        "day-strip should come after the filter form")
         self.assertLess(i_strip, i_cust,
                         "day-strip should come before the customer list")
+        # And the headline stats block is gone — its job moved into
+        # the strip's "Week" tile.
+        self.assertNotIn('class="stats"', body)
 
     def test_day_strip_appears_only_once_on_page(self):
         # The strip used to render at the bottom in the old layout.
@@ -7597,7 +7603,7 @@ class OrdersTests(TestCase):
 
     def test_day_strip_sits_above_the_customer_grid(self):
         # When a customer is selected, the order is:
-        # stats → day-strip → grid (no customer list, which is
+        # filter form → day-strip → grid (no customer list, which is
         # mutually exclusive with the grid).
         order = Order.objects.create(
             customer=self.alice_cust, department=self.dept,
@@ -7607,13 +7613,13 @@ class OrdersTests(TestCase):
         body = self.client.get(
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
         ).content.decode()
-        i_stats = body.find('class="stats"')
+        i_filter = body.find('<form method="get" class="card"')
         i_strip = body.find('class="day-strip"')
         i_grid = body.find('class="order-grid-wrap"')
-        self.assertGreater(i_stats, -1)
+        self.assertGreater(i_filter, -1)
         self.assertGreater(i_strip, -1)
         self.assertGreater(i_grid, -1)
-        self.assertLess(i_stats, i_strip)
+        self.assertLess(i_filter, i_strip)
         self.assertLess(i_strip, i_grid)
 
     # ---- compact per-day totals strip ----

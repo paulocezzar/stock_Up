@@ -107,16 +107,11 @@ products × days grid fits more day columns without horizontal scroll.
   </div>
 </form>
 
-<div class="stats">
-  <div class="stat"><div class="k">Orders this week</div><div class="v">{{ week_total_orders }}</div></div>
-  <div class="stat"><div class="k">Total value</div><div class="v">£{{ week_total_value }}</div></div>
-</div>
-
 {% comment %}
-Compact per-day totals strip — sits immediately under the headline
-stats block so the whole week shape (Mon..Sun + grand total) is
-visible at a glance before the operator scrolls. Each tile is a
-link that narrows the view to that specific day via ?date=.
+Compact per-day totals strip — the single at-a-glance summary for
+the week. The final "Week" tile rolls Mon..Sun into a grand total,
+so a separate stats block above would be redundant. Each weekday
+tile is a link that narrows the view to that specific day via ?date=.
 {% endcomment %}
 <div class="day-strip">
   {% for day in days %}
@@ -225,8 +220,8 @@ link that narrows the view to that specific day via ?date=.
   .order-grid thead th.total-qty,.order-grid thead th.total-val{z-index:5}
 </style>
 <div class="card">
-  <h3>{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}</h3>
-  <p class="muted" style="margin:0 0 10px;font-size:12px">Rows = products. Columns = the seven days of the week. Blank cells = no order that day. The SKU, Product and Price columns stay locked while the day columns scroll. <a href="?week={{ week_start|date:'Y-m-d' }}">← back to all customers</a></p>
+  <h3>{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}
+    <a href="?week={{ week_start|date:'Y-m-d' }}" class="muted" style="font-weight:400;font-size:11px;margin-left:10px;letter-spacing:0;text-transform:none">← back to all customers</a></h3>
   <div class="order-grid-wrap">
   <table class="order-grid">
     <thead>
@@ -326,8 +321,4 @@ but only for the single day the operator filtered to.
     {% endif %}
   </div>
 {% endif %}
-
-<p class="muted" style="font-size:12px;margin:14px 0 0">
-  Each order is stored per date; the week-commencing Monday is always derived from the date. The within-week filters (customer + specific day) narrow what's shown without changing the storage shape — manual <b>new order</b> creation still works per date.
-</p>
 {% endblock %}
