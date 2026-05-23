@@ -191,15 +191,61 @@ def _classify_packaging_header(row):
 
 
 def parse_recipe_workbook(file_or_path):
-    """Walk the workbook and return a list of recipe dicts.
+    """Walk a single-recipe workbook and return a list of recipe dicts.
 
     First entry is the main recipe; the rest are sub-recipes in workbook
     order. Each dict carries `code`, `name`, `finished_weight_g`,
     `deposit_weight_g`, `cook_loss_pct`, `method_text`, `units_requested`,
-    and `lines` (each `{code, name, weight_g, is_subrecipe}`).
+    `lines` (each `{code, name, weight_g, is_subrecipe}`), and `packaging`
+    (each `{code, name, raw_quantity}`).
+
+    Only reads the active sheet — for multi-recipe workbooks where each
+    sheet is its own Recipe Report, use ``parse_recipe_workbook_bulk``.
     """
     wb = load_workbook(file_or_path, data_only=True)
-    ws = wb.active
+    return _parse_recipe_sheet(wb.active)
+
+
+def parse_recipe_workbook_bulk(file_or_path):
+    """Parse every sheet in a workbook where each sheet is a Recipe Report.
+
+    Reuses ``_parse_recipe_sheet`` per worksheet — the per-recipe logic
+    isn't changed at all. Sheets that don't look like a Recipe Report
+    (missing the "Recipe Code:" header, malformed structure, etc.) are
+    recorded in ``failures`` and skipped; one bad sheet must not abort
+    the rest of the import.
+
+    Returns ``(parsed, failures, sheets_processed)`` where:
+      * ``parsed`` is the flat list of recipe dicts across all successful
+        sheets (same shape as ``parse_recipe_workbook``'s return value);
+      * ``failures`` is a list of ``(sheet_title, reason)`` tuples;
+      * ``sheets_processed`` is the total number of sheets we attempted.
+    """
+    wb = load_workbook(file_or_path, data_only=True)
+    parsed = []
+    failures = []
+    sheets_processed = 0
+    for title in wb.sheetnames:
+        sheets_processed += 1
+        try:
+            sheet_parsed = _parse_recipe_sheet(wb[title])
+        except RecipeParseError as e:
+            failures.append((title, str(e)))
+            continue
+        except Exception as e:  # noqa: BLE001 — keep going past any bad sheet
+            failures.append((title, f"{type(e).__name__}: {e}"))
+            continue
+        parsed.extend(sheet_parsed)
+    return parsed, failures, sheets_processed
+
+
+def _parse_recipe_sheet(ws):
+    """Run the per-recipe state machine over one worksheet.
+
+    This is the shared parser used by both the single-recipe and bulk
+    entry points. Raises ``RecipeParseError`` if the sheet doesn't look
+    like a Recipe Report (missing "Recipe Code:" header).
+    """
     rows = list(ws.iter_rows(values_only=True))
 
     recipes = []
@@ -440,6 +486,35 @@ def parse_recipe_workbook(file_or_path):
     return recipes
 
 
+def summarize_parse_bulk(parsed, failures, sheets_processed):
+    """Bulk-mode summary: counts + failures + unknown-code lists.
+
+    Doesn't designate a "main" — a bulk workbook has many independent
+    recipes. The unknown-ingredients and stub-subrecipes computation is
+    the same as ``summarize_parse`` so the preview UI can flag them the
+    same way.
+    """
+    have_codes = {r["code"] for r in parsed}
+    referenced_ing_codes = {ln["code"] for r in parsed for ln in r["lines"]
+                            if not ln["is_subrecipe"]}
+    referenced_sub_codes = {ln["code"] for r in parsed for ln in r["lines"]
+                            if ln["is_subrecipe"]}
+    known_products = set(
+        Product.objects.filter(code__in=referenced_ing_codes)
+        .values_list("code", flat=True))
+    unknown_ingredients = sorted(referenced_ing_codes - known_products)
+    stub_subrecipes = sorted(referenced_sub_codes - have_codes)
+    return {
+        "sheets_processed": sheets_processed,
+        "sheets_failed": len(failures),
+        "failures": failures,
+        "recipes": parsed,
+        "unique_recipe_codes": len(have_codes),
+        "unknown_ingredients": unknown_ingredients,
+        "stub_subrecipes": stub_subrecipes,
+    }
+
+
 def summarize_parse(parsed):
     """Cheap pre-save analysis for the preview screen.
 
@@ -491,8 +566,22 @@ def save_recipes(parsed, department):
     stub_products = []
     unknown_ingredients = []
 
-    recipes_by_code = {}
+    # Bulk imports (one sheet per recipe) reference the same NPD-R code
+    # across several sheets — once as the main of its own sheet, once or
+    # more as a sub-recipe section under each parent. The breakdowns are
+    # consistent, so first-occurrence wins: dedupe parsed so we don't
+    # re-save the same recipe (and re-delete-and-rebuild its lines) over
+    # and over within a single import call.
+    deduped = []
+    seen_codes = set()
     for spec in parsed:
+        if spec["code"] in seen_codes:
+            continue
+        seen_codes.add(spec["code"])
+        deduped.append(spec)
+
+    recipes_by_code = {}
+    for spec in deduped:
         recipe, was_created = Recipe.objects.update_or_create(
             code=spec["code"],
             defaults={
@@ -511,7 +600,7 @@ def save_recipes(parsed, department):
         p.code: p for p in Product.objects.filter(code__isnull=False)
     }
 
-    for spec in parsed:
+    for spec in deduped:
         recipe = recipes_by_code[spec["code"]]
         recipe.lines.all().delete()
         recipe.packaging_links.all().delete()

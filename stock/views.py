@@ -9,7 +9,8 @@ from django.http import HttpResponseForbidden
 from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer
 from .ai_extract import extract_lines, auto_match, ExtractError
 from .recipe_import import (
-    parse_recipe_workbook, save_recipes, summarize_parse,
+    parse_recipe_workbook, parse_recipe_workbook_bulk,
+    save_recipes, summarize_parse, summarize_parse_bulk,
     serialize_parsed, deserialize_parsed, RecipeParseError,
 )
 
@@ -436,7 +437,14 @@ def recipe_set_sold(request, pk):
 
 @login_required
 def recipe_upload(request):
-    """Step 1 of import: pick a workbook; parse and stash for preview."""
+    """Step 1 of import: pick a workbook; parse all sheets and stash for preview.
+
+    The bulk parser handles both single-recipe and multi-recipe workbooks:
+    a one-sheet upload comes back as one parsed recipe-tree, a 93-sheet
+    upload comes back as everything across the workbook. Sheets that
+    don't parse become failures (skipped, surfaced in the preview) so a
+    single bad sheet can't abort the rest.
+    """
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -449,21 +457,28 @@ def recipe_upload(request):
             messages.error(request, "That file is over 20 MB.")
             return redirect("recipe_upload")
         try:
-            parsed = parse_recipe_workbook(upload)
-        except RecipeParseError as e:
-            messages.error(request, str(e))
-            return redirect("recipe_upload")
+            parsed, failures, sheets_processed = parse_recipe_workbook_bulk(upload)
         except Exception as e:
-            messages.error(request, f"Could not parse the workbook: {e}")
+            messages.error(request, f"Could not open the workbook: {e}")
+            return redirect("recipe_upload")
+        if not parsed:
+            # Show the failures so the operator knows why nothing came back.
+            joined = "; ".join(f"{t}: {r}" for t, r in failures[:3])
+            messages.error(
+                request,
+                "No recipes parsed from any sheet."
+                + (f" First failure(s): {joined}" if failures else ""))
             return redirect("recipe_upload")
         request.session["pending_recipe_import"] = serialize_parsed(parsed)
+        request.session["pending_recipe_failures"] = failures
+        request.session["pending_recipe_sheets"] = sheets_processed
         return redirect("recipe_upload_preview")
     return render(request, "stock/recipe_upload.html", {})
 
 
 @login_required
 def recipe_upload_preview(request):
-    """Step 2: show the parsed tree + summary; POST to commit."""
+    """Step 2: show the parsed summary (per-recipe + per-sheet); POST to commit."""
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -472,6 +487,8 @@ def recipe_upload_preview(request):
         messages.info(request, "Upload a recipe workbook first.")
         return redirect("recipe_upload")
     parsed = deserialize_parsed(raw)
+    failures = request.session.get("pending_recipe_failures") or []
+    sheets_processed = request.session.get("pending_recipe_sheets") or 1
 
     if request.method == "POST":
         try:
@@ -480,17 +497,35 @@ def recipe_upload_preview(request):
             messages.error(request, f"Refused to save: {e}")
             return redirect("recipe_upload_preview")
         request.session.pop("pending_recipe_import", None)
+        request.session.pop("pending_recipe_failures", None)
+        request.session.pop("pending_recipe_sheets", None)
+        n_unique = len(stats["created"]) + len(stats["updated"])
+        # Multi-sheet workbooks (each sheet a separate top-level recipe) land
+        # on the recipes list — there's no single "main" to feature. A single
+        # sheet, even one that nests several sub-recipes, still lands on its
+        # main's detail page (preserves the per-recipe upload UX).
+        if sheets_processed > 1:
+            msg = (f"Imported {n_unique} recipe(s) across "
+                   f"{sheets_processed} sheet(s) — "
+                   f"{len(stats['created'])} created, "
+                   f"{len(stats['updated'])} updated.")
+            if failures:
+                msg += f" {len(failures)} sheet(s) failed."
+            if stats["stub_products"]:
+                msg += f" {len(stats['stub_products'])} unknown ingredient(s) stubbed."
+            messages.success(request, msg)
+            return redirect("recipes")
+        # Single-sheet upload: land on the main recipe's detail page.
         main = parsed[0]
         msg = (f"Imported {main['code']} ({main['name']}): "
                f"{len(stats['created'])} created, {len(stats['updated'])} updated.")
         if stats["stub_products"]:
             msg += f" {len(stats['stub_products'])} unknown ingredient(s) stubbed."
         messages.success(request, msg)
-        # Land on the main recipe's detail page so the user can see the result.
         main_recipe = Recipe.objects.get(code=main["code"])
         return redirect("recipe_detail", pk=main_recipe.pk)
 
-    summary = summarize_parse(parsed)
+    summary = summarize_parse_bulk(parsed, failures, sheets_processed)
     return render(request, "stock/recipe_upload_preview.html", {
         "parsed": parsed,
         "summary": summary,

@@ -2002,6 +2002,7 @@ class ResetStockDataTests(TestCase):
 
 SAMPLE_RECIPE_XLSX = "data/recipe_sample.xlsx"
 SAMPLE_MINCEPIE_XLSX = "data/recipe_sample_mincepie.xlsx"
+SAMPLE_BULK_XLSX = "data/recipes_bulk_93.xlsx"
 
 
 class RecipeModelTests(TestCase):
@@ -4425,3 +4426,236 @@ class CustomersImportProtectionTests(TestCase):
                      "--department", "Bakery", stdout=out)
         text = out.getvalue().lower()
         self.assertIn("skipped 1 hand-created", text)
+
+
+def _build_multisheet_workbook(path, *, include_malformed=True):
+    """Write a tiny multi-sheet Recipe Report workbook for the bulk tests.
+
+    Two valid Recipe Report sheets (NPD-R900 with a sub-recipe at
+    NPD-R901, plus NPD-R902 as a third sheet) and — when
+    ``include_malformed`` is True — a fourth sheet that deliberately
+    lacks the "Recipe Code:" header so the bulk parser must skip it.
+    Keeping this synthetic (rather than slicing the 93-sheet file)
+    makes assertions stable and the test fast.
+    """
+    from openpyxl import Workbook
+    wb = Workbook()
+    # Remove the default empty sheet
+    wb.remove(wb.active)
+
+    def _add_recipe_sheet(title, code, name, lines):
+        ws = wb.create_sheet(title=title)
+        ws.append(["Recipe Code:", code])
+        ws.append(["Recipe Description:", name])
+        ws.append(["Units Requested:", 1])
+        ws.append([])
+        ws.append(["Code", "Description", "Weight (g)"])
+        for c, d, w in lines:
+            ws.append([c, d, w])
+        ws.append(["Total", "", sum(w for _, _, w in lines)])
+        ws.append(["Finished Weight", "", sum(w for _, _, w in lines)])
+
+    _add_recipe_sheet(
+        "Recipe Report - NPD-R900",
+        "NPD-R900", "Test Loaf",
+        [("NPD-I9001", "Flour", 500),
+         ("NPD-I9002", "Water", 300),
+         ("NPD-R901", "Test Starter", 100)],
+    )
+    # Sub-recipe on its own sheet — bulk import must wire R900 → R901.
+    _add_recipe_sheet(
+        "Recipe Report - NPD-R901",
+        "NPD-R901", "Test Starter",
+        [("NPD-I9001", "Flour", 50),
+         ("NPD-I9002", "Water", 50)],
+    )
+    _add_recipe_sheet(
+        "Recipe Report - NPD-R902",
+        "NPD-R902", "Test Roll",
+        [("NPD-I9001", "Flour", 200),
+         ("NPD-I9003", "Salt", 5)],
+    )
+    if include_malformed:
+        # No "Recipe Code:" header → parser raises RecipeParseError,
+        # which the bulk loop must catch and record as a failure.
+        ws_bad = wb.create_sheet(title="Notes")
+        ws_bad.append(["This sheet isn't a recipe report"])
+        ws_bad.append(["Just some operator notes"])
+    wb.save(path)
+
+
+class RecipeBulkImportTests(TestCase):
+    """The bulk parser loops over every sheet, reusing the per-recipe code."""
+
+    def test_committed_93_sheet_workbook_parses_all_sheets(self):
+        # The committed workbook has 93 sheets; the parser should walk
+        # every one and the unique recipe count should match the sheet
+        # count (each sheet's main recipe has its own NPD-R code).
+        from stock.recipe_import import (
+            parse_recipe_workbook_bulk, summarize_parse_bulk,
+        )
+        parsed, failures, sheets_processed = parse_recipe_workbook_bulk(
+            SAMPLE_BULK_XLSX)
+        self.assertEqual(sheets_processed, 93)
+        self.assertEqual(failures, [])
+        summary = summarize_parse_bulk(parsed, failures, sheets_processed)
+        # Each sheet is its own top-level recipe; sub-recipes overlap
+        # across sheets but the union covers all 93 mains.
+        self.assertGreaterEqual(summary["unique_recipe_codes"], 93)
+        # Spot-check: sourdough (NPD-R800) and mince pie (NPD-R655) are
+        # both in this workbook and must appear in the parsed list.
+        codes = {r["code"] for r in parsed}
+        self.assertIn("NPD-R800", codes)
+        self.assertIn("NPD-R655", codes)
+
+    def test_bulk_import_command_saves_all_recipes(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("import_recipes_bulk", SAMPLE_BULK_XLSX,
+                     "--department", "Bakery", stdout=out)
+        # All 93 main recipes plus nested sub-recipes are persisted.
+        self.assertGreaterEqual(Recipe.objects.count(), 93)
+        # Known nested chain still wires up (mince pie regression).
+        r655 = Recipe.objects.get(code="NPD-R655")
+        line = r655.lines.get()
+        self.assertEqual(line.sub_recipe.code, "NPD-R568")
+        # The summary mentions sheet count and recipe count.
+        text = out.getvalue()
+        self.assertIn("93 sheet(s) processed", text)
+
+    def test_bulk_skips_malformed_sheet_and_imports_the_rest(self):
+        # A synthetic workbook with three valid sheets + one bad sheet.
+        # The bad sheet is recorded as a failure but doesn't prevent
+        # the other three from importing.
+        import os
+        import tempfile
+        from stock.recipe_import import (
+            parse_recipe_workbook_bulk, save_recipes,
+        )
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            _build_multisheet_workbook(path, include_malformed=True)
+            parsed, failures, sheets_processed = parse_recipe_workbook_bulk(path)
+        finally:
+            os.unlink(path)
+        # 4 sheets seen, 1 failure (the Notes sheet), 3 recipes parsed.
+        self.assertEqual(sheets_processed, 4)
+        self.assertEqual(len(failures), 1)
+        bad_title, reason = failures[0]
+        self.assertEqual(bad_title, "Notes")
+        self.assertIn("Recipe Code", reason)
+        codes = {r["code"] for r in parsed}
+        self.assertEqual(codes, {"NPD-R900", "NPD-R901", "NPD-R902"})
+
+        # Saving still works — the three valid recipes persist and the
+        # NPD-R900 → NPD-R901 cross-sheet link resolves to the real
+        # sub-recipe row (not an empty stub).
+        dept = Department.objects.create(name="Bakery")
+        stats = save_recipes(parsed, dept)
+        self.assertEqual(Recipe.objects.count(), 3)
+        r900 = Recipe.objects.get(code="NPD-R900")
+        sub_line = r900.lines.filter(sub_recipe__isnull=False).get()
+        self.assertEqual(sub_line.sub_recipe.code, "NPD-R901")
+        # NPD-R901 was matched as an existing sheet, not stubbed.
+        self.assertNotIn(sub_line.sub_recipe, stats["stub_subrecipes"])
+
+    def test_bulk_summary_reports_counts_and_failures(self):
+        # summarize_parse_bulk surfaces sheets_processed, sheets_failed,
+        # the failures list itself, and unique recipe codes — the upload
+        # preview template reads these directly.
+        import os
+        import tempfile
+        from stock.recipe_import import (
+            parse_recipe_workbook_bulk, summarize_parse_bulk,
+        )
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            _build_multisheet_workbook(path, include_malformed=True)
+            parsed, failures, sheets_processed = parse_recipe_workbook_bulk(path)
+        finally:
+            os.unlink(path)
+        summary = summarize_parse_bulk(parsed, failures, sheets_processed)
+        self.assertEqual(summary["sheets_processed"], 4)
+        self.assertEqual(summary["sheets_failed"], 1)
+        self.assertEqual(summary["unique_recipe_codes"], 3)
+        self.assertEqual(len(summary["failures"]), 1)
+        # NPD-I codes referenced but absent should be flagged.
+        self.assertIn("NPD-I9001", summary["unknown_ingredients"])
+
+    def test_bulk_upload_through_web_form_imports_and_lands_on_recipes_list(self):
+        # End-to-end through the upload view: a multi-sheet POST is
+        # parsed, preview rendered with per-sheet stats, then commit
+        # redirects to the recipes list (not a single recipe detail).
+        import os
+        import tempfile
+        User = get_user_model()
+        user = User.objects.create_user(username="u", password="p")
+        dept = Department.objects.create(name="Bakery")
+        user.departments.add(dept)
+        c = Client()
+        c.force_login(user)
+        session = c.session
+        session["dept_id"] = dept.pk
+        session.save()
+
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            _build_multisheet_workbook(path, include_malformed=True)
+            with open(path, "rb") as f:
+                upload = SimpleUploadedFile(
+                    "bulk.xlsx", f.read(),
+                    content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        finally:
+            os.unlink(path)
+
+        r = c.post("/recipes/upload/", {"file": upload})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes/upload/preview/")
+
+        r = c.get("/recipes/upload/preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Per-sheet stats visible
+        self.assertIn("Sheets processed", body)
+        self.assertIn("Sheets failed", body)
+        # Failure surfaced with the offending sheet name
+        self.assertIn("Notes", body)
+        # All three valid recipes listed
+        self.assertIn("NPD-R900", body)
+        self.assertIn("NPD-R901", body)
+        self.assertIn("NPD-R902", body)
+
+        # Commit: multi-sheet uploads land on the recipes list (no main).
+        r = c.post("/recipes/upload/preview/", {})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes/")
+        self.assertEqual(Recipe.objects.count(), 3)
+
+    def test_single_sheet_with_subrecipes_still_lands_on_main_detail(self):
+        # Regression: a one-sheet workbook (the existing sourdough sample
+        # with 7 nested recipes) still uses the "single-recipe" landing
+        # behaviour — main's detail page, not the recipes list.
+        User = get_user_model()
+        user = User.objects.create_user(username="u", password="p")
+        dept = Department.objects.create(name="Bakery")
+        user.departments.add(dept)
+        c = Client()
+        c.force_login(user)
+        session = c.session
+        session["dept_id"] = dept.pk
+        session.save()
+
+        with open(SAMPLE_RECIPE_XLSX, "rb") as f:
+            upload = SimpleUploadedFile(
+                "recipe_sample.xlsx", f.read(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        r = c.post("/recipes/upload/", {"file": upload})
+        self.assertEqual(r.status_code, 302)
+        r = c.post("/recipes/upload/preview/", {})
+        self.assertEqual(r.status_code, 302)
+        main = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(r.headers["Location"], f"/recipes/{main.pk}/")
