@@ -59,14 +59,244 @@
 
 {% if view_mode == "by_product" %}
   {% if forest %}
+  <style>
+    .tree-cb{margin-right:6px}
+    .tree-also-used{font-size:11px;color:var(--muted);font-style:italic;margin-left:8px}
+    .tree-also-used.warn{color:var(--red);font-style:normal;font-weight:600}
+    .tree-warnings{margin:0 0 14px}
+    .tree-warnings .warn-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--red);padding:10px 14px;margin-bottom:8px;font-size:12px}
+    .tree-warnings .warn-card code{color:var(--amber)}
+    .tree-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px}
+    .tree-actions .danger{background:var(--red);border-color:var(--red);color:#fff}
+  </style>
+  {% comment %}
+  The tree's checkboxes are attached to this form via form="tree-bulk-form".
+  The form action defaults to bulk-archive; the Delete button overrides it
+  via the HTML5 formaction attribute.
+  {% endcomment %}
+  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="tree-bulk-form" style="display:none">{% csrf_token %}</form>
+  <div class="tree-actions">
+    <button type="button" class="btn ghost" id="tree-select-all" style="padding:4px 12px">Select all products</button>
+    <button type="button" class="btn ghost" id="tree-clear" style="padding:4px 12px">Clear</button>
+    <span class="muted" id="tree-counter">0 selected</span>
+    <span style="flex:1"></span>
+    <button type="submit" form="tree-bulk-form" id="tree-archive-btn" disabled
+            formaction="{% url 'recipe_bulk_archive' %}"
+            class="btn" style="padding:4px 14px">Archive selected</button>
+    <button type="submit" form="tree-bulk-form" id="tree-delete-btn" disabled
+            formaction="{% url 'recipe_bulk_delete' %}"
+            class="btn danger" style="padding:4px 14px">Delete selected</button>
+  </div>
+  <div class="tree-warnings" id="tree-warnings" hidden></div>
   <div class="card"><h3>By product <span class="muted" style="font-size:11px">final products and the components they're built from</span></h3>
-    <ul class="tree-list">
+    <ul class="tree-list" id="tree-root">
       {% for root in forest %}
         {% include "stock/_recipe_forest_node.html" with node=root %}
       {% endfor %}
     </ul>
-    <p class="muted" style="margin:14px 0 0;font-size:12px">Roots are recipes nothing else uses; nested rows are sub-recipes referenced by the parent above. A component used by more than one product appears under each.</p>
+    <p class="muted" style="margin:14px 0 0;font-size:12px">Tick a top-level product to also auto-tick the components it solely owns. Shared components (used by other products too) are revealed un-ticked with an "also used by" label — tick them anyway and a warning will name the products they still touch. Use Archive (reversible) for hidden, or Delete (permanent — extra confirmation) to remove.</p>
   </div>
+  <script type="application/json" id="tree-recipe-meta">{{ tree_recipe_meta_json|safe }}</script>
+  <script>
+  (function(){
+    const root = document.getElementById('tree-root');
+    if(!root) return;
+    const meta = JSON.parse(document.getElementById('tree-recipe-meta').textContent || '{}');
+    const archiveBtn = document.getElementById('tree-archive-btn');
+    const deleteBtn = document.getElementById('tree-delete-btn');
+    const counter = document.getElementById('tree-counter');
+    const warningsEl = document.getElementById('tree-warnings');
+    const selectAllBtn = document.getElementById('tree-select-all');
+    const clearBtn = document.getElementById('tree-clear');
+
+    // Per-recipe user override: 'on' / 'off' / undefined (auto).
+    const userState = new Map();
+    // Same recipe can appear at multiple positions in the tree (a sub
+    // that's also sold). All occurrences must reflect the same state.
+    const cbsByRecipe = new Map();
+    function allCbs(){ return root.querySelectorAll('.tree-cb'); }
+
+    function parseList(s){
+      // The server emits Python repr-style "[1, 2, 3]" which JSON.parse
+      // happens to accept; treat empty as [].
+      if(!s) return [];
+      try { return JSON.parse(s); } catch(e){ return []; }
+    }
+
+    // Cache parsed data once per checkbox (the lists never change).
+    allCbs().forEach(cb => {
+      cb._activeParents = parseList(cb.dataset.activeParents);
+      cb._rootsUsing = parseList(cb.dataset.rootsUsing);
+      cb._recipeId = parseInt(cb.dataset.recipeId, 10);
+      cb._depth = parseInt(cb.dataset.depth, 10);
+      cb._code = cb.dataset.code;
+      cb._name = cb.dataset.name;
+      if(!cbsByRecipe.has(cb._recipeId)) cbsByRecipe.set(cb._recipeId, []);
+      cbsByRecipe.get(cb._recipeId).push(cb);
+    });
+
+    function selectionAfterClosure(){
+      // Start from every checkbox the user EXPLICITLY ticked on.
+      const sel = new Set();
+      cbsByRecipe.forEach((list, id) => {
+        if(userState.get(id) === 'on') sel.add(id);
+      });
+      // Iteratively cascade auto-ticks: a recipe with non-empty active
+      // parents is "safe" (auto-on) when every active parent is in the
+      // current selection AND the user hasn't pinned it 'off'.
+      let changed = true;
+      while(changed){
+        changed = false;
+        cbsByRecipe.forEach((list, id) => {
+          if(sel.has(id)) return;
+          if(userState.get(id) === 'off') return;
+          const parents = list[0]._activeParents;
+          if(parents.length === 0) return;
+          if(parents.every(p => sel.has(p))){
+            sel.add(id);
+            changed = true;
+          }
+        });
+      }
+      return sel;
+    }
+
+    function syncCheckboxes(sel){
+      // Apply the closure-resolved state to every checkbox occurrence.
+      cbsByRecipe.forEach((list, id) => {
+        const state = userState.get(id);
+        let checked;
+        if(state === 'on') checked = true;
+        else if(state === 'off') checked = false;
+        else checked = sel.has(id);
+        list.forEach(cb => { cb.checked = checked; });
+      });
+    }
+
+    function openAncestorsOf(cb){
+      // When a root product is ticked, reveal its components by opening
+      // every <details> ancestor inside the tree.
+      let el = cb.parentElement;
+      while(el && el !== root.parentElement){
+        if(el.tagName === 'DETAILS') el.open = true;
+        el = el.parentElement;
+      }
+    }
+
+    function updateAlsoUsedLabels(sel){
+      // For each occurrence, decide what label/warning to render next
+      // to the recipe name:
+      //  * depth>0 + un-checked + at least one OTHER root using this
+      //    recipe NOT in selection → faint "also used by: X, Y"
+      //  * checked + at least one OTHER root using this recipe NOT in
+      //    selection → bold red "still used by X, Y — removing
+      //    will affect them"
+      cbsByRecipe.forEach((list, id) => {
+        list.forEach(cb => {
+          const row = cb.closest('summary, .tree-row');
+          if(!row) return;
+          const label = row.querySelector('.tree-also-used');
+          if(!label) return;
+          const rootsUsing = cb._rootsUsing.filter(r => r !== id);
+          const others = rootsUsing.filter(r => !sel.has(r));
+          label.classList.remove('warn');
+          if(others.length === 0){ label.textContent = ''; return; }
+          const codes = others.map(r => (meta[r] && meta[r].code) || ('#'+r));
+          if(cb.checked){
+            label.classList.add('warn');
+            label.textContent = '⚠ still used by: ' + codes.join(', ');
+          } else if(cb._depth > 0){
+            label.textContent = 'also used by: ' + codes.join(', ');
+          } else {
+            label.textContent = '';
+          }
+        });
+      });
+    }
+
+    function renderTopWarnings(sel){
+      // Per-recipe red warning cards listing OTHER products that will
+      // be affected when a shared component is in the selection.
+      const lines = [];
+      const seen = new Set();
+      cbsByRecipe.forEach((list, id) => {
+        if(seen.has(id)) return;
+        if(!sel.has(id)) return;
+        const cb = list[0];
+        if(cb._depth === 0) return;            // products themselves
+        const rootsUsing = cb._rootsUsing.filter(r => r !== id);
+        const others = rootsUsing.filter(r => !sel.has(r));
+        if(others.length === 0) return;
+        seen.add(id);
+        const codes = others.map(r => {
+          const m = meta[r] || {};
+          return (m.code || '#'+r) + (m.name ? ' (' + m.name + ')' : '');
+        });
+        lines.push(
+          '<div class="warn-card"><code>' + cb._code + '</code> — '
+          + cb._name + ' is also used by ' + others.length
+          + ' other product' + (others.length === 1 ? '' : 's')
+          + ' not in your selection: ' + codes.join(', ')
+          + '. Removing it will affect them.</div>');
+      });
+      if(lines.length === 0){ warningsEl.hidden = true; warningsEl.innerHTML = ''; }
+      else { warningsEl.innerHTML = lines.join(''); warningsEl.hidden = false; }
+    }
+
+    function updateButtons(sel){
+      const n = sel.size;
+      counter.textContent = n + ' selected';
+      archiveBtn.disabled = n === 0;
+      deleteBtn.disabled = n === 0;
+    }
+
+    function rebuild(){
+      const sel = selectionAfterClosure();
+      syncCheckboxes(sel);
+      updateAlsoUsedLabels(sel);
+      renderTopWarnings(sel);
+      updateButtons(sel);
+    }
+
+    // Wire change events: a click toggles the cb's checked state; we
+    // record the new state as a user override (on/off) and rebuild.
+    root.addEventListener('change', function(e){
+      const cb = e.target;
+      if(!cb || !cb.classList || !cb.classList.contains('tree-cb')) return;
+      const id = cb._recipeId;
+      if(cb.checked){
+        userState.set(id, 'on');
+        // Reveal sub-tree when a root product is ticked.
+        if(cb._depth === 0) openAncestorsOf(cb);
+      } else {
+        userState.set(id, 'off');
+      }
+      rebuild();
+    });
+
+    selectAllBtn.addEventListener('click', function(){
+      cbsByRecipe.forEach((list, id) => {
+        if(list[0]._depth === 0) userState.set(id, 'on');
+      });
+      // Open every root's <details> so the cascade is visible.
+      cbsByRecipe.forEach((list) => {
+        if(list[0]._depth === 0) openAncestorsOf(list[0]);
+        // Also open their own children's <details> so cascaded components
+        // can be seen.
+      });
+      root.querySelectorAll('details').forEach(d => { d.open = true; });
+      rebuild();
+    });
+
+    clearBtn.addEventListener('click', function(){
+      userState.clear();
+      rebuild();
+    });
+
+    // Initial render (everything off → empty selection, all labels clean).
+    rebuild();
+  })();
+  </script>
   {% else %}
     <p class="tree-empty">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
   {% endif %}
@@ -162,9 +392,11 @@
     <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
     <span class="count-out"></span>
   </div>
-  {# Bulk-archive form lives OUTSIDE the table so it doesn't nest with the
-     per-row Sold-toggle / archive forms. Checkboxes and the submit button
-     attach via the HTML5 form="bulk-form" attribute. #}
+  {% comment %}
+  Bulk-archive form lives OUTSIDE the table so it doesn't nest with the
+  per-row Sold-toggle / archive forms. Checkboxes and the submit button
+  attach via the HTML5 form="bulk-form" attribute.
+  {% endcomment %}
   <form method="post" action="{% url 'recipe_bulk_archive' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>

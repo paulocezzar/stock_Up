@@ -1,7 +1,12 @@
 {% extends "stock/_section_recipes.html" %}
 {% block n_rec_list %}on{% endblock %}
 {% block body %}
-<h2>Delete {{ selected|length }} recipe{{ selected|length|pluralize }}?</h2>
+<h2 style="color:var(--red)">Permanently delete {{ selected|length }} recipe{{ selected|length|pluralize }}?</h2>
+
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>This is NOT the same as archiving</h3>
+  <p>Archive (the default action) hides recipes and is reversible. <strong>Permanent delete</strong> removes them from the database and is irreversible from the UI. Use this only when you want each code itself blacklisted — for example because the recipes were created in error.</p>
+</div>
 
 <div class="card">
   <h3>Will delete</h3>
@@ -38,19 +43,53 @@
 {% endif %}
 
 <div class="card">
-  <h3>Confirm</h3>
-  <p>Confirming will:</p>
+  <h3>Confirm permanent deletion</h3>
+  <p>This will:</p>
   <ul style="margin:0 0 14px;padding-left:20px">
     <li>Delete <strong>{{ selected|length }}</strong> recipe{{ selected|length|pluralize }} and {{ selected|length|pluralize:"its,their" }} ingredient lines (raw ingredient Products are kept).</li>
     {% if external_rows %}<li>Drop sub-recipe lines in {{ external_rows|length }} other recipe{{ external_rows|length|pluralize }}.</li>{% endif %}
     <li>Record each code as suppressed so future deploys won't bring them back. Un-suppress via the Django admin if you change your mind.</li>
   </ul>
-  <form method="post" action="{% url 'recipe_bulk_delete' %}"
-        onsubmit="return confirm('Really delete {{ selected|length }} recipe{{ selected|length|pluralize }}? This can\'t be undone from the UI.')">{% csrf_token %}
+  {% if error %}<p class="muted" style="color:var(--red);margin:0 0 10px">{{ error }}</p>{% endif %}
+  <form method="post" action="{% url 'recipe_bulk_delete' %}" id="bulk-hard-delete-form">{% csrf_token %}
     {% for r in selected %}<input type="hidden" name="recipe_ids" value="{{ r.pk }}">{% endfor %}
     <input type="hidden" name="confirm" value="1">
-    <button class="btn" type="submit" style="background:var(--red);border-color:var(--red);color:#fff">Delete {{ selected|length }} recipe{{ selected|length|pluralize }}</button>
-    &nbsp;<a href="/recipes/?view=flat" class="muted">cancel</a>
+    <p>
+      <label style="display:inline-flex;align-items:center;gap:8px">
+        <input type="checkbox" name="acknowledge" id="bulk-hard-delete-ack">
+        I understand this is permanent and is different from archiving.
+      </label>
+    </p>
+    <p>
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span>Type <code>DELETE</code> to confirm:</span>
+        <input type="text" name="confirm_phrase" id="bulk-hard-delete-phrase"
+               autocomplete="off" spellcheck="false"
+               style="width:240px;font-family:var(--mono)">
+      </label>
+    </p>
+    <p>
+      <button class="btn" type="submit" id="bulk-hard-delete-btn" disabled
+              style="background:var(--red);border-color:var(--red);color:#fff">
+        Permanently delete {{ selected|length }} recipe{{ selected|length|pluralize }}
+      </button>
+      &nbsp;<a href="/recipes/" class="muted">cancel</a>
+    </p>
   </form>
 </div>
+
+<script>
+(function(){
+  var ack = document.getElementById('bulk-hard-delete-ack');
+  var phrase = document.getElementById('bulk-hard-delete-phrase');
+  var btn = document.getElementById('bulk-hard-delete-btn');
+  function refresh(){
+    var typed = (phrase.value || '').trim().toUpperCase();
+    btn.disabled = !(ack.checked && typed === 'DELETE');
+  }
+  ack.addEventListener('change', refresh);
+  phrase.addEventListener('input', refresh);
+  refresh();
+})();
+</script>
 {% endblock %}

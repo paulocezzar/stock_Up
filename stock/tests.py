@@ -4983,8 +4983,8 @@ class RecipeDeleteEditTests(TestCase):
         self.assertIn("NPD-R101", body)
         self.assertIn("Beta", body)
         self.assertNotIn("NPD-R102", body)
-        # Count visible
-        self.assertIn("Delete 2 recipe", body)
+        # Heading + button copy mentions 2 recipes.
+        self.assertIn("Permanently delete 2 recipe", body)
         # Confirmation NOT performed yet — both recipes still exist.
         self.assertEqual(Recipe.objects.filter(code__in=("NPD-R100", "NPD-R101")).count(), 2)
         self.assertFalse(SuppressedRecipe.objects.filter(code__in=("NPD-R100", "NPD-R101")).exists())
@@ -5029,6 +5029,7 @@ class RecipeDeleteEditTests(TestCase):
         resp = self.client.post("/recipes/bulk-delete/", {
             "recipe_ids": [str(a.pk), str(b.pk)],
             "confirm": "1",
+            "acknowledge": "on", "confirm_phrase": "DELETE",
         })
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(
@@ -5036,6 +5037,31 @@ class RecipeDeleteEditTests(TestCase):
         self.assertEqual(
             set(SuppressedRecipe.objects.values_list("code", flat=True)),
             {"NPD-R100", "NPD-R101"})
+
+    def test_bulk_delete_requires_acknowledgement_and_phrase(self):
+        # Without the gate, the confirmation re-renders with an error
+        # and nothing is deleted (matches the single hard-delete gate).
+        a = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept)
+        # No acknowledge → form re-renders
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk)],
+            "confirm": "1",
+            "confirm_phrase": "DELETE",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"acknowledgement", resp.content)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R100").exists())
+        # Wrong phrase → form re-renders
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk)],
+            "confirm": "1",
+            "acknowledge": "on",
+            "confirm_phrase": "delete please",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"DELETE", resp.content)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R100").exists())
 
     def test_bulk_delete_clears_dangling_external_subrecipe_lines(self):
         # External parent loses its sub-recipe line; its own ingredient
@@ -5055,6 +5081,7 @@ class RecipeDeleteEditTests(TestCase):
         resp = self.client.post("/recipes/bulk-delete/", {
             "recipe_ids": [str(sub.pk)],
             "confirm": "1",
+            "acknowledge": "on", "confirm_phrase": "DELETE",
         })
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(code="NPD-R900").exists())
@@ -5077,6 +5104,7 @@ class RecipeDeleteEditTests(TestCase):
                 self.client.post("/recipes/bulk-delete/", {
                     "recipe_ids": [str(a.pk), str(b.pk)],
                     "confirm": "1",
+                    "acknowledge": "on", "confirm_phrase": "DELETE",
                 })
         # Atomic rollback: both still there, no suppression.
         self.assertEqual(Recipe.objects.filter(
@@ -5102,6 +5130,7 @@ class RecipeDeleteEditTests(TestCase):
         resp = self.client.post("/recipes/bulk-delete/", {
             "recipe_ids": [str(mine.pk), str(theirs.pk)],
             "confirm": "1",
+            "acknowledge": "on", "confirm_phrase": "DELETE",
         })
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(code="NPD-R100").exists())
@@ -5132,6 +5161,7 @@ class RecipeDeleteEditTests(TestCase):
         self.client.post("/recipes/bulk-delete/", {
             "recipe_ids": [str(a.pk), str(b.pk)],
             "confirm": "1",
+            "acknowledge": "on", "confirm_phrase": "DELETE",
         })
         call_command("import_recipe", SAMPLE_RECIPE_XLSX,
                      "--department", "Bakery")
@@ -5440,6 +5470,215 @@ class RecipeDeleteEditTests(TestCase):
         # Bulk restore form posts to the right endpoint.
         self.assertIn('action="/recipes/bulk-restore/"', body)
         self.assertIn("Restore selected", body)
+
+    # ---- by-product tree: bulk-select with auto-tick cascade ----
+    #
+    # The auto-tick logic itself lives in client-side JS, so most of
+    # the closure scenarios are server-side data assertions: the
+    # template emits each recipe's `data-active-parents` and
+    # `data-roots-using` lists, and the JS computes orphan-ness from
+    # there. The tests below verify that:
+    #   * the data attributes match the actual sub_recipe references,
+    #   * the bulk-archive / bulk-delete endpoints accept the full
+    #     selection (product + components) the JS posts,
+    #   * the hard-delete confirmation gate works on the bulk path.
+
+    def _make_tree(self):
+        """A: P1 -> [C1 (only P1), C2 (shared P1+P2)], P2 -> [C2, C3 (only P2)],
+                  P1 -> ... -> C1 -> D1 (only-via-C1).
+
+        Sets up four products and three components, with a nested
+        depth-2 sub-component D1 reachable only through the C1 branch
+        of P1 — useful for the cascading-orphan test.
+        """
+        p1 = Recipe.objects.create(code="NPD-R100", name="Pie One",
+                                   department=self.dept, sold_as_product=True)
+        p2 = Recipe.objects.create(code="NPD-R101", name="Pie Two",
+                                   department=self.dept, sold_as_product=True)
+        c1 = Recipe.objects.create(code="NPD-R200", name="Filling",
+                                   department=self.dept, sold_as_product=False)
+        c2 = Recipe.objects.create(code="NPD-R201", name="Pastry",
+                                   department=self.dept, sold_as_product=False)
+        c3 = Recipe.objects.create(code="NPD-R202", name="Glaze",
+                                   department=self.dept, sold_as_product=False)
+        d1 = Recipe.objects.create(code="NPD-R300", name="Spice Mix",
+                                   department=self.dept, sold_as_product=False)
+        RecipeLine.objects.create(recipe=p1, sub_recipe=c1,
+                                  weight_g=Decimal("100"), ordering=0)
+        RecipeLine.objects.create(recipe=p1, sub_recipe=c2,
+                                  weight_g=Decimal("80"), ordering=1)
+        RecipeLine.objects.create(recipe=p2, sub_recipe=c2,
+                                  weight_g=Decimal("70"), ordering=0)
+        RecipeLine.objects.create(recipe=p2, sub_recipe=c3,
+                                  weight_g=Decimal("30"), ordering=1)
+        RecipeLine.objects.create(recipe=c1, sub_recipe=d1,
+                                  weight_g=Decimal("10"), ordering=0)
+        return {"p1": p1, "p2": p2, "c1": c1, "c2": c2, "c3": c3, "d1": d1}
+
+    def test_tree_renders_checkboxes_and_data_attributes(self):
+        t = self._make_tree()
+        body = self.client.get("/recipes/").content.decode()
+        # Two-button action bar; archive default, delete dangerous.
+        self.assertIn('id="tree-bulk-form"', body)
+        self.assertIn("Archive selected", body)
+        self.assertIn("Delete selected", body)
+        self.assertIn('formaction="/recipes/bulk-archive/"', body)
+        self.assertIn('formaction="/recipes/bulk-delete/"', body)
+        # Each active recipe in the tree is rendered with a tree-cb
+        # checkbox carrying its data attributes.
+        self.assertIn('class="tree-cb"', body)
+        self.assertIn(f'data-recipe-id="{t["p1"].pk}"', body)
+        self.assertIn(f'data-recipe-id="{t["c1"].pk}"', body)
+        self.assertIn(f'data-recipe-id="{t["c2"].pk}"', body)
+
+    def test_tree_node_active_parents_match_reality(self):
+        t = self._make_tree()
+        body = self.client.get("/recipes/").content.decode()
+        # C1 — only-parent P1 (orphaned the moment P1 is in selection).
+        c1_parents_pattern = f'data-recipe-id="{t["c1"].pk}"'
+        # The data-active-parents attribute is a stringified list like
+        # "[1, 2]"; assert C1's contains P1 only, C2's contains both.
+        import re
+        def parents_for(pk):
+            # Find the first checkbox tag carrying this recipe id and
+            # extract data-active-parents from it.
+            m = re.search(
+                rf'<input[^>]*data-recipe-id="{pk}"[^>]*'
+                r'data-active-parents="([^"]*)"', body)
+            assert m, f"no checkbox for recipe pk={pk}"
+            import json
+            return set(json.loads(m.group(1)))
+        self.assertEqual(parents_for(t["c1"].pk), {t["p1"].pk})
+        self.assertEqual(parents_for(t["c2"].pk), {t["p1"].pk, t["p2"].pk})
+        self.assertEqual(parents_for(t["c3"].pk), {t["p2"].pk})
+        self.assertEqual(parents_for(t["d1"].pk), {t["c1"].pk})
+        # Roots have no active parents themselves.
+        self.assertEqual(parents_for(t["p1"].pk), set())
+
+    def test_tree_node_roots_using_match_reality(self):
+        t = self._make_tree()
+        body = self.client.get("/recipes/").content.decode()
+        import re, json
+        def roots_for(pk):
+            m = re.search(
+                rf'<input[^>]*data-recipe-id="{pk}"[^>]*'
+                r'data-roots-using="([^"]*)"', body)
+            assert m
+            return set(json.loads(m.group(1)))
+        # C2 is reached from both P1 and P2; C1 only from P1; D1 only from P1 via C1.
+        self.assertEqual(roots_for(t["c2"].pk), {t["p1"].pk, t["p2"].pk})
+        self.assertEqual(roots_for(t["c1"].pk), {t["p1"].pk})
+        self.assertEqual(roots_for(t["d1"].pk), {t["p1"].pk})
+        # A root product's "roots using" includes itself (it's its own
+        # tree) — the JS subtracts the current node before rendering.
+        self.assertIn(t["p1"].pk, roots_for(t["p1"].pk))
+
+    def test_tree_archive_accepts_product_plus_orphaned_components(self):
+        # The JS would build the selection as {P1, C1, D1} (C1 and D1
+        # only reachable via P1). Posting that to bulk-archive must
+        # archive all three; C2 (shared) and P2 untouched.
+        t = self._make_tree()
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(t["p1"].pk), str(t["c1"].pk), str(t["d1"].pk)],
+        })
+        # Confirmation page renders with all three listed.
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        for code in ("NPD-R100", "NPD-R200", "NPD-R300"):
+            self.assertIn(code, body)
+        # Commit.
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(t["p1"].pk), str(t["c1"].pk), str(t["d1"].pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        for code in ("NPD-R100", "NPD-R200", "NPD-R300"):
+            self.assertTrue(Recipe.objects.get(code=code).archived)
+        # Shared C2 and the other product P2 + C3 are untouched.
+        for code in ("NPD-R101", "NPD-R201", "NPD-R202"):
+            self.assertFalse(Recipe.objects.get(code=code).archived)
+
+    def test_tree_archive_confirmation_flags_shared_component_when_included(self):
+        # The JS auto-ticks SAFE components only; the user can override
+        # by manually ticking a shared one (with a JS warning). When
+        # such a selection is POSTed, the confirmation must still
+        # surface the "still referenced" note so the operator is
+        # reminded server-side too.
+        t = self._make_tree()
+        # Selection = {P1, C2} — C2 is shared with P2 (not in selection).
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(t["p1"].pk), str(t["c2"].pk)],
+        })
+        body = resp.content.decode()
+        self.assertIn("still referenced", body.lower())
+        # Names the still-active parent.
+        self.assertIn("NPD-R101", body)
+        # And the component being archived.
+        self.assertIn("NPD-R201", body)
+
+    def test_tree_archive_leaves_shared_component_alone_when_unticked(self):
+        # Posting only the product (without the shared component) must
+        # NOT archive the component — it stays active.
+        t = self._make_tree()
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(t["p1"].pk), str(t["c1"].pk), str(t["d1"].pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        c2 = Recipe.objects.get(code="NPD-R201")
+        self.assertFalse(c2.archived)
+        # C2's ACTIVE parents reduce to {P2} after P1 is archived.
+        # parents() returns all references regardless of archived state,
+        # so we filter here to assert what the tree's auto-tick logic
+        # would consider (active references only).
+        active_parents = set(c2.parents().filter(archived=False)
+                             .values_list("code", flat=True))
+        self.assertEqual(active_parents, {"NPD-R101"})
+
+    def test_tree_delete_accepts_full_selection_with_acknowledgement(self):
+        # Tree's "Delete selected" posts to bulk-delete; the
+        # acknowledgement gate must accept ack=on + confirm_phrase=DELETE.
+        t = self._make_tree()
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(t["p1"].pk), str(t["c1"].pk), str(t["d1"].pk)],
+            "confirm": "1",
+            "acknowledge": "on",
+            "confirm_phrase": "DELETE",
+        })
+        self.assertEqual(resp.status_code, 302)
+        for code in ("NPD-R100", "NPD-R200", "NPD-R300"):
+            self.assertFalse(Recipe.objects.filter(code=code).exists())
+        # Suppression rows written.
+        suppressed = set(SuppressedRecipe.objects.values_list("code", flat=True))
+        self.assertEqual(suppressed,
+                         {"NPD-R100", "NPD-R200", "NPD-R300"})
+        # Shared C2 and the other product survive.
+        for code in ("NPD-R101", "NPD-R201", "NPD-R202"):
+            self.assertTrue(Recipe.objects.filter(code=code).exists())
+
+    def test_tree_does_not_render_archived_recipes(self):
+        # Archived recipes don't appear in the by-product tree at all
+        # (the bulk-selection UI never sees them). They show up in the
+        # Archived tab only.
+        t = self._make_tree()
+        t["c1"].archived = True
+        t["c1"].archived_at = timezone.now()
+        t["c1"].save()
+        body = self.client.get("/recipes/").content.decode()
+        # P1 and other actives still rendered; C1 absent.
+        self.assertIn(f'data-recipe-id="{t["p1"].pk}"', body)
+        self.assertNotIn(f'data-recipe-id="{t["c1"].pk}"', body)
+
+    def test_tree_recipe_meta_json_embedded(self):
+        # The JS reads /recipes/ meta to render code/name labels in
+        # warnings. The view must emit a JSON dict keyed by pk.
+        t = self._make_tree()
+        body = self.client.get("/recipes/").content.decode()
+        self.assertIn('id="tree-recipe-meta"', body)
+        # Each active recipe present in the meta blob (look for its code).
+        for code in ("NPD-R100", "NPD-R101", "NPD-R200", "NPD-R201",
+                     "NPD-R202", "NPD-R300"):
+            self.assertIn(code, body)
 
     def test_bulk_import_skips_suppressed_subrecipe_reference(self):
         # A workbook references NPD-R901 as a sub-recipe of NPD-R900.

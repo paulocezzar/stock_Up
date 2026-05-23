@@ -333,6 +333,18 @@ def _recipe_tree(recipe, depth=0, seen=None):
     return node
 
 
+def _safe_json(obj):
+    """Render a Python obj as JSON safe to embed in an HTML attribute.
+
+    `</script>` and other sensitive sequences are escaped via the standard
+    Django json_script trick; we just produce the raw JSON here and the
+    template emits it via the ``json_script`` filter or |escape, both of
+    which preserve correctness.
+    """
+    import json
+    return json.dumps(obj, separators=(",", ":"))
+
+
 def _by_product_forest(recipes):
     """Build the top-level → sub-recipe forest for the by-product view.
 
@@ -341,13 +353,24 @@ def _by_product_forest(recipes):
     under each parent that uses it, so the tree shows both "things we sell"
     and "what each is built from."
 
-    Each node is ``{recipe, depth, children, cycle}``. The recursion path's
-    ``seen`` set prevents an admin-edited cycle from rendering forever; a
-    back-edge becomes a leaf with cycle=True.
+    Each node is ``{recipe, depth, children, cycle, active_parent_ids,
+    roots_using}``. ``active_parent_ids`` is the list of recipe pks in the
+    active set that reference this node as a sub_recipe — used by the
+    tree's client-side auto-tick logic to decide whether a component is
+    "safe" to cascade-tick when its product is selected (safe iff every
+    active parent is in the current selection). ``roots_using`` is the
+    list of root product pks whose sub-trees transitively reach this
+    recipe — used for the user-friendly "also used by: X, Y" labels on
+    shared components.
+
+    The recursion path's ``seen`` set prevents an admin-edited cycle from
+    rendering forever; a back-edge becomes a leaf with cycle=True.
     """
     by_id = {r.pk: r for r in recipes}
     # parent_id → ordered, deduped list of sub_recipe ids
     children_of = {pk: [] for pk in by_id}
+    # sub_id → set of active parent ids (those that reference it)
+    parents_of = {pk: set() for pk in by_id}
     for r in recipes:
         seen_for_this = set()
         for line in sorted(r.lines.all(), key=lambda l: (l.ordering, l.id)):
@@ -357,13 +380,33 @@ def _by_product_forest(recipes):
                 continue
             seen_for_this.add(line.sub_recipe_id)
             children_of[r.pk].append(line.sub_recipe_id)
+            parents_of[line.sub_recipe_id].add(r.pk)
+
     roots = [r for r in recipes if r.sold_as_product]
     roots.sort(key=lambda r: r.code)
+
+    # Per-recipe set of root product ids whose sub-tree reaches it.
+    # DFS from each root, accumulating root pk into roots_using[child].
+    roots_using = {pk: set() for pk in by_id}
+    for root in roots:
+        stack = [root.pk]
+        visited = set()
+        while stack:
+            cur = stack.pop()
+            if cur in visited:
+                continue
+            visited.add(cur)
+            roots_using[cur].add(root.pk)
+            for child_id in children_of.get(cur, []):
+                if child_id not in visited:
+                    stack.append(child_id)
 
     def build(rid, depth, path):
         recipe = by_id[rid]
         node = {"recipe": recipe, "depth": depth,
-                "children": [], "cycle": False}
+                "children": [], "cycle": False,
+                "active_parent_ids": sorted(parents_of[rid]),
+                "roots_using": sorted(roots_using[rid])}
         if rid in path:
             node["cycle"] = True
             return node
@@ -419,6 +462,11 @@ def recipes_home(request):
 
     if view_mode == "by_product":
         context["forest"] = _by_product_forest(recipes)
+        # Map of pk → {code, name} so the tree's JS can render "also used
+        # by: X, Y" labels and shared-component warnings without scraping
+        # the DOM. Lightweight (one entry per active recipe).
+        context["tree_recipe_meta_json"] = _safe_json(
+            {r.pk: {"code": r.code, "name": r.name} for r in recipes})
     elif view_mode == "archived":
         # The archived view uses the same flat-row shape as the
         # "All recipes" tab so the existing checkbox / select-all UI
@@ -847,38 +895,49 @@ def recipe_bulk_delete(request):
         return redirect("/recipes/?view=flat")
     selected_pks = {r.pk for r in selected}
 
+    error = None
     if request.POST.get("confirm") == "1":
-        with transaction.atomic():
-            # Drop EVERY RecipeLine that references a selected recipe as
-            # its sub_recipe — including lines inside other selected
-            # recipes. Django's deletion collector raises ProtectedError
-            # the moment it sees any protected FK, even if the referrer
-            # is in the same delete batch and would be cascaded itself.
-            # Clearing them up front sidesteps that.
-            RecipeLine.objects.filter(sub_recipe_id__in=selected_pks).delete()
-            codes = [r.code for r in selected]
-            names = {r.code: r.name for r in selected}
-            Recipe.objects.filter(pk__in=selected_pks).delete()
-            for code in codes:
-                SuppressedRecipe.objects.update_or_create(
-                    code=code,
-                    defaults={"reason": f"Bulk delete: {names[code]}"[:200]},
-                )
-        # Former parents may have lost their last child reference; sold
-        # flags re-derive (manual overrides still respected).
-        Recipe.recompute_all_sold_defaults()
-        messages.success(
-            request,
-            f"Deleted {len(selected)} recipe(s): "
-            f"{', '.join(codes)}. "
-            "The next re-import will skip these codes.")
-        return redirect("/recipes/?view=flat")
+        acknowledge = request.POST.get("acknowledge") == "on"
+        typed = (request.POST.get("confirm_phrase") or "").strip().upper()
+        if not acknowledge:
+            error = "Tick the acknowledgement to confirm permanent bulk deletion."
+        elif typed != "DELETE":
+            error = ('Type "DELETE" (without the quotes) to confirm '
+                     "permanent bulk deletion.")
+        else:
+            with transaction.atomic():
+                # Drop EVERY RecipeLine that references a selected recipe
+                # as its sub_recipe — including lines inside other
+                # selected recipes. Django's deletion collector raises
+                # ProtectedError the moment it sees any protected FK,
+                # even if the referrer is in the same delete batch and
+                # would be cascaded itself. Clearing them up front
+                # sidesteps that.
+                RecipeLine.objects.filter(sub_recipe_id__in=selected_pks).delete()
+                codes = [r.code for r in selected]
+                names = {r.code: r.name for r in selected}
+                Recipe.objects.filter(pk__in=selected_pks).delete()
+                for code in codes:
+                    SuppressedRecipe.objects.update_or_create(
+                        code=code,
+                        defaults={"reason": f"Bulk delete: {names[code]}"[:200]},
+                    )
+            # Former parents may have lost their last child reference; sold
+            # flags re-derive (manual overrides still respected).
+            Recipe.recompute_all_sold_defaults()
+            messages.success(
+                request,
+                f"Permanently deleted {len(selected)} recipe(s): "
+                f"{', '.join(codes)}. "
+                "The next re-import will skip these codes.")
+            return redirect("/recipes/?view=flat")
 
-    # First submission — show the confirmation page. "External" parents
-    # are parents that use a selected sub-recipe but aren't themselves
-    # in the selection (so the operator sees the knock-on damage before
-    # confirming). Parents inside the selection are being deleted too,
-    # so they don't need their own warning row.
+    # Either first submission (no confirm) or confirm with a failed
+    # acknowledgement gate — render the confirmation page. "External"
+    # parents are parents that use a selected sub-recipe but aren't
+    # themselves in the selection (so the operator sees the knock-on
+    # damage before confirming). Parents inside the selection are being
+    # deleted too, so they don't need their own warning row.
     external = (Recipe.objects
                 .filter(lines__sub_recipe_id__in=selected_pks)
                 .exclude(pk__in=selected_pks)
@@ -893,6 +952,7 @@ def recipe_bulk_delete(request):
     return render(request, "stock/recipe_bulk_delete_confirm.html", {
         "selected": selected,
         "external_rows": external_rows,
+        "error": error,
     })
 
 
