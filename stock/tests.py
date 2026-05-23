@@ -7382,12 +7382,19 @@ class OrdersTests(TestCase):
     def test_orders_weekly_view_uses_wide_main_layout(self):
         # The weekly orders view opts into the wide-main layout so the
         # per-customer grid can use most of the viewport. Assert the
-        # rendered <main> carries the `wide` class.
+        # rendered <main> carries the `wide` class and the supporting
+        # CSS raises the max-width well above the default 1100px while
+        # keeping a modest side gutter (so content doesn't run flush
+        # to the screen edges).
         body = self.client.get("/orders/").content.decode()
-        # The <main> tag carries class="wide" (with no other classes).
         self.assertIn('<main class="wide">', body)
-        # And the supporting CSS rule is loaded.
-        self.assertIn('main.wide{max-width:none', body)
+        # Wider than the default 1100px container but capped so on
+        # ultra-wide monitors content still sits inside a sensible
+        # reading width.
+        self.assertIn('main.wide{max-width:1700px', body)
+        # And a real side gutter is set (not edge-to-edge).
+        self.assertIn('padding-left:28px', body)
+        self.assertIn('padding-right:28px', body)
 
     def test_other_pages_do_not_opt_into_wide_layout(self):
         # The wide layout is scoped to the orders weekly view ONLY —

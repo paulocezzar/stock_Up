@@ -1,7 +1,9 @@
 {% extends "stock/_section_orders.html" %}
 {% block n_orders_list %}on{% endblock %}
-{# Opt the weekly-orders view into the wide layout so the per-customer
-   products × days grid fits more day columns without horizontal scroll. #}
+{% comment %}
+Opt the weekly-orders view into the wide layout so the per-customer
+products × days grid fits more day columns without horizontal scroll.
+{% endcomment %}
 {% block main_class %}wide{% endblock %}
 {% block body %}
 <style>
@@ -266,9 +268,11 @@
   </div>
 </div>
 
-{# When ?date= narrows to one day, list that day's orders with the
-   detail / edit / delete actions — same surface the old day cards had
-   but only for the single day the operator filtered to. #}
+{% comment %}
+When ?date= narrows to one day, list that day's orders with the
+detail / edit / delete actions — same surface the old day cards had
+but only for the single day the operator filtered to.
+{% endcomment %}
 {% if filtered_day and filter_date %}
   <div class="day-block{% if filtered_day.is_today %} today{% endif %}">
     <div class="day-head">

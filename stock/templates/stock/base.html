@@ -30,12 +30,12 @@
   nav a.on,nav a:hover{color:var(--amber)}
   main{padding:22px;max-width:1100px;margin:0 auto}
   /* Wide layout — pages opt in by overriding the main_class block to
-     "wide". Drops the max-width and shrinks side padding to a small
-     gutter so a wide table (the Orders products × days grid) can use
-     most of the viewport without horizontal scrolling. Only the
-     Orders page opts in today; every other page keeps the default
-     centred 1100px container. */
-  main.wide{max-width:none;padding-left:14px;padding-right:14px}
+     "wide". Raises the max-width well beyond the default 1100px and
+     keeps a modest side gutter so a wide table (the Orders products
+     × days grid) can use most of the viewport without running flush
+     to the screen edges. Only the Orders page opts in today; every
+     other page keeps the default centred 1100px container. */
+  main.wide{max-width:1700px;padding-left:28px;padding-right:28px}
   h2{font-family:var(--disp);font-weight:600;letter-spacing:.5px;margin:0 0 16px}
   .stats{display:flex;gap:14px;margin-bottom:22px;flex-wrap:wrap}
   .stat{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);padding:14px 18px;min-width:130px}
@@ -76,13 +76,13 @@
   /* tablet landscape and smaller: trim outer chrome a touch */
   @media (max-width:1024px){
     main{padding:18px}
-    main.wide{padding-left:12px;padding-right:12px}
+    main.wide{padding-left:20px;padding-right:20px}
     header{padding:14px 18px;gap:16px}
   }
   /* tablet portrait: tighter spacing; let wide tables scroll inside their card rather than breaking the page */
   @media (max-width:768px){
     main{padding:16px}
-    main.wide{padding-left:10px;padding-right:10px}
+    main.wide{padding-left:16px;padding-right:16px}
     header{gap:12px;padding:12px 16px}
     header h1{font-size:16px}
     nav a{margin-right:12px;font-size:11px}
@@ -95,7 +95,7 @@
   @media (max-width:480px){
     body{font-size:13px}
     main{padding:12px}
-    main.wide{padding-left:8px;padding-right:8px}
+    main.wide{padding-left:12px;padding-right:12px}
     header{padding:10px 12px;gap:8px}
     header h1{width:100%;font-size:15px;margin:0}
     nav{width:100%;order:2}
