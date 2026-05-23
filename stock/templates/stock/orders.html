@@ -164,63 +164,64 @@ link that narrows the view to that specific day via ?date=.
 
 {% if grid %}
 <style>
-  /* The wrap div keeps horizontal scrolling as a fallback for narrow
-     screens; on a normal desktop the table itself fills the container
-     so there's no empty void on the right. */
+  /* The wrap keeps horizontal scrolling as a fallback for genuinely
+     narrow viewports; on a normal desktop the fixed column widths sum
+     to less than the available width so the table fits without ever
+     showing a horizontal scrollbar in the middle of the page. */
   .order-grid-wrap{position:relative;overflow-x:auto;max-width:100%;border:1px solid var(--line);background:var(--panel)}
-  .order-grid{border-collapse:separate;border-spacing:0;width:100%;
+  /* table-layout:fixed pins column widths from the explicit width on
+     each header cell. Cells without a width (the 7 day columns) share
+     whatever horizontal space is left, so the table always equals the
+     container's width — no overflow on desktop, clean fallback scroll
+     on mobile. */
+  .order-grid{table-layout:fixed;border-collapse:separate;border-spacing:0;width:100%;
     font-variant-numeric:tabular-nums;background:var(--panel);margin:0}
   .order-grid th,.order-grid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);
-    padding:9px 14px;text-align:right;white-space:nowrap;background:var(--panel)}
+    padding:7px 10px;text-align:right;white-space:nowrap;background:var(--panel)}
   .order-grid th.l,.order-grid td.l{text-align:left}
   .order-grid thead th{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;
     color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0;z-index:3}
-  /* Day columns get a real minimum so quantities never look cramped,
-     and they share whatever horizontal space is left after the fixed
-     columns — width:100% on the table distributes the remainder. */
-  .order-grid thead th.day{min-width:80px}
   .order-grid thead th.today{color:var(--amber);background:var(--bg)}
-  .order-grid tbody td.qty{font-family:var(--mono);min-width:80px}
+  .order-grid tbody td.qty{font-family:var(--mono)}
   .order-grid tbody td.qty.zero{color:var(--muted)}
   .order-grid tbody td.total-qty,.order-grid tbody td.total-val{font-weight:600;background:var(--panel2)}
   .order-grid tfoot td{font-weight:600;background:var(--panel2);border-top:2px solid var(--line)}
   .order-grid td.sku{font-family:var(--disp);color:var(--amber);font-size:11px;letter-spacing:.5px}
   .order-grid td.name a{font-weight:600}
 
-  /* Sticky left columns (SKU / Product / Price) so the day columns can
-     scroll horizontally without losing the row labels. Each sticky cell
-     needs an opaque background so the scrolling cells don't bleed through.
-     Fixed left offsets stack the three sticky columns; widths here MUST
-     equal the cumulative offsets used by the cell to the right so the
-     sticky positions line up with the natural column edges. */
+  /* Sticky left columns (SKU / Product / Price). Widths sum to 540px;
+     the col-sticky-foot in the footer matches that sum so the day-total
+     labels span exactly the three sticky columns. The Product column
+     truncates long names with an ellipsis when the column is narrower
+     than the name — the link's title= attribute carries the full name
+     so hover still reveals it. */
   .order-grid th.col-sku,.order-grid td.col-sku{
-    position:sticky;left:0;z-index:2;min-width:110px;width:110px;background:var(--panel)}
+    position:sticky;left:0;z-index:2;width:90px;background:var(--panel)}
   .order-grid th.col-name,.order-grid td.col-name{
-    position:sticky;left:110px;z-index:2;min-width:340px;width:340px;background:var(--panel);
-    white-space:nowrap;overflow:visible}
+    position:sticky;left:90px;z-index:2;width:380px;background:var(--panel);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .order-grid th.col-price,.order-grid td.col-price{
-    position:sticky;left:450px;z-index:2;min-width:90px;width:90px;background:var(--panel);
+    position:sticky;left:470px;z-index:2;width:70px;background:var(--panel);
     border-right:2px solid var(--line);text-align:right}
-  /* tfoot left cell spans all three sticky columns and stays sticky. */
   .order-grid tfoot td.col-sticky-foot{
     position:sticky;left:0;z-index:2;background:var(--panel2);border-right:2px solid var(--line);
-    min-width:540px}
+    width:540px}
   /* Header row sticky cells need a higher z-index to layer over the
      scrolling cells beneath. */
-  .order-grid thead th.col-sku{z-index:5;background:var(--panel2)}
-  .order-grid thead th.col-name{z-index:5;background:var(--panel2)}
+  .order-grid thead th.col-sku,
+  .order-grid thead th.col-name,
   .order-grid thead th.col-price{z-index:5;background:var(--panel2)}
+
   /* Row totals (qty + £) sit on the right edge — also sticky so a wide
-     scroll keeps them visible. Their fixed widths feed the `right:` offsets
-     below: total-val pins to right:0 (width 110px), total-qty pins to
-     right:110 (just to the left of total-val). */
+     scroll keeps them visible. Widths sum to 160px (total-qty 70 +
+     total-val 90); the right offsets below pin them in that order. */
   .order-grid tbody td.total-qty,.order-grid tbody td.total-val,
   .order-grid thead th.total-qty,.order-grid thead th.total-val{
     position:sticky;background:var(--panel2)}
-  .order-grid th.total-qty,.order-grid td.total-qty{min-width:100px;width:100px}
-  .order-grid th.total-val,.order-grid td.total-val{min-width:110px;width:110px}
+  .order-grid th.total-qty,.order-grid td.total-qty{width:70px}
+  .order-grid th.total-val,.order-grid td.total-val{width:90px}
   .order-grid tbody td.total-val,.order-grid thead th.total-val{right:0;z-index:2}
-  .order-grid tbody td.total-qty,.order-grid thead th.total-qty{right:110px;z-index:2}
+  .order-grid tbody td.total-qty,.order-grid thead th.total-qty{right:90px;z-index:2}
   .order-grid thead th.total-qty,.order-grid thead th.total-val{z-index:5}
 </style>
 <div class="card">
@@ -244,7 +245,7 @@ link that narrows the view to that specific day via ?date=.
       {% for row in grid.rows %}
         <tr>
           <td class="sku col-sku">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
-          <td class="l name col-name"><a href="{% url 'sale_product_detail' row.product.pk %}">{{ row.product.name }}</a></td>
+          <td class="l name col-name"><a href="{% url 'sale_product_detail' row.product.pk %}" title="{{ row.product.name }}">{{ row.product.name }}</a></td>
           <td class="col-price">{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
           {% for cell in row.cells %}
             {% if cell.qty is not None %}

@@ -7439,11 +7439,12 @@ class OrdersTests(TestCase):
         # The day-totals footer also pins its label cell sticky.
         self.assertIn('col-sticky-foot', body)
 
-    def test_grid_product_names_not_truncated(self):
-        # Long product names render in full inside the locked Product
-        # column — no CSS text-overflow truncation that would clip
-        # them. The cell uses white-space:nowrap so it widens to fit
-        # rather than hiding characters.
+    def test_grid_long_product_names_keep_full_text_via_title(self):
+        # The Product column has a fixed width (so the grid fits the
+        # container without horizontal scroll on desktop). A name too
+        # long for that width truncates visually with an ellipsis, but
+        # the full text stays in the DOM AND on the link's title=
+        # attribute so hover surfaces the complete name.
         long_name = "Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY"
         long_sp = SaleProduct.objects.create(
             name=long_name, price=Decimal("1.20"), department=self.dept)
@@ -7455,15 +7456,35 @@ class OrdersTests(TestCase):
         body = self.client.get(
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
         ).content.decode()
-        # The full name appears verbatim (Django autoescapes `&` to
-        # `&amp;`; assert on the escaped form the browser sees).
+        # The full name appears in the DOM (Django autoescapes `&`
+        # to `&amp;`; assert on the escaped form the browser sees).
         escaped = long_name.replace("&", "&amp;")
         self.assertIn(escaped, body)
-        # No "text-overflow: ellipsis" applied to the name column —
-        # truncation would erase characters from view.
-        self.assertNotIn('text-overflow:ellipsis', body)
-        # The name cell uses white-space:nowrap so it widens to fit.
+        # The link carries title="<full name>" so hover reveals it
+        # even when the cell visually truncates.
+        self.assertIn(f'title="{escaped}"', body)
+        # And the row uses nowrap (single-line truncation, not wrapping
+        # to a second row) so the grid keeps its tight vertical rhythm.
         self.assertIn('white-space:nowrap', body)
+
+    def test_grid_uses_fixed_layout_to_fit_container(self):
+        # The grid is table-layout:fixed and width:100% so its column
+        # widths come from the CSS — not the content — and the table
+        # always equals the container width. That stops the table from
+        # over-shooting its wrapper and producing a mid-page horizontal
+        # scrollbar between the grid and the day-tiles below.
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+        ).content.decode()
+        # table-layout:fixed is on the .order-grid rule.
+        self.assertIn('table-layout:fixed', body)
+        # Width is 100% so the table tracks the container exactly.
+        self.assertIn('width:100%', body)
 
     # ---- active-first customer list ----
 
