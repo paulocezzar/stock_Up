@@ -190,6 +190,20 @@ def _classify_packaging_header(row):
     return code_col, desc_col, qty_col
 
 
+def _open_workbook(file_or_path):
+    """Open a workbook in streaming mode, values-only.
+
+    ``read_only=True`` makes openpyxl stream the file instead of loading
+    every cell's full style record (borders, fonts, merged-cell rectangles,
+    colour theme, …) into memory. On a heavily formatted 93-sheet export
+    that styling load is what blows past Render's 512 MB free-tier limit
+    and times out the worker before parsing starts. ``data_only=True``
+    keeps the computed value of formula cells. Caller MUST close the
+    workbook (read_only workbooks hold the source file open).
+    """
+    return load_workbook(file_or_path, read_only=True, data_only=True)
+
+
 def parse_recipe_workbook(file_or_path):
     """Walk a single-recipe workbook and return a list of recipe dicts.
 
@@ -202,8 +216,11 @@ def parse_recipe_workbook(file_or_path):
     Only reads the active sheet — for multi-recipe workbooks where each
     sheet is its own Recipe Report, use ``parse_recipe_workbook_bulk``.
     """
-    wb = load_workbook(file_or_path, data_only=True)
-    return _parse_recipe_sheet(wb.active)
+    wb = _open_workbook(file_or_path)
+    try:
+        return _parse_recipe_sheet(wb.active)
+    finally:
+        wb.close()
 
 
 def parse_recipe_workbook_bulk(file_or_path):
@@ -221,22 +238,25 @@ def parse_recipe_workbook_bulk(file_or_path):
       * ``failures`` is a list of ``(sheet_title, reason)`` tuples;
       * ``sheets_processed`` is the total number of sheets we attempted.
     """
-    wb = load_workbook(file_or_path, data_only=True)
-    parsed = []
-    failures = []
-    sheets_processed = 0
-    for title in wb.sheetnames:
-        sheets_processed += 1
-        try:
-            sheet_parsed = _parse_recipe_sheet(wb[title])
-        except RecipeParseError as e:
-            failures.append((title, str(e)))
-            continue
-        except Exception as e:  # noqa: BLE001 — keep going past any bad sheet
-            failures.append((title, f"{type(e).__name__}: {e}"))
-            continue
-        parsed.extend(sheet_parsed)
-    return parsed, failures, sheets_processed
+    wb = _open_workbook(file_or_path)
+    try:
+        parsed = []
+        failures = []
+        sheets_processed = 0
+        for title in wb.sheetnames:
+            sheets_processed += 1
+            try:
+                sheet_parsed = _parse_recipe_sheet(wb[title])
+            except RecipeParseError as e:
+                failures.append((title, str(e)))
+                continue
+            except Exception as e:  # noqa: BLE001 — keep going past any bad sheet
+                failures.append((title, f"{type(e).__name__}: {e}"))
+                continue
+            parsed.extend(sheet_parsed)
+        return parsed, failures, sheets_processed
+    finally:
+        wb.close()
 
 
 def _parse_recipe_sheet(ws):
