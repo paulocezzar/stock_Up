@@ -28,3 +28,15 @@ python manage.py import_packaging data/packaging.xlsx
 # up new customers; manual type overrides are preserved via
 # is_type_manual exactly like Recipe.is_sold_manual.
 python manage.py import_customers data/order_sheet.xlsm
+
+# import_recipes_bulk walks every sheet in the 93-recipe workbook and runs
+# the per-sheet parser on each. Idempotent on NPD-R code, same as the
+# single-recipe importer, so re-running on every deploy is safe.
+# DELIBERATELY non-fatal: on Render free tier the web request itself can't
+# parse 93 sheets within the 30s gunicorn worker timeout, so this is the
+# canonical path for bulk recipe loads — but if a sheet here malforms or
+# the file goes missing we want the deploy to continue (the rest of the
+# app keeps working with the previous recipe data). Smaller single-recipe
+# uploads still go through /recipes/upload/.
+python manage.py import_recipes_bulk data/recipes_bulk_93.xlsx \
+    || echo "import_recipes_bulk had errors; continuing deploy."

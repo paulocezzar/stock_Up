@@ -12,6 +12,7 @@
       <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div>
   </div>
   <p class="muted" style="margin:10px 0 0;font-size:12px">Re-uploading an updated workbook for the same recipe code overwrites that recipe and its lines.</p>
+  <p class="muted" style="margin:6px 0 0;font-size:12px">Very large multi-sheet workbooks (dozens of recipes) should be loaded via deploy — the web request can't parse them within its timeout.</p>
 </div>
 <p>
   <button id="upBtn" class="btn" type="submit">Parse and preview</button>
