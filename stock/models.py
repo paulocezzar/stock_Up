@@ -540,6 +540,31 @@ class Recipe(models.Model):
                 sub_mult = multiplier * (line.weight_g / ref)
                 sub._explode_into(totals, sub_mult, seen)
 
+    def all_packaging(self):
+        """Distinct packaging Products used by this recipe or any sub-recipe.
+
+        Walks the sub-recipe tree (with cycle protection) and returns a
+        list of Product rows deduped by pk, code-sorted. Used by the
+        detail page so a sold product shows the packaging from its
+        nested components, not just whatever the top-level recipe
+        section happened to link directly.
+        """
+        seen_recipes = set()
+        packaging_by_pk = {}
+        stack = [self]
+        while stack:
+            r = stack.pop()
+            if r.pk in seen_recipes:
+                continue
+            seen_recipes.add(r.pk)
+            for link in r.packaging_links.select_related("packaging"):
+                packaging_by_pk.setdefault(link.packaging.pk, link.packaging)
+            for line in (r.lines.filter(sub_recipe__isnull=False)
+                         .select_related("sub_recipe")):
+                stack.append(line.sub_recipe)
+        return sorted(packaging_by_pk.values(),
+                      key=lambda p: (p.code or "").lower())
+
     def contains_cycle(self, candidate_child_id):
         """Would adding `candidate_child_id` as a sub-recipe create a cycle?
 
@@ -601,3 +626,33 @@ class RecipeLine(models.Model):
     @property
     def component(self):
         return self.ingredient or self.sub_recipe
+
+
+class RecipePackaging(models.Model):
+    """A packaging item used by a recipe.
+
+    Modelled separately from RecipeLine because packaging has different
+    semantics: the raw quantity from the export is in unreliable units
+    (per-gram fractions like ``4.41897311481717E-05Each``, per-pack
+    strings like ``50g``, etc.). We store the original string verbatim
+    so future production maths can interpret it, and surface the link
+    on the recipe detail page so the bakery can see which packaging a
+    product is built with.
+    """
+    recipe = models.ForeignKey(
+        Recipe, related_name="packaging_links", on_delete=models.CASCADE)
+    packaging = models.ForeignKey(
+        Product, related_name="used_in_recipe_packaging",
+        on_delete=models.PROTECT,
+        help_text="A Product in the Packaging category (NPD-P*).")
+    # Raw, exporter-provided quantity string — kept as-is so we can revisit
+    # the units question without re-importing.
+    raw_quantity = models.CharField(max_length=64, blank=True)
+    ordering = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["ordering", "id"]
+        unique_together = ("recipe", "packaging")
+
+    def __str__(self):
+        return f"{self.recipe.code} ↔ {self.packaging.code}"

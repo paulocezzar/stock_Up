@@ -106,12 +106,6 @@ field couldn't express.
 <p class="muted" style="margin:-10px 0 14px;font-size:12px">Used in: {% for p in parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
 {% endif %}
 
-{% if recipe.cook_loss_pct is not None %}
-<div class="stats">
-  <div class="stat"><div class="k">Cook loss</div><div class="v">{{ recipe.cook_loss_pct|floatformat:2 }}%</div></div>
-</div>
-{% endif %}
-
 <div class="view-toggle" role="tablist">
   <a href="{% url 'recipe_detail' recipe.pk %}" class="{% if view_mode == 'structure' %}on{% endif %}">Structure</a>
   <a href="{% url 'recipe_detail' recipe.pk %}?view=flat" class="{% if view_mode == 'flat' %}on{% endif %}">All ingredients</a>
@@ -140,6 +134,24 @@ field couldn't express.
 {% else %}
 <div class="card"><h3>Nested breakdown</h3>
 {% include "stock/_recipe_node.html" with node=tree %}
+</div>
+{% endif %}
+
+{% if packaging_items %}
+<div class="card"><h3>Packaging <span class="muted" style="font-size:11px">linked items · quantities are display-only for now</span></h3>
+<table>
+  <thead><tr><th>Code</th><th>Item</th><th></th></tr></thead>
+  <tbody>
+  {% for p in packaging_items %}
+    <tr>
+      <td><a href="{% url 'product_detail' p.pk %}">{{ p.code }}</a></td>
+      <td>{{ p.name }}</td>
+      <td><a href="{% url 'product_detail' p.pk %}">open →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Includes packaging from every sub-recipe used by this product. Per-unit consumption maths will live with production later.</p>
 </div>
 {% endif %}
 

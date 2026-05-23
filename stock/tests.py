@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -3547,8 +3547,8 @@ class PackagingViewTests(TestCase):
 
 
 class RecipeDetailStatsTrimTests(TestCase):
-    """Recipe detail page now shows ONLY the Cook loss stat card —
-    Deposit weight / Finished weight / Lines were removed per spec."""
+    """Recipe detail page has no stat cards now — Cook loss was the last
+    survivor and the spec dropped it too."""
 
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
@@ -3564,29 +3564,199 @@ class RecipeDetailStatsTrimTests(TestCase):
             finished_weight_g=Decimal("600"),
             cook_loss_pct=Decimal("9.09"))
 
-    def test_detail_shows_cook_loss_stat(self):
+    def test_detail_no_longer_shows_any_stat_cards(self):
         r = self.client.get(f"/recipes/{self.r.pk}/")
         body = r.content.decode()
-        self.assertIn(">Cook loss<", body)
-        self.assertIn("9.09%", body)
-
-    def test_detail_no_longer_shows_deposit_finished_lines_stats(self):
-        r = self.client.get(f"/recipes/{self.r.pk}/")
-        body = r.content.decode()
-        # The stat-card labels are gone (we only check inside the .stats
-        # block so the deposit/finished values can still show elsewhere if
-        # we add them later — but the cards specifically are removed).
+        # All four ever-shown stat-card labels are gone — Deposit / Finished
+        # / Lines were removed earlier, Cook loss has now been removed too.
         self.assertNotIn(">Deposit weight<", body)
         self.assertNotIn(">Finished weight<", body)
-        # ">Lines<" was the stat-card label; it must not appear anymore.
-        # ">Lines</div>" was the exact original markup.
         self.assertNotIn(">Lines</div>", body)
+        # The Cook loss stat card specifically: no "Cook loss" label inside
+        # a stat block AND the percentage doesn't render in the header area
+        # (it can still appear inside the nested-breakdown rows because each
+        # recipe block shows "· cook loss N%" in-line — that's fine).
+        # Just verify the dedicated stat-card label/value are absent.
+        self.assertNotIn(">Cook loss</div>", body)
 
-    def test_detail_omits_stats_block_entirely_when_no_cook_loss(self):
-        # A recipe with no cook loss shouldn't render an empty .stats block.
-        r2 = Recipe.objects.create(
-            code="NPD-R901", name="Plain", department=self.dept,
-            finished_weight_g=Decimal("100"))
-        resp = self.client.get(f"/recipes/{r2.pk}/")
+    def test_detail_omits_stats_block_entirely(self):
+        # No .stats block should render on the detail page at all now,
+        # whether or not cook_loss_pct is populated.
+        for r in (self.r,
+                  Recipe.objects.create(code="NPD-R901", name="Plain",
+                                        department=self.dept,
+                                        finished_weight_g=Decimal("100"))):
+            resp = self.client.get(f"/recipes/{r.pk}/")
+            body = resp.content.decode()
+            # The view-toggle should be the first thing after the header
+            # bits — no <div class="stats"> between the <h2> and the toggle.
+            head_end = body.index("</h2>")
+            toggle_start = body.index('class="view-toggle"')
+            between = body[head_end:toggle_start]
+            self.assertNotIn('class="stats"', between)
+
+
+class RecipePackagingImportTests(TestCase):
+    """Recipe import captures packaging links (NPD-P codes only) from
+    packaging sections, ignoring NPD-R/NPD-I noise that the exporter
+    sometimes drops into those tables."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        # Pre-import the real packaging master so NPD-P25 exists as a
+        # Product in the packaging category that the recipe import can
+        # link to (the recipe import never auto-creates packaging stubs).
+        call_command("import_packaging", PACKAGING_XLSX, "--department", "Bakery")
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX, "--department", "Bakery")
+
+    def test_npd_p25_linked_to_npd_r412(self):
+        # The only real packaging link in the mince pie file: NPD-P25
+        # (Vacuum Pouch) on NPD-R412 (Mincemeat). Stored on the new
+        # RecipePackaging table with the raw quantity string verbatim.
+        r412 = Recipe.objects.get(code="NPD-R412")
+        links = list(r412.packaging_links.all())
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link.packaging.code, "NPD-P25")
+        self.assertEqual(link.packaging.category, "packaging")
+        # Raw quantity from the spreadsheet is kept as-is (per-gram fraction
+        # in scientific notation + "Each" suffix), not converted.
+        self.assertIn("Each", link.raw_quantity)
+
+    def test_non_npd_p_rows_in_packaging_sections_are_ignored(self):
+        # Two such noise rows exist in the mince pie file:
+        # - row 26 of NPD-R655's "Recipe Packaging" table lists NPD-R568
+        # - row 49 of NPD-R568's "Packaging" table lists NPD-R412
+        # Both are sub-recipe references masquerading as packaging — the
+        # parser must skip them.
+        r655 = Recipe.objects.get(code="NPD-R655")
+        r568 = Recipe.objects.get(code="NPD-R568")
+        # No direct packaging links from either of those recipes
+        self.assertEqual(r655.packaging_links.count(), 0)
+        self.assertEqual(r568.packaging_links.count(), 0)
+        # Total NPD-P-linked rows = 1 across the whole import
+        self.assertEqual(RecipePackaging.objects.count(), 1)
+
+    def test_ingredient_and_subrecipe_parsing_is_unchanged(self):
+        # Regression guard: the same chain the mince pie regression test
+        # locks in must still nest correctly even with packaging parsing
+        # added.
+        r655 = Recipe.objects.get(code="NPD-R655")
+        self.assertEqual(r655.lines.count(), 1)
+        self.assertEqual(r655.lines.get().sub_recipe.code, "NPD-R568")
+        r568 = Recipe.objects.get(code="NPD-R568")
+        child_codes = sorted(ln.sub_recipe.code for ln in r568.lines.all())
+        self.assertEqual(child_codes,
+                         ["NPD-R223", "NPD-R412", "NPD-R413", "NPD-R567"])
+
+    def test_all_packaging_walks_subrecipe_tree(self):
+        # NPD-R655 has no direct packaging, but it transitively uses
+        # NPD-R412 which is packaged in NPD-P25 — Recipe.all_packaging
+        # walks the tree and surfaces it.
+        r655 = Recipe.objects.get(code="NPD-R655")
+        codes = [p.code for p in r655.all_packaging()]
+        self.assertEqual(codes, ["NPD-P25"])
+
+    def test_re_import_does_not_duplicate_packaging_links(self):
+        # save_recipes deletes existing packaging_links before re-creating;
+        # re-running the importer must keep the link count at 1.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_MINCEPIE_XLSX, "--department", "Bakery")
+        self.assertEqual(RecipePackaging.objects.count(), 1)
+
+    def test_recipe_detail_renders_packaging_section_for_sold_product(self):
+        # The detail page for the sold product (NPD-R655) shows a
+        # Packaging card with NPD-P25 linked through to the product page.
+        U = get_user_model()
+        u, _ = U.objects.get_or_create(username="alice")
+        u.set_password("pw"); u.save()
+        self.dept.members.add(u)
+        c = Client(); c.login(username="alice", password="pw")
+        c.get(f"/switch/{self.dept.pk}/")
+        r655 = Recipe.objects.get(code="NPD-R655")
+        resp = c.get(f"/recipes/{r655.pk}/")
         body = resp.content.decode()
-        self.assertNotIn(">Cook loss<", body)
+        # The h3 looks like `<h3>Packaging <span class="muted">…`, anchor
+        # on the opening tag so the trailing-space form still matches.
+        self.assertIn("<h3>Packaging", body)
+        self.assertIn("NPD-P25", body)
+        # And the row links to the packaging Product's detail page
+        npd_p25 = Product.objects.get(code="NPD-P25")
+        self.assertIn(f'href="/products/{npd_p25.pk}/"', body)
+
+    def test_recipe_detail_omits_packaging_section_when_recipe_has_none(self):
+        # A recipe with no direct or transitive packaging shouldn't show
+        # the section header.
+        U = get_user_model()
+        u, _ = U.objects.get_or_create(username="alice")
+        u.set_password("pw"); u.save()
+        self.dept.members.add(u)
+        c = Client(); c.login(username="alice", password="pw")
+        c.get(f"/switch/{self.dept.pk}/")
+        # NPD-R223 (Hazelnut Praline) is a leaf with no packaging anywhere
+        r223 = Recipe.objects.get(code="NPD-R223")
+        resp = c.get(f"/recipes/{r223.pk}/")
+        body = resp.content.decode()
+        self.assertNotIn("<h3>Packaging", body)
+
+
+class PackagingPageLayoutTests(TestCase):
+    """The Packaging list page mirrors the Ingredients page columns
+    + styling so the bakery sees one consistent stock-list pattern."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # One ingredient + one packaging item so we can compare layouts.
+        self.flour = Product.objects.create(
+            code="NPD-I777", name="Flour", department=self.dept,
+            category="dry_goods", unit="g", minimum=0)
+        self.box = Product.objects.create(
+            code="NPD-P777", name="Box", department=self.dept,
+            category="packaging", unit="ea", minimum=0)
+        sup = Supplier.objects.create(name="Acme")
+        SupplierPrice.objects.create(
+            product=self.box, supplier=sup,
+            pack_weight=Decimal("100"), pack_price=Decimal("25.00"))
+
+    def _header_cells(self, body, table_id):
+        # Pull the <thead><tr>...</tr></thead> cells for the named table.
+        start = body.index(f'id="{table_id}"')
+        thead = body[start:body.index("</thead>", start)]
+        import re
+        return re.findall(r"<th[^>]*>([^<]*)</th>", thead)
+
+    def test_packaging_page_columns_match_ingredients_page(self):
+        ing = self.client.get("/products/").content.decode()
+        pkg = self.client.get("/packaging/").content.decode()
+        ing_cols = self._header_cells(ing, "ingredients-tbl")
+        pkg_cols = self._header_cells(pkg, "packaging-tbl")
+        # Same number of columns, same numeric markers
+        self.assertEqual(len(ing_cols), len(pkg_cols))
+        # Both have a £/1000 column (the cross-units price comparator)
+        self.assertIn("£/1000", ing_cols)
+        self.assertIn("£/1000", pkg_cols)
+        # Both have Min and Cheapest
+        self.assertIn("Min", ing_cols)
+        self.assertIn("Min", pkg_cols)
+        self.assertIn("Cheapest", ing_cols)
+        self.assertIn("Cheapest", pkg_cols)
+
+    def test_packaging_page_uses_same_filter_and_row_styling(self):
+        body = self.client.get("/packaging/").content.decode()
+        # Same .filter + data-filter + data-search hooks as products.html
+        self.assertIn('class="filter"', body)
+        self.assertIn('data-filter="packaging-tbl"', body)
+        self.assertIn('data-search="', body)
+        # £/1000 for NPD-P777: £25 / 100 ea × 1000 = £250.00
+        self.assertIn("250.00", body)
+        # Same edit-prices + delete affordance shape as ingredients
+        self.assertIn("edit prices →", body)
+        self.assertIn("delete", body)

@@ -18,7 +18,12 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction
 from openpyxl import load_workbook
 
-from .models import Product, Recipe, RecipeCycleError, RecipeLine
+from .models import (
+    Product, Recipe, RecipeCycleError, RecipeLine, RecipePackaging,
+)
+
+
+PACKAGING_CODE_RE = re.compile(r"^NPD-P\d+$", re.IGNORECASE)
 
 
 HEADING_RE = re.compile(r"^(NPD-R\d+)\s*-\s*(.+)$", re.IGNORECASE)
@@ -164,6 +169,27 @@ def _classify_ingredient_header(row):
     return code_col, desc_col, weight_col
 
 
+def _classify_packaging_header(row):
+    """If this row is a Code/Description/Quantity packaging-table header,
+    return ``(code_col, desc_col, qty_col)``. Otherwise return ``None``.
+
+    Packaging tables share the Code/Description labels with ingredient
+    tables but use Quantity (+ optionally UOM/State) instead of g/Weight.
+    A row with a weight column is NOT a packaging header (returns None
+    so the ingredient classifier wins).
+    """
+    code_col = _find_col(row, "Code")
+    desc_col = _find_col(row, "Description")
+    if code_col is None or desc_col is None:
+        return None
+    if _find_col(row, *_WEIGHT_HEADER_LABELS) is not None:
+        return None
+    qty_col = _find_col(row, "Quantity")
+    if qty_col is None:
+        return None
+    return code_col, desc_col, qty_col
+
+
 def parse_recipe_workbook(file_or_path):
     """Walk the workbook and return a list of recipe dicts.
 
@@ -217,6 +243,7 @@ def parse_recipe_workbook(file_or_path):
         if code in by_code:
             r = by_code[code]
             r["lines"] = []  # re-parsing this section: lines repopulate below
+            r["packaging"] = []
             if name and (not r.get("name") or r.get("name") == code):
                 r["name"] = name
             current["r"] = r
@@ -229,6 +256,7 @@ def parse_recipe_workbook(file_or_path):
             "cook_loss_pct": None,
             "method_text": "",
             "lines": [],
+            "packaging": [],
             "_total": None,
         }
         recipes.append(r)
@@ -236,12 +264,13 @@ def parse_recipe_workbook(file_or_path):
         current["r"] = r
         return r
 
-    state = "idle"  # idle | ingredients | method
+    state = "idle"  # idle | ingredients | packaging | method
     # Column indices recorded the last time we saw an ingredient-table
     # header — used so subsequent line rows pull from the right cells
     # regardless of how the exporter spaced its columns. Reset on every
     # new header (which may have a different layout for sub-recipes).
     ing_cols = {"code": None, "desc": None, "weight": None}
+    pkg_cols = {"code": None, "desc": None, "qty": None}
 
     for row in rows:
         cells_non_empty = _non_empty_cells(row)
@@ -265,6 +294,7 @@ def parse_recipe_workbook(file_or_path):
             _start(heading.group(1), heading.group(2))
             state = "idle"
             ing_cols = {"code": None, "desc": None, "weight": None}
+            pkg_cols = {"code": None, "desc": None, "qty": None}
             continue
 
         # "Method" section start (only when "Method" is the lone label in B,
@@ -287,6 +317,45 @@ def parse_recipe_workbook(file_or_path):
                 current["r"]["lines"] = []
             ing_cols["code"], ing_cols["desc"], ing_cols["weight"] = cls
             state = "ingredients"
+            continue
+
+        # Start of a packaging block (Code + Description + Quantity, NO
+        # weight column). Captures NPD-P rows beneath; any NPD-R/NPD-I
+        # rows that creep into packaging sections (the exporter mixes
+        # sub-recipe references into "Recipe Packaging" tables) are
+        # ignored — they're export noise, not real packaging.
+        pkg = _classify_packaging_header(row)
+        if pkg is not None:
+            if current["r"] is None and main_code:
+                _start(main_code, main_name, units=main_units)
+            if current["r"]:
+                current["r"]["packaging"] = []
+            pkg_cols["code"], pkg_cols["desc"], pkg_cols["qty"] = pkg
+            state = "packaging"
+            continue
+
+        # Packaging row: NPD-P only.
+        if state == "packaging":
+            code_col = pkg_cols["code"]
+            cand = None
+            if code_col is not None and code_col < len(row) and row[code_col] is not None:
+                cand = str(row[code_col]).strip()
+            if cand and PACKAGING_CODE_RE.match(cand) and current["r"] is not None:
+                desc = ""
+                desc_col = pkg_cols["desc"]
+                if desc_col is not None and desc_col < len(row) and row[desc_col] is not None:
+                    desc = str(row[desc_col]).strip()
+                qty_raw = ""
+                qty_col = pkg_cols["qty"]
+                if qty_col is not None and qty_col < len(row) and row[qty_col] is not None:
+                    qty_raw = str(row[qty_col]).strip()
+                current["r"]["packaging"].append({
+                    "code": cand.upper(),
+                    "name": desc,
+                    "raw_quantity": qty_raw,
+                })
+            # Non-NPD-P codes in a packaging section are export noise (e.g.
+            # NPD-R sub-recipe references). Drop them quietly.
             continue
 
         # Ingredient row (in or near an ingredients block).
@@ -445,6 +514,20 @@ def save_recipes(parsed, department):
     for spec in parsed:
         recipe = recipes_by_code[spec["code"]]
         recipe.lines.all().delete()
+        recipe.packaging_links.all().delete()
+        # Packaging: link to the existing packaging Product by NPD-P code.
+        # If the code isn't a known Product (packaging master hasn't been
+        # imported yet, or the code is bogus), skip silently — packaging
+        # has its own importer.
+        for j, pkg in enumerate(spec.get("packaging") or []):
+            pkg_product = product_by_code.get(pkg["code"])
+            if pkg_product is None:
+                continue
+            RecipePackaging.objects.create(
+                recipe=recipe, packaging=pkg_product,
+                raw_quantity=(pkg.get("raw_quantity") or "")[:64],
+                ordering=j,
+            )
         for i, line in enumerate(spec["lines"]):
             code = line["code"]
             weight = line["weight_g"]
@@ -521,6 +604,11 @@ def serialize_parsed(parsed):
                 "weight_g": str(ln["weight_g"]),
                 "is_subrecipe": ln["is_subrecipe"],
             } for ln in r["lines"]],
+            "packaging": [{
+                "code": pk["code"],
+                "name": pk["name"],
+                "raw_quantity": pk.get("raw_quantity") or "",
+            } for pk in r.get("packaging") or []],
         })
     return out
 
@@ -542,5 +630,10 @@ def deserialize_parsed(raw):
                 "weight_g": _dec(ln["weight_g"]),
                 "is_subrecipe": ln["is_subrecipe"],
             } for ln in r["lines"]],
+            "packaging": [{
+                "code": pk["code"],
+                "name": pk["name"],
+                "raw_quantity": pk.get("raw_quantity") or "",
+            } for pk in r.get("packaging") or []],
         })
     return out

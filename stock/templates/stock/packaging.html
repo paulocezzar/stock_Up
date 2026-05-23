@@ -1,27 +1,24 @@
 {% extends "stock/_section_stock.html" %}
-{% load pack_format %}
 {% block n_pack %}on{% endblock %}
 {% block body %}
-<h2>Packaging <span class="muted" style="font-size:14px">{{ n_items }} items</span></h2>
-<p class="muted" style="margin:-8px 0 14px;font-size:12px">Boxes, bags, labels, trays. Same stock/value/reorder machinery as ingredients — these just live in the Packaging category and aren't listed under <a href="{% url 'products' %}">Ingredients</a>.</p>
-
+<h2>Packaging</h2>
 <div class="filter">
   <input type="search" placeholder="filter by name or code…" data-filter="packaging-tbl" autocomplete="off">
   <span class="count-out"></span>
 </div>
 <table id="packaging-tbl">
-  <thead><tr><th>Item</th><th>Cheapest</th><th class="num">Pack size</th><th class="num">£/pack</th><th class="num">Min</th><th></th></tr></thead>
+  <thead><tr><th>Item</th><th>Cheapest</th><th class="num">£/1000</th><th class="num">Min</th><th></th><th></th></tr></thead>
   <tbody>
   {% for p in products %}
     <tr data-search="{{ p.name|lower }} {{ p.code|default:''|lower }}">
       <td><a href="{% url 'product_detail' p.pk %}">{{ p.name }}</a> <span class="muted">{{ p.code|default:"" }}</span></td>
       <td>{% with c=p.cheapest_price %}{% if c %}{{ c.supplier.name }}{% else %}<span class="muted">no price</span>{% endif %}{% endwith %}</td>
-      <td class="num">{% with c=p.cheapest_price %}{% if c %}{{ c.pack_weight|floatformat:0 }} ea{% else %}—{% endif %}{% endwith %}</td>
-      <td class="num">{% with c=p.cheapest_price %}{% if c %}£{{ c.pack_price|floatformat:2 }}{% else %}—{% endif %}{% endwith %}</td>
+      <td class="num">{% with c=p.cheapest_price %}{% if c %}{{ c.per_1000|floatformat:2 }}{% else %}—{% endif %}{% endwith %}</td>
       <td class="num">{{ p.minimum|floatformat:0 }}</td>
-      <td><a href="{% url 'product_detail' p.pk %}">open →</a></td>
+      <td><a href="{% url 'product_detail' p.pk %}">edit prices →</a></td>
+      <td><form method="post" action="{% url 'product_delete' p.pk %}" style="display:inline" onsubmit="return confirm('Delete {{ p.name }}?')">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">delete</button></form></td>
     </tr>
-  {% empty %}<tr><td colspan="6" class="muted">No packaging imported yet — run <code>import_packaging</code>.</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="6" class="muted">No packaging yet.</td></tr>{% endfor %}
   </tbody>
 </table>
 {% endblock %}

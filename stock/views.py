@@ -517,6 +517,9 @@ def recipe_detail(request, pk):
     else:
         context["tree"] = _recipe_tree(recipe)
     context["parents"] = list(recipe.parents())
+    # Packaging linked by this recipe OR any of its sub-recipes — for a
+    # sold product the union is what the bakery actually needs.
+    context["packaging_items"] = recipe.all_packaging()
     return render(request, "stock/recipe_detail.html", context)
 
 
