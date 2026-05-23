@@ -9,6 +9,42 @@
   .week-nav .current{font-family:var(--disp);font-weight:600;font-size:15px;color:var(--amber)}
   .week-nav form{display:inline-flex;gap:6px;align-items:center}
   .week-nav input[type=date]{padding:4px 8px}
+
+  /* Compact per-day totals strip — replaces the old verbose day cards.
+     Each weekday is one tile (clickable: filters the week to that day). */
+  .day-strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) minmax(110px,auto);
+    gap:6px;margin:14px 0}
+  .day-tile{display:flex;flex-direction:column;gap:2px;padding:8px 10px;
+    background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
+    color:inherit;text-decoration:none;font-variant-numeric:tabular-nums}
+  .day-tile:hover{border-color:var(--amber)}
+  .day-tile.today{border-left-color:var(--amber);background:var(--panel2)}
+  .day-tile.empty{opacity:.55}
+  .day-tile.empty:hover{opacity:.85}
+  .day-tile.total{background:var(--panel2);border-left-color:var(--amber)}
+  .day-tile .dn{font-family:var(--disp);font-weight:600;font-size:12px;letter-spacing:.5px}
+  .day-tile .dd{font-size:11px;color:var(--muted)}
+  .day-tile .count{font-size:11px;color:var(--muted);margin-top:2px}
+  .day-tile .value{font-family:var(--mono);font-weight:600;font-size:13px}
+  .day-tile.empty .value{color:var(--muted);font-weight:400}
+
+  /* Customer picker — active-first list with order count + value badge,
+     inactives dimmed but still clickable. */
+  .cust-list{margin:0;padding:0;list-style:none}
+  .cust-list .cust{display:flex;align-items:baseline;gap:10px;padding:6px 4px;
+    border-bottom:1px solid var(--line)}
+  .cust-list .cust:last-child{border-bottom:0}
+  .cust-list .cust.muted{opacity:.5}
+  .cust-list .cust.muted:hover{opacity:.85}
+  .cust-list .cust .name a{font-weight:600}
+  .cust-list .cust.muted .name a{font-weight:500}
+  .cust-list .cust .badge{font-family:var(--mono);font-size:11px;color:var(--muted);
+    margin-left:auto;white-space:nowrap}
+  .cust-list .cust.active .badge{color:var(--amber)}
+  .cust-list .divider{font-family:var(--disp);font-size:11px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);padding:10px 4px 4px;border-bottom:1px solid var(--line)}
+
+  /* Per-day order card — only rendered when ?date= narrows to one day. */
   .day-block{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
     padding:10px 14px;margin-bottom:8px}
   .day-block.today{border-left-color:var(--amber);background:var(--panel2)}
@@ -73,10 +109,14 @@
 
 {% if grid %}
 <style>
-  .order-grid{width:auto;font-variant-numeric:tabular-nums;border-collapse:collapse;background:var(--panel);border:1px solid var(--line)}
-  .order-grid th,.order-grid td{border:1px solid var(--line);padding:6px 10px;text-align:right;white-space:nowrap}
+  .order-grid-wrap{position:relative;overflow-x:auto;max-width:100%;border:1px solid var(--line);background:var(--panel)}
+  .order-grid{border-collapse:separate;border-spacing:0;width:auto;
+    font-variant-numeric:tabular-nums;background:var(--panel);margin:0}
+  .order-grid th,.order-grid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+    padding:6px 10px;text-align:right;white-space:nowrap;background:var(--panel)}
   .order-grid th.l,.order-grid td.l{text-align:left}
-  .order-grid thead th{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500;background:var(--panel2)}
+  .order-grid thead th{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;
+    color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0;z-index:3}
   .order-grid thead th.day{min-width:54px}
   .order-grid thead th.today{color:var(--amber);background:var(--bg)}
   .order-grid tbody td.qty{font-family:var(--mono);min-width:48px}
@@ -85,30 +125,60 @@
   .order-grid tfoot td{font-weight:600;background:var(--panel2);border-top:2px solid var(--line)}
   .order-grid td.sku{font-family:var(--disp);color:var(--amber);font-size:11px;letter-spacing:.5px}
   .order-grid td.name a{font-weight:600}
+
+  /* Sticky left columns (SKU / Product / Price) so the day columns can
+     scroll horizontally without losing the row labels. Each sticky cell
+     needs an opaque background so the scrolling cells don't bleed through.
+     Fixed left offsets stack the three sticky columns. */
+  .order-grid th.col-sku,.order-grid td.col-sku{
+    position:sticky;left:0;z-index:2;min-width:100px;width:100px;background:var(--panel)}
+  .order-grid th.col-name,.order-grid td.col-name{
+    position:sticky;left:100px;z-index:2;min-width:280px;max-width:380px;background:var(--panel);
+    white-space:nowrap;overflow:visible}
+  .order-grid th.col-price,.order-grid td.col-price{
+    position:sticky;left:380px;z-index:2;min-width:70px;width:70px;background:var(--panel);
+    border-right:2px solid var(--line);text-align:right}
+  /* tfoot left cell spans all three sticky columns and stays sticky. */
+  .order-grid tfoot td.col-sticky-foot{
+    position:sticky;left:0;z-index:2;background:var(--panel2);border-right:2px solid var(--line);
+    min-width:450px}
+  /* Header row sticky cells need a higher z-index to layer over the
+     scrolling cells beneath. */
+  .order-grid thead th.col-sku{z-index:5;background:var(--panel2)}
+  .order-grid thead th.col-name{z-index:5;background:var(--panel2)}
+  .order-grid thead th.col-price{z-index:5;background:var(--panel2)}
+  /* Row totals (qty + £) sit on the right edge — also sticky so a wide
+     scroll keeps them visible. */
+  .order-grid tbody td.total-qty,.order-grid tbody td.total-val,
+  .order-grid thead th.total-qty,.order-grid thead th.total-val{
+    position:sticky;background:var(--panel2)}
+  .order-grid tbody td.total-val,.order-grid thead th.total-val{right:0;z-index:2}
+  .order-grid tbody td.total-qty,.order-grid thead th.total-qty{right:90px;z-index:2}
+  .order-grid thead th.total-qty,.order-grid thead th.total-val{z-index:5}
 </style>
 <div class="card">
   <h3>{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}</h3>
-  <p class="muted" style="margin:0 0 10px;font-size:12px">Rows = products. Columns = the seven days of the week. Blank cells = no order that day. <a href="?week={{ week_start|date:'Y-m-d' }}">← back to all customers</a></p>
-  <div style="overflow-x:auto">
+  <p class="muted" style="margin:0 0 10px;font-size:12px">Rows = products. Columns = the seven days of the week. Blank cells = no order that day. The SKU, Product and Price columns stay locked while the day columns scroll. <a href="?week={{ week_start|date:'Y-m-d' }}">← back to all customers</a></p>
+  <div class="order-grid-wrap">
   <table class="order-grid">
     <thead>
       <tr>
-        <th class="l">SKU</th>
-        <th class="l">Product</th>
-        <th>Price</th>
+        <th class="l col-sku">SKU</th>
+        <th class="l col-name">Product</th>
+        <th class="col-price">Price</th>
         {% for day in days %}
           <th class="day{% if day.is_today %} today{% endif %}">{{ day.label|slice:":3" }}<br><span style="font-weight:400;color:var(--muted)">{{ day.date|date:"d M" }}</span></th>
         {% endfor %}
-        <th>Total</th>
-        <th>Total £</th>
+        <th class="total-qty">Total</th>
+        <th class="total-val">Total £</th>
       </tr>
     </thead>
     <tbody>
       {% for row in grid.rows %}
         <tr>
-          <td class="sku">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
-          <td class="l name"><a href="{% url 'sale_product_detail' row.product.pk %}">{{ row.product.name }}</a></td>
-          <td>{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
+          <td class="sku col-sku">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
+          <td class="l name col-name"><a href="{% url 'sale_product_detail' row.product.pk %}">{{ row.product.name }}</a></td>
+          <td class="col-price">{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
           {% for cell in row.cells %}
             {% if cell.qty is not None %}
               <td class="qty">{{ cell.qty|floatformat:"-3" }}</td>
@@ -126,20 +196,20 @@
     {% if grid.rows %}
     <tfoot>
       <tr>
-        <td colspan="3" class="l">Day totals (qty)</td>
+        <td colspan="3" class="l col-sticky-foot">Day totals (qty)</td>
         {% for t in grid.day_totals %}
           <td>{% if t %}{{ t|floatformat:"-3" }}{% else %}—{% endif %}</td>
         {% endfor %}
-        <td>{{ grid.grand_total|floatformat:"-3" }}</td>
-        <td>£{{ grid.grand_value }}</td>
+        <td class="total-qty">{{ grid.grand_total|floatformat:"-3" }}</td>
+        <td class="total-val">£{{ grid.grand_value }}</td>
       </tr>
       <tr>
-        <td colspan="3" class="l">Day totals (£)</td>
+        <td colspan="3" class="l col-sticky-foot">Day totals (£)</td>
         {% for v in grid.day_values %}
           <td>{% if v %}£{{ v }}{% else %}—{% endif %}</td>
         {% endfor %}
-        <td></td>
-        <td>£{{ grid.grand_value }}</td>
+        <td class="total-qty"></td>
+        <td class="total-val">£{{ grid.grand_value }}</td>
       </tr>
     </tfoot>
     {% endif %}
@@ -151,58 +221,86 @@
 {% if customer_links and not grid %}
 <div class="card">
   <h3>Customers <span class="muted" style="font-size:11px">click a customer to see their grid for this week</span></h3>
-  <ul style="margin:0;padding-left:20px;columns:2;column-gap:24px">
+  <ul class="cust-list">
+    {% if customer_links.0.active %}
+      <li class="divider">Ordered this week</li>
+    {% endif %}
     {% for cl in customer_links %}
-      <li style="margin:2px 0">
-        <a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a>
-        {% if cl.n_orders %}<span class="muted" style="font-size:11px">— {{ cl.n_orders }} order{{ cl.n_orders|pluralize }} this week</span>{% endif %}
+      {% ifchanged cl.active %}
+        {% if not cl.active %}
+          <li class="divider">Other customers <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— no orders this week</span></li>
+        {% endif %}
+      {% endifchanged %}
+      <li class="cust {% if cl.active %}active{% else %}muted{% endif %}">
+        <span class="name"><a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a></span>
+        {% if cl.active %}
+          <span class="badge">{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}</span>
+        {% else %}
+          <span class="badge">no orders this week</span>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>
 </div>
 {% endif %}
 
-{% for day in days %}
-  {% if day.count %}
-    <div class="day-block{% if day.is_today %} today{% endif %}">
-      <div class="day-head">
-        <span class="dn">{{ day.label }}</span>
-        <span class="dd">{{ day.date|date:"d M Y" }}</span>
-        <span class="dtot">{{ day.count }} order{{ day.count|pluralize }} · £{{ day.total }}</span>
-      </div>
-      <table>
-        <thead><tr><th>Customer</th><th class="num">Lines</th><th class="num">Value</th><th></th><th></th></tr></thead>
-        <tbody>
-        {% for o in day.orders %}
-          <tr>
-            <td>
-              <a href="{% url 'order_detail' o.pk %}">{{ o.customer.name }}</a>
-              {% if o.note %} <span class="muted" style="font-size:11px">· {{ o.note }}</span>{% endif %}
-            </td>
-            <td class="num">{{ o.lines.count }}</td>
-            <td class="num">£{{ o.total_value }}</td>
-            <td><a href="{% url 'order_edit' o.pk %}">edit →</a></td>
-            <td>
-              <form method="post" action="{% url 'order_delete' o.pk %}" style="display:inline"
-                    onsubmit="return confirm('Delete the order for {{ o.customer.name|escapejs }} on {{ o.order_date|date:'d M Y'|escapejs }}? This can\'t be undone.')">{% csrf_token %}
-                <button class="btn ghost" style="padding:4px 10px">delete</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+{# Compact per-day totals strip — replaces the old 7 verbose day cards. #}
+<div class="day-strip">
+  {% for day in days %}
+    <a class="day-tile{% if day.is_today %} today{% endif %}{% if not day.count %} empty{% endif %}"
+       href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}">
+      <span class="dn">{{ day.label|slice:":3" }}</span>
+      <span class="dd">{{ day.date|date:"d M" }}</span>
+      <span class="count">{% if day.count %}{{ day.count }} order{{ day.count|pluralize }}{% else %}—{% endif %}</span>
+      <span class="value">{% if day.total %}£{{ day.total }}{% else %}—{% endif %}</span>
+    </a>
+  {% endfor %}
+  <div class="day-tile total">
+    <span class="dn">Week</span>
+    <span class="dd">total</span>
+    <span class="count">{{ week_total_orders }} order{{ week_total_orders|pluralize }}</span>
+    <span class="value">£{{ week_total_value }}</span>
+  </div>
+</div>
+
+{# When ?date= narrows to one day, list that day's orders with the
+   detail / edit / delete actions — same surface the old day cards had
+   but only for the single day the operator filtered to. #}
+{% if filtered_day and filter_date %}
+  <div class="day-block{% if filtered_day.is_today %} today{% endif %}">
+    <div class="day-head">
+      <span class="dn">{{ filtered_day.label }}</span>
+      <span class="dd">{{ filtered_day.date|date:"d M Y" }}</span>
+      <span class="dtot">{{ filtered_day.count }} order{{ filtered_day.count|pluralize }} · £{{ filtered_day.total }}</span>
     </div>
-  {% else %}
-    <div class="day-block empty{% if day.is_today %} today{% endif %}">
-      <div class="day-head">
-        <span class="dn">{{ day.label }}</span>
-        <span class="dd">{{ day.date|date:"d M Y" }}</span>
-        <span class="dtot">no orders</span>
-      </div>
-    </div>
-  {% endif %}
-{% endfor %}
+    {% if filtered_day.orders %}
+    <table>
+      <thead><tr><th>Customer</th><th class="num">Lines</th><th class="num">Value</th><th></th><th></th></tr></thead>
+      <tbody>
+      {% for o in filtered_day.orders %}
+        <tr>
+          <td>
+            <a href="{% url 'order_detail' o.pk %}">{{ o.customer.name }}</a>
+            {% if o.note %} <span class="muted" style="font-size:11px">· {{ o.note }}</span>{% endif %}
+          </td>
+          <td class="num">{{ o.lines.count }}</td>
+          <td class="num">£{{ o.total_value }}</td>
+          <td><a href="{% url 'order_edit' o.pk %}">edit →</a></td>
+          <td>
+            <form method="post" action="{% url 'order_delete' o.pk %}" style="display:inline"
+                  onsubmit="return confirm('Delete the order for {{ o.customer.name|escapejs }} on {{ o.order_date|date:'d M Y'|escapejs }}? This can\'t be undone.')">{% csrf_token %}
+              <button class="btn ghost" style="padding:4px 10px">delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted" style="margin:0;font-size:12px">No orders for this day.</p>
+    {% endif %}
+  </div>
+{% endif %}
 
 <p class="muted" style="font-size:12px;margin:14px 0 0">
   Each order is stored per date; the week-commencing Monday is always derived from the date. The within-week filters (customer + specific day) narrow what's shown without changing the storage shape — manual <b>new order</b> creation still works per date.

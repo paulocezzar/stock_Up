@@ -2559,13 +2559,40 @@ def orders_home(request):
             grid = _build_order_grid(orders, days)
 
     # When no customer is picked the list of dept customers doubles as
-    # a "drill into a customer's week" picker — render each as a link
-    # that preserves the current week.
+    # a "drill into a customer's week" picker. Active customers (those
+    # with orders THIS week) come first with their order count + total;
+    # inactive ones still render below (dimmed in the template) so any
+    # customer remains one click away. Order within each group is
+    # alphabetical so the eye scans predictably.
     customer_links = []
     if not customer_pk:
         for c in customers:
-            n_orders = sum(1 for o in orders if o.customer_id == c.pk)
-            customer_links.append({"customer": c, "n_orders": n_orders})
+            cust_orders = [o for o in orders if o.customer_id == c.pk]
+            n_orders = len(cust_orders)
+            total_value = sum((o.total_value() for o in cust_orders),
+                              Decimal("0"))
+            customer_links.append({
+                "customer": c,
+                "n_orders": n_orders,
+                "total_value": total_value,
+                "active": n_orders > 0,
+            })
+        customer_links.sort(
+            key=lambda cl: (0 if cl["active"] else 1,
+                            cl["customer"].name.lower()))
+
+    # When ?date= narrows to a single day, surface that day's orders
+    # as a one-day list (the replacement for the old verbose 7-card
+    # strip — same edit / delete / detail links, but only for the day
+    # the operator actually filtered to).
+    filtered_day = None
+    if date_str:
+        try:
+            d = datetime.date.fromisoformat(date_str)
+            filtered_day = next(
+                (day for day in days if day["date"] == d), None)
+        except ValueError:
+            filtered_day = None
 
     return render(request, "stock/orders.html", {
         "orders": orders,
@@ -2584,6 +2611,7 @@ def orders_home(request):
         "selected_customer": selected_customer,
         "grid": grid,
         "customer_links": customer_links,
+        "filtered_day": filtered_day,
     })
 
 

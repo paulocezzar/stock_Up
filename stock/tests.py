@@ -6924,17 +6924,22 @@ class OrdersTests(TestCase):
         c = Order.objects.create(
             customer=self.alice_cust, order_date=datetime.date(2026, 5, 2),
             department=self.dept)
-        # No filter: all three shown.
+        # No filter: customer list shows Alice + Bob with their per-week
+        # order counts ("2 orders" / "1 order"). Individual order detail
+        # links don't surface here — they're reachable by drilling in.
         body = self.client.get("/orders/").content.decode()
-        for o in (a, b, c):
-            self.assertIn(f'/orders/{o.pk}/', body)
-        # Customer filter: only Alice's orders (a and c).
+        self.assertIn(self.alice_cust.name, body)
+        self.assertIn(self.bob_cust.name, body)
+        self.assertIn("2 orders", body)
+        self.assertIn("1 order", body)
+        # Customer filter alone → renders Alice's product grid for the
+        # week. Other customers' orders don't bleed in.
         body = self.client.get(
             f"/orders/?customer={self.alice_cust.pk}").content.decode()
-        self.assertIn(f'/orders/{a.pk}/', body)
-        self.assertIn(f'/orders/{c.pk}/', body)
+        self.assertIn('class="order-grid"', body)
         self.assertNotIn(f'/orders/{b.pk}/', body)
-        # Date filter: only May 1 (a and b).
+        # Date filter alone → single-day list of orders with their
+        # detail / edit / delete actions.
         body = self.client.get("/orders/?date=2026-05-01").content.decode()
         self.assertIn(f'/orders/{a.pk}/', body)
         self.assertIn(f'/orders/{b.pk}/', body)
@@ -7158,40 +7163,49 @@ class OrdersTests(TestCase):
                 "b_tue": b_tue, "b_fri": b_fri}
 
     def test_week_filter_snaps_any_day_to_monday(self):
-        # Any day inside Week A snaps to Mon 4 May. Orders in Week B
-        # must not appear and orders in Week A must.
-        orders = self._seed_two_weeks()
+        # Any day inside Week A snaps to Mon 4 May. Week A customers
+        # appear in the active list; Week B's day-tile dates (12 May
+        # b_tue, 15 May b_fri) must not appear in the compact strip.
+        self._seed_two_weeks()
         for snap_day in ("2026-05-04", "2026-05-06", "2026-05-10"):
             body = self.client.get(f"/orders/?week={snap_day}").content.decode()
             self.assertIn("week commencing 04 May 2026", body)
-            self.assertIn(f'/orders/{orders["a_mon"].pk}/', body)
-            self.assertIn(f'/orders/{orders["a_wed"].pk}/', body)
-            self.assertNotIn(f'/orders/{orders["b_tue"].pk}/', body)
-            self.assertNotIn(f'/orders/{orders["b_fri"].pk}/', body)
+            # Week A's tile dates (Mon..Sun, 04..10 May) all render.
+            for dt in ("04 May", "05 May", "06 May", "07 May",
+                       "08 May", "09 May", "10 May"):
+                self.assertIn(dt, body)
+            # Both Alice (a_mon) and Bob (a_wed) ordered in Week A —
+            # both appear with active badges.
+            self.assertIn(self.alice_cust.name, body)
+            self.assertIn(self.bob_cust.name, body)
+            # Week B's tile dates don't appear.
+            self.assertNotIn("12 May", body)
+            self.assertNotIn("15 May", body)
 
     def test_week_groups_orders_by_weekday(self):
-        # Each weekday strip carries its own orders. We assert the
-        # rendered .day-block sections appear in Mon–Sun order and the
-        # right orders end up under each.
-        orders = self._seed_two_weeks()
+        # The compact day strip lists Mon..Sun in order with each day's
+        # order count and £ total. Assert the dates render in calendar
+        # order inside the strip section.
+        self._seed_two_weeks()
         body = self.client.get("/orders/?week=2026-05-04").content.decode()
-        # Mon 04 strip — Garden Cafe order under it.
-        import re
-        # Use a coarse substring split: each day-block starts with
-        # `class="day-block` and includes a date heading.
-        # Mon strip must contain a_mon, Wed strip must contain a_wed.
-        # Confirm by ordering of substrings in the body.
-        i_mon_head = body.find("04 May 2026")
-        i_wed_head = body.find("06 May 2026")
-        i_a_mon_link = body.find(f'/orders/{orders["a_mon"].pk}/')
-        i_a_wed_link = body.find(f'/orders/{orders["a_wed"].pk}/')
-        self.assertGreater(i_mon_head, -1)
-        self.assertGreater(i_wed_head, -1)
-        # a_mon link sits between Mon heading and Wed heading.
-        self.assertLess(i_mon_head, i_a_mon_link)
-        self.assertLess(i_a_mon_link, i_wed_head)
-        # a_wed sits after Wed heading.
-        self.assertLess(i_wed_head, i_a_wed_link)
+        strip_start = body.find('class="day-strip"')
+        self.assertGreater(strip_start, -1,
+                           "compact day-strip should be on the page")
+        last = strip_start
+        for dt in ("04 May", "05 May", "06 May", "07 May",
+                   "08 May", "09 May", "10 May"):
+            pos = body.find(dt, last)
+            self.assertGreater(pos, last,
+                               f"{dt} should follow the previous date "
+                               "inside the day-strip")
+            last = pos
+        # Each day-tile is a link back into the view with ?date= so the
+        # operator can drill into one specific day's orders.
+        self.assertIn("date=2026-05-04", body)
+        self.assertIn("date=2026-05-06", body)
+        # Mon (a_mon) and Wed (a_wed) tiles report "1 order"; the empty
+        # days report a dash. Assert both shapes appear in the strip.
+        self.assertIn("1 order", body)
 
     def test_week_summary_totals_match_line_values(self):
         # Week A: a_mon = 3 × 2.20 = 6.60; a_wed = 1 × 18.00 = 18.00
@@ -7207,13 +7221,17 @@ class OrdersTests(TestCase):
         self.assertIn("£18.00", body)
 
     def test_week_filter_combines_with_customer_filter(self):
-        # Alice in Week A → a_mon only (not a_wed which is Bob's, not
-        # b_tue / b_fri which are in Week B).
+        # Alice in Week A → the grid renders for her. Bob's a_wed order
+        # and Week B's orders don't surface.
         orders = self._seed_two_weeks()
         body = self.client.get(
             f"/orders/?week=2026-05-04&customer={self.alice_cust.pk}"
         ).content.decode()
-        self.assertIn(f'/orders/{orders["a_mon"].pk}/', body)
+        # Alice's grid is on the page.
+        self.assertIn('class="order-grid"', body)
+        self.assertIn(self.loose.name, body)
+        # Bob's a_wed order, and Week B's order detail links, must not
+        # appear anywhere on the page (no detail-link surface here).
         self.assertNotIn(f'/orders/{orders["a_wed"].pk}/', body)
         self.assertNotIn(f'/orders/{orders["b_tue"].pk}/', body)
         self.assertNotIn(f'/orders/{orders["b_fri"].pk}/', body)
@@ -7239,28 +7257,34 @@ class OrdersTests(TestCase):
 
     def test_default_week_is_most_recent_when_today_has_no_orders(self):
         # Today is well after May 2026 (or before). The default lands
-        # on the most-recent-order's week.
-        orders = self._seed_two_weeks()
+        # on the most-recent-order's week — Week B (11 May–17 May).
+        self._seed_two_weeks()
         body = self.client.get("/orders/").content.decode()
         # Most recent order = b_fri (15 May 2026), Monday = 11 May.
         self.assertIn("week commencing 11 May 2026", body)
-        self.assertIn(f'/orders/{orders["b_fri"].pk}/', body)
-        self.assertIn(f'/orders/{orders["b_tue"].pk}/', body)
-        self.assertNotIn(f'/orders/{orders["a_mon"].pk}/', body)
+        # Week B's day-tile dates render; Week A's don't.
+        self.assertIn("12 May", body)            # b_tue
+        self.assertIn("15 May", body)            # b_fri
+        self.assertNotIn("04 May", body)         # a_mon (Week A)
+        # Both customers with Week B orders appear in the active list.
+        self.assertIn(self.alice_cust.name, body)
+        self.assertIn(self.bob_cust.name, body)
 
     def test_default_week_falls_back_to_today_when_no_orders(self):
         # No orders at all → default week = current week. The empty
-        # strip still renders with seven day blocks.
+        # compact strip still renders with seven day-tiles plus the
+        # week-total tile (8 tiles total).
         body = self.client.get("/orders/").content.decode()
         today_monday = (datetime.date.today() -
                         datetime.timedelta(days=datetime.date.today().weekday()))
         self.assertIn(f"week commencing {today_monday:%d %b %Y}", body)
-        # Seven day-block sections (one per weekday).
-        self.assertEqual(body.count('class="day-block'), 7)
+        # 7 weekday tiles + 1 week-total tile = 8 occurrences of
+        # `class="day-tile`.
+        self.assertEqual(body.count('class="day-tile'), 8)
 
     def test_manual_create_still_works_per_date_through_week_view(self):
         # Creating an order through the existing endpoint isn't
-        # affected by the week-grouping layer.
+        # affected by the new layout.
         resp = self.client.post("/orders/new/", {
             "customer_id": str(self.alice_cust.pk),
             "order_date": "2026-05-13",   # Wed in Week B
@@ -7269,9 +7293,14 @@ class OrdersTests(TestCase):
         })
         self.assertEqual(resp.status_code, 302)
         new_order = Order.objects.get(order_date=datetime.date(2026, 5, 13))
-        # And it appears under the Wed strip of Week B.
+        # The Wed day-tile shows the order count + £ for that day.
         body = self.client.get("/orders/?week=2026-05-11").content.decode()
-        self.assertIn("13 May 2026", body)
+        self.assertIn("13 May", body)
+        self.assertIn("1 order", body)
+        # Drilling into the day (?date=…) surfaces the order detail link.
+        body = self.client.get(
+            "/orders/?week=2026-05-11&date=2026-05-13"
+        ).content.decode()
         self.assertIn(f'/orders/{new_order.pk}/', body)
 
     def test_invalid_week_query_falls_back_to_default(self):
@@ -7347,6 +7376,197 @@ class OrdersTests(TestCase):
             "&date=2026-05-18"
         ).content.decode()
         self.assertNotIn('class="order-grid"', body)
+
+    # ---- sticky / frozen grid columns ----
+
+    def test_grid_left_columns_are_sticky(self):
+        # SKU / Product / Price columns stay locked while the day
+        # columns scroll horizontally. Assert the sticky CSS classes
+        # land on both the <th>s and the matching <td>s for at least
+        # one product row, and that the wrap div carries overflow-x.
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("4"))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+        ).content.decode()
+        # Header cells carry the col-* sticky classes.
+        self.assertIn('class="l col-sku"', body)
+        self.assertIn('class="l col-name"', body)
+        self.assertIn('class="col-price"', body)
+        # And the body cells carry them too — without these, the
+        # column wouldn't actually stick.
+        self.assertIn('class="sku col-sku"', body)
+        self.assertIn('class="l name col-name"', body)
+        self.assertIn('class="col-price"', body)
+        # Sticky positioning is enabled in the CSS block.
+        self.assertIn('position:sticky', body)
+        # The wrap div provides the horizontal scroll context.
+        self.assertIn('class="order-grid-wrap"', body)
+        # The day-totals footer also pins its label cell sticky.
+        self.assertIn('col-sticky-foot', body)
+
+    def test_grid_product_names_not_truncated(self):
+        # Long product names render in full inside the locked Product
+        # column — no CSS text-overflow truncation that would clip
+        # them. The cell uses white-space:nowrap so it widens to fit
+        # rather than hiding characters.
+        long_name = "Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY"
+        long_sp = SaleProduct.objects.create(
+            name=long_name, price=Decimal("1.20"), department=self.dept)
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=long_sp, qty_ordered=Decimal("1"))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+        ).content.decode()
+        # The full name appears verbatim (Django autoescapes `&` to
+        # `&amp;`; assert on the escaped form the browser sees).
+        escaped = long_name.replace("&", "&amp;")
+        self.assertIn(escaped, body)
+        # No "text-overflow: ellipsis" applied to the name column —
+        # truncation would erase characters from view.
+        self.assertNotIn('text-overflow:ellipsis', body)
+        # The name cell uses white-space:nowrap so it widens to fit.
+        self.assertIn('white-space:nowrap', body)
+
+    # ---- active-first customer list ----
+
+    def test_customer_list_orders_active_customers_first(self):
+        # Alice has an order this week; Bob doesn't. Alice's link must
+        # appear BEFORE Bob's in the rendered customer list.
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("4"))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        list_start = body.find('class="cust-list"')
+        self.assertGreater(list_start, -1)
+        # "Ordered this week" divider sits above Alice's row; the
+        # "Other customers" divider sits above Bob's row.
+        i_active_divider = body.find("Ordered this week", list_start)
+        i_other_divider = body.find("Other customers", list_start)
+        i_alice = body.find(self.alice_cust.name, list_start)
+        i_bob = body.find(self.bob_cust.name, list_start)
+        self.assertGreater(i_active_divider, -1)
+        self.assertGreater(i_other_divider, -1)
+        self.assertLess(i_active_divider, i_alice)
+        self.assertLess(i_alice, i_other_divider)
+        self.assertLess(i_other_divider, i_bob)
+
+    def test_customer_list_shows_count_and_total_value(self):
+        # Alice gets two orders this week — one each on Mon and Tue —
+        # adding up to 3 × 2.20 + 2 × 2.20 = £11.00. The badge spells
+        # out the count + £ alongside her name.
+        mon = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=mon, sale_product=self.loose, qty_ordered=Decimal("3"))
+        tue = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 19))
+        OrderLine.objects.create(
+            order=tue, sale_product=self.loose, qty_ordered=Decimal("2"))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        # The badge text on Alice's row: "2 orders · £11.00".
+        self.assertIn("2 orders", body)
+        self.assertIn("£11.00", body)
+
+    def test_inactive_customers_render_dimmed_but_clickable(self):
+        # Bob has no orders this week. His row renders with the
+        # `muted` class (the CSS dims it) AND still links to his
+        # customer-filtered week view (so he stays one click away).
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        # Scope the lookup to the customer-list section so we don't
+        # collide with the customer name appearing in the filter
+        # <select> at the top of the page.
+        list_start = body.find('class="cust-list"')
+        self.assertGreater(list_start, -1)
+        list_body = body[list_start:]
+        bob_pos = list_body.find(self.bob_cust.name)
+        self.assertGreater(bob_pos, -1)
+        # Walk back to the enclosing <li> opening tag.
+        li_start = list_body.rfind("<li", 0, bob_pos)
+        self.assertGreater(li_start, -1)
+        li_tag = list_body[li_start:bob_pos]
+        self.assertIn("cust muted", li_tag,
+                      "inactive customer row should carry the `muted` class")
+        # And he's still clickable: the customer-filtered URL is on
+        # his row's <a href>.
+        self.assertIn(f"customer={self.bob_cust.pk}", list_body)
+
+    # ---- compact per-day totals strip ----
+
+    def test_day_strip_shows_per_day_count_and_value(self):
+        # Mon = 3 × 2.20 = £6.60; Wed = 1 × 18.00 = £18.00. The strip
+        # shows the day, date, "1 order" and the value for each.
+        order_mon = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order_mon, sale_product=self.loose, qty_ordered=Decimal("3"))
+        order_wed = Order.objects.create(
+            customer=self.bob_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 20))
+        OrderLine.objects.create(
+            order=order_wed, sale_product=self.slab, qty_ordered=Decimal("1"))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        strip_start = body.find('class="day-strip"')
+        self.assertGreater(strip_start, -1)
+        # All 7 weekday tiles render with their date.
+        for dt in ("18 May", "19 May", "20 May", "21 May",
+                   "22 May", "23 May", "24 May"):
+            self.assertIn(dt, body[strip_start:])
+        # Mon + Wed each report "1 order" with their £ totals.
+        strip = body[strip_start:]
+        self.assertIn("1 order", strip)
+        self.assertIn("£6.60", strip)
+        self.assertIn("£18.00", strip)
+        # The week-total tile rolls them up to "2 orders · £24.60".
+        self.assertIn("2 orders", strip)
+        self.assertIn("£24.60", strip)
+
+    def test_day_strip_replaces_per_day_cards(self):
+        # The verbose per-day cards no longer render in the default
+        # (unfiltered) view; they only come back as a single block
+        # when ?date= narrows to one day. Without ?date= there should
+        # be at most one .day-block on the page (the filtered card),
+        # and with no filter, zero.
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        # No verbose per-day .day-block sections in the default view.
+        self.assertEqual(body.count('class="day-block'), 0)
+        # The compact strip is the replacement — 7 day-tiles + 1
+        # week-total tile = 8.
+        self.assertEqual(body.count('class="day-tile'), 8)
+
+    def test_day_strip_tile_links_filter_to_that_day(self):
+        # Each day-tile is a clickable link with ?date=YYYY-MM-DD so
+        # the operator can drill into a single day. The filtered view
+        # then surfaces that day's order detail links.
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        self.assertIn("date=2026-05-18", body)
+        # And the per-day list does surface when ?date= is set.
+        filtered = self.client.get(
+            "/orders/?week=2026-05-18&date=2026-05-18"
+        ).content.decode()
+        self.assertIn(f'/orders/{order.pk}/', filtered)
 
 
 def _seed_garden_cafe_products(dept):
