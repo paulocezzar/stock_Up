@@ -52,10 +52,20 @@ class Command(BaseCommand):
             f"discontinued / no catalogue link)")
         for tab, result in summary["per_tab"].items():
             unmatched = len(result.get("products_unmatched", []))
+            extra = ""
+            if "customers_imported" in result:
+                extra = f", {result['customers_imported']} wholesale customer(s)"
             self.stdout.write(
                 f"    {tab}: {result['lines_imported']} line(s), "
                 f"{result['products_matched']} matched, "
-                f"{unmatched} unmatched")
+                f"{unmatched} unmatched{extra}")
+        unmatched_names = summary.get("wholesale_customer_unmatched") or []
+        if unmatched_names:
+            self.stdout.write(self.style.WARNING(
+                f"  {len(unmatched_names)} wholesale name(s) with no Customer "
+                f"row — add them manually to capture their revenue:"))
+            for name in unmatched_names:
+                self.stdout.write(f"    {name!r}")
         if summary.get("failures"):
             self.stdout.write(self.style.WARNING(
                 f"  {len(summary['failures'])} tab failure(s):"))

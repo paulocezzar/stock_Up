@@ -61,6 +61,7 @@ python manage.py import_sale_products data/order_sheet.xlsm
 # non-fatal: a malformed tab or missing customer must not abort the
 # deploy after the imports above have already run.
 python manage.py import_orders data/order_sheet.xlsm \
+        --tab "GARDEN CAFE" --tab "WHOLESALE" \
     || echo "import_orders had errors; continuing deploy."
 
 # Historical order sheets in data/historical/ — one full week per file

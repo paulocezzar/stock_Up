@@ -37,14 +37,24 @@ class Command(BaseCommand):
             f"  {summary['tabs_processed']} tab(s) requested, "
             f"{summary['tabs_imported']} imported")
         for tab, result in summary["per_tab"].items():
+            extra = ""
+            if "customers_imported" in result:
+                extra = f", {result['customers_imported']} wholesale customer(s)"
             self.stdout.write(
                 f"  {tab}: {result['lines_imported']} line(s), "
-                f"{result['products_matched']} product(s) matched")
+                f"{result['products_matched']} product(s) matched{extra}")
             if result.get("products_unmatched"):
                 self.stdout.write(self.style.WARNING(
                     f"    {len(result['products_unmatched'])} unmatched row(s):"))
                 for sage, name in result["products_unmatched"]:
                     self.stdout.write(f"      sage={sage!r} name={name!r}")
+        unmatched_names = summary.get("wholesale_customer_unmatched") or []
+        if unmatched_names:
+            self.stdout.write(self.style.WARNING(
+                f"  {len(unmatched_names)} wholesale name(s) with no Customer "
+                f"row — add them manually to capture their revenue:"))
+            for name in unmatched_names:
+                self.stdout.write(f"    {name!r}")
         if summary.get("failures"):
             self.stdout.write(self.style.WARNING("  Tab failures:"))
             for tab, reason in summary["failures"]:

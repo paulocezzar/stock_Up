@@ -8178,13 +8178,17 @@ class HistoricalWorkbookImportTests(TestCase):
             customer=self.garden, order_date=self.WEEK_START).exists())
 
     def test_meta_tabs_are_skipped(self):
-        # The Products / Customers / WHOLESALE tabs aren't customer
-        # order forms — they should never appear in per_tab or failures.
+        # The Products / Customers / Delivery Note tabs aren't order
+        # forms — they should never appear in per_tab or failures.
+        # WHOLESALE is NOT in this list any more: it has its own
+        # parser and routes through per_tab with the wholesale-handler
+        # shape; see HistoricalImportReconciliationTests for that path.
         from stock.order_import import import_historical_workbook
         summary = import_historical_workbook(self.SHEET)
         seen = set(summary["per_tab"]) | {t for t, _ in summary["failures"]}
         for meta in ("Start", "Products", "Customers",
-                     "Customer Lookup", "WHOLESALE", "Production"):
+                     "Customer Lookup", "Production",
+                     "Delivery Note", "Wholesale Delivery Note"):
             self.assertNotIn(meta, seen,
                 f"meta tab {meta!r} should have been skipped silently")
 
@@ -8206,3 +8210,296 @@ class HistoricalWorkbookImportTests(TestCase):
         from django.core.management.base import CommandError
         with self.assertRaises(CommandError):
             call_command("import_historical_orders", "data/historical/does_not_exist.xlsm")
+
+
+class ImportBlankPriceTreatmentTests(TestCase):
+    """A blank Price cell on the sheet means £0 on import — NOT the
+    linked SaleProduct's current catalogue price. The fallback in
+    OrderLine.save() (snapshot the catalogue when the caller passes
+    None) is kept for the manual order form, where it's the right
+    thing to do. Importer paths must always pass something explicit."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.ecom = Customer.objects.create(name="ECOM", department=self.dept)
+        # The ECOM tab's "TN Biscuits Easter Bag_EA" row carries qty
+        # 50 on Tue but a BLANK Price cell. Seed a current catalogue
+        # entry priced at £2.50 — without the fix the importer would
+        # snapshot the catalogue price and inflate the order by £125.
+        self.biscuits = SaleProduct.objects.create(
+            name="TN Biscuits Easter Bag_EA", sage_number="660260238",
+            price=Decimal("2.50"), department=self.dept)
+
+    def test_blank_price_row_imports_at_zero_not_catalogue_price(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["ECOM"])
+        # The row matched by Sage No, so sale_product is linked. The
+        # snapshot must be £0 from the (blank) sheet cell, not £2.50
+        # from the catalogue.
+        line = OrderLine.objects.filter(
+            order__customer=self.ecom,
+            product_name="TN Biscuits Easter Bag_EA").first()
+        self.assertIsNotNone(line, "ECOM biscuits row should have imported")
+        self.assertEqual(line.sale_product_id, self.biscuits.pk,
+            "still links to current catalogue product (matched by Sage)")
+        self.assertEqual(line.unit_price, Decimal("0.00"),
+            "blank Price cell must snapshot as £0, not catalogue £2.50")
+        self.assertEqual(line.line_value, Decimal("0.00"))
+
+    def test_manual_orderline_creation_still_uses_catalogue_fallback(self):
+        # The OrderLine.save() snapshot fallback (catalogue → unit_price
+        # when caller passes None) is intentionally PRESERVED for the
+        # manual order form. This protects the operator UX: creating
+        # an order line through /orders/new/ should still record the
+        # current catalogue price even though we removed the fallback
+        # from the import path.
+        order = Order.objects.create(
+            customer=self.ecom, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        line = OrderLine.objects.create(
+            order=order, sale_product=self.biscuits,
+            qty_ordered=Decimal("3"))  # no unit_price passed
+        line.refresh_from_db()
+        self.assertEqual(line.unit_price, Decimal("2.50"),
+            "manual creation should still snapshot the catalogue price")
+
+
+class WholesaleImportTests(TestCase):
+    """The WHOLESALE tab — one row per (wholesale customer, product)
+    — is now routed to a dedicated parser. Each wholesale customer
+    must ALREADY EXIST as a Customer (no auto-create), gets their own
+    first-class Orders, and unmatched names are reported."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+    WEEK_START = datetime.date(2026, 3, 30)
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        # Seed two wholesale customers (TEALS + MJOLK) so we can prove
+        # per-customer orders land separately; deliberately omit
+        # BISHOPSTROW HOTEL to prove unmatched-name reporting.
+        self.teals = Customer.objects.create(
+            name="TEALS", department=self.dept)
+        self.mjolk = Customer.objects.create(
+            name="MJOLK", department=self.dept)
+        # A current-catalogue product so we can verify match-by-name
+        # still wires the link on a wholesale line.
+        self.croissant = SaleProduct.objects.create(
+            name="Croissant (Loose)", sage_number="660130013",
+            price=Decimal("1.10"), department=self.dept)
+
+    def test_wholesale_parser_splits_per_customer_with_orders(self):
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            result = import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        # Both seeded wholesale customers now have orders for the
+        # historical week — first-class Orders, just like Garden Café.
+        for cust in (self.teals, self.mjolk):
+            self.assertTrue(
+                Order.objects.filter(
+                    customer=cust, order_date=self.WEEK_START).exists(),
+                f"{cust.name} got no Orders out of WHOLESALE")
+        # Per-customer summary surfaces both with non-zero values.
+        self.assertIn("TEALS", result["per_customer"])
+        self.assertIn("MJOLK", result["per_customer"])
+        self.assertGreater(result["per_customer"]["TEALS"]["value"],
+                           Decimal("0"))
+
+    def test_wholesale_imports_existing_customers_no_duplicates(self):
+        # The handler must NEVER create a Customer row. Count before
+        # and after; the only Customer rows are the ones we seeded.
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        before = set(Customer.objects.values_list("name", flat=True))
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        after = set(Customer.objects.values_list("name", flat=True))
+        self.assertEqual(before, after,
+            "wholesale importer must not auto-create Customer rows")
+
+    def test_unmatched_wholesale_names_are_reported(self):
+        # BISHOPSTROW HOTEL appears on the WHOLESALE tab but we
+        # deliberately didn't seed it. The handler must report it
+        # in customer_unmatched rather than silently dropping it AND
+        # rather than auto-creating a new Customer for it.
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            result = import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        names_lower = [n.lower() for n in result["customer_unmatched"]]
+        self.assertIn("bishopstrow hotel", names_lower)
+        self.assertFalse(
+            Customer.objects.filter(name__iexact="bishopstrow hotel").exists(),
+            "unmatched wholesale name must NOT have been auto-created")
+
+    def test_wholesale_matched_products_link_to_saleproduct(self):
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        # Croissant (Loose) on TEALS' block matches by name → linked.
+        croissant_lines = OrderLine.objects.filter(
+            order__customer=self.teals, sale_product=self.croissant)
+        self.assertGreater(croissant_lines.count(), 0,
+            "name-matched product should still link to current catalogue")
+
+    def test_wholesale_total_for_seeded_customers_matches_sheet(self):
+        # TEALS sheet total is £1703.40, MJOLK is £357.60. Together
+        # the imported total for these two seeded customers should
+        # reconcile exactly with the sheet.
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        week = [self.WEEK_START + datetime.timedelta(days=i)
+                for i in range(7)]
+        teals_total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.teals, order_date__in=week)),
+            Decimal("0"))
+        mjolk_total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.mjolk, order_date__in=week)),
+            Decimal("0"))
+        self.assertEqual(teals_total, Decimal("1703.40"))
+        self.assertEqual(mjolk_total, Decimal("357.60"))
+
+    def test_wholesale_is_idempotent(self):
+        # Re-running converges, never duplicates. Mirror the per-tab
+        # importer's wipe-and-rebuild guarantee for the wholesale
+        # handler so build.sh can call it on every deploy safely.
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)
+            first_lines = OrderLine.objects.count()
+            first_orders = Order.objects.count()
+            import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        self.assertEqual(OrderLine.objects.count(), first_lines)
+        self.assertEqual(Order.objects.count(), first_orders)
+
+    def test_wholesale_blank_price_imports_as_zero(self):
+        # The wholesale handler shares the blank-price-is-£0 rule
+        # with the per-customer importer. THE OLD PHARMACY's
+        # "Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY" row
+        # has a blank Price cell but real quantities — those lines
+        # must snapshot at £0 even if a current catalogue match exists.
+        Customer.objects.create(
+            name="THE OLD PHARMACY", department=self.dept)
+        SaleProduct.objects.create(
+            name="Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY",
+            price=Decimal("1.20"), department=self.dept)
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)
+        finally:
+            wb.close()
+        sticky_lines = OrderLine.objects.filter(
+            order__customer__name__iexact="THE OLD PHARMACY",
+            product_name__icontains="Sticky Apple & Cinnamon Bun")
+        self.assertGreater(sticky_lines.count(), 0)
+        for line in sticky_lines:
+            self.assertEqual(line.unit_price, Decimal("0.00"),
+                "WHOLESALE blank-price row should snapshot at £0")
+
+    def test_wholesale_no_longer_in_meta_tabs(self):
+        # Future-proofing: if anyone re-adds 'wholesale' to META_TABS
+        # the importer silently stops capturing wholesale revenue.
+        from stock.order_import import META_TABS
+        self.assertNotIn("wholesale", META_TABS)
+
+
+class HistoricalImportReconciliationTests(TestCase):
+    """End-to-end reconciliation: the full historical import routes
+    WHOLESALE through its handler, fixes blank-price rows to £0, and
+    reconciles to the spec totals for w/c 30 Mar 2026."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+    WEEK_START = datetime.date(2026, 3, 30)
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        # Seed two customer-tab customers + two wholesale customers.
+        # The rest land in failures / customer_unmatched as expected.
+        self.garden = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.ecom = Customer.objects.create(
+            name="ECOM", department=self.dept)
+        self.teals = Customer.objects.create(
+            name="TEALS", department=self.dept)
+        # Seed the one ECOM SaleProduct whose blank-price row is the
+        # whole point of FIX 1 (also seed garden's catalogue so its
+        # matched lines work as before).
+        SaleProduct.objects.create(
+            name="TN Biscuits Easter Bag_EA", sage_number="660260238",
+            price=Decimal("2.50"), department=self.dept)
+        _seed_garden_cafe_products(self.dept)
+
+    def test_garden_and_ecom_reconcile_to_sheet_totals(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET, force=True)
+        week = [self.WEEK_START + datetime.timedelta(days=i) for i in range(7)]
+        garden_total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.garden, order_date__in=week)),
+            Decimal("0"))
+        ecom_total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.ecom, order_date__in=week)),
+            Decimal("0"))
+        self.assertEqual(garden_total, Decimal("649.05"))
+        # Pre-fix this was £766.60 (£125 ghost from the catalogue
+        # fallback). Post-fix it should be £641.60.
+        self.assertEqual(ecom_total, Decimal("641.60"))
+
+    def test_wholesale_routed_through_handler_in_historical(self):
+        from stock.order_import import import_historical_workbook
+        summary = import_historical_workbook(self.SHEET, force=True)
+        # WHOLESALE appears in per_tab with wholesale-handler shape
+        # (carries customers_imported), proving it's not skipped.
+        self.assertIn("WHOLESALE", summary["per_tab"])
+        self.assertIn("customers_imported", summary["per_tab"]["WHOLESALE"])
+        # TEALS has its own orders from WHOLESALE.
+        week = [self.WEEK_START + datetime.timedelta(days=i) for i in range(7)]
+        teals_total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.teals, order_date__in=week)),
+            Decimal("0"))
+        self.assertEqual(teals_total, Decimal("1703.40"))
+
+    def test_historical_summary_surfaces_wholesale_unmatched(self):
+        from stock.order_import import import_historical_workbook
+        summary = import_historical_workbook(self.SHEET, force=True)
+        # We didn't seed Bishopstrow / Pinkmans / Society / Mjolk /
+        # etc., so they should be reported at the top level for
+        # operator reconciliation — never silently auto-created.
+        self.assertGreater(len(summary.get(
+            "wholesale_customer_unmatched", [])), 0)
+        names_lower = [n.lower() for n in summary["wholesale_customer_unmatched"]]
+        self.assertIn("bishopstrow hotel", names_lower)

@@ -261,6 +261,15 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
         # which protects the total from later catalogue edits.
         sheet_name = (row.get("name") or "").strip()
         sheet_price = row.get("price")  # Decimal or None
+        # Sheet is authoritative for imports: a BLANK Price cell means
+        # £0, NOT "fall back to the linked SaleProduct's current price".
+        # The fallback in OrderLine.save() is kept for the manual order
+        # form (where the operator picks a product and we snapshot the
+        # catalogue's current price). For sheet rows we always pass
+        # something explicit so save()'s `unit_price is None` branch
+        # never fires — even a row whose Price cell is empty contributes
+        # £0 to the order total, matching the sheet exactly.
+        unit_price = sheet_price if sheet_price is not None else Decimal("0")
         if sp is None:
             products_unmatched.append((row.get("sage") or "",
                                        sheet_name))
@@ -277,7 +286,7 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
             OrderLine.objects.create(
                 order=order, sale_product=sp,
                 product_name=sheet_name,
-                unit_price=sheet_price,
+                unit_price=unit_price,
                 qty_ordered=qty)
             lines_imported += 1
             if sp is not None:
@@ -300,17 +309,285 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
     }
 
 
-# Workbook tabs that aren't customer order forms — never import as
-# orders. Mirrors ``import_customers.META_TABS`` (kept duplicated rather
-# than imported across modules to keep ordering imports independent of
-# the customer importer). WHOLESALE is meta here too: its layout is one
-# row per wholesale-customer name in column 0, not the per-customer
-# Ordered/Sent/Comments strip the parser expects.
+# Workbook tabs that aren't order forms at all — never import as
+# orders. WHOLESALE used to live here too (different layout) but it's
+# now routed to ``import_wholesale_tab`` so we capture wholesale
+# revenue: every other tab in this set really is just metadata or a
+# production sheet that the importer should never look at.
 META_TABS = {
     "start", "products", "customers", "customer lookup",
     "production", "starter", "daily production", "weekly production",
-    "delivery note", "wholesale delivery note", "wholesale",
+    "delivery note", "wholesale delivery note",
 }
+
+# The WHOLESALE tab is a per-row variant of the customer order form:
+# one row per (wholesale customer, product), grouped by customer in
+# vertical blocks. Routed to a dedicated parser because its column
+# layout is shifted by one to make room for the customer-name column.
+WHOLESALE_TAB = "WHOLESALE"
+
+# WHOLESALE layout: column 0 is the wholesale customer name (repeated
+# on every product row of that customer's block), then SKU at 1,
+# Product at 2, Price at 3, and Ordered/Sent/Comments triples per day
+# starting at column 4 (one-stride right of the per-customer tabs).
+WHOLESALE_NAME_COL = 0
+WHOLESALE_SKU_COL = 1
+WHOLESALE_PRODUCT_COL = 2
+WHOLESALE_PRICE_COL = 3
+WHOLESALE_DAY_COL_ORDERED = [4, 7, 10, 13, 16, 19, 22]
+WHOLESALE_DATE_ROW = 9
+WHOLESALE_PRODUCT_FIRST_ROW = 11
+
+
+def read_wholesale_dates(ws):
+    """Read the 7 (Mon..Sun) dates from the WHOLESALE tab's date row.
+
+    Same shape check as :func:`read_tab_dates` (Monday start, one-day
+    stride) but reads the wholesale-specific column offsets so the
+    customer-name column doesn't shift the dates left by one.
+    """
+    rows = list(ws.iter_rows(min_row=WHOLESALE_DATE_ROW,
+                             max_row=WHOLESALE_DATE_ROW,
+                             values_only=True))
+    if not rows:
+        raise ValueError("WHOLESALE date row missing")
+    row = rows[0]
+    dates = []
+    for col in WHOLESALE_DAY_COL_ORDERED:
+        if col >= len(row):
+            raise ValueError(
+                f"WHOLESALE date row too short — column {col} missing")
+        d = _date_from_cell(row[col])
+        if d is None:
+            raise ValueError(
+                f"WHOLESALE date column {col} doesn't carry a date")
+        dates.append(d)
+    if dates[0].weekday() != 0:
+        raise ValueError(
+            f"first WHOLESALE date {dates[0]} is a "
+            f"{dates[0].strftime('%A')}, not a Monday")
+    for i in range(1, 7):
+        if dates[i] - dates[i - 1] != datetime.timedelta(days=1):
+            raise ValueError(
+                f"WHOLESALE dates aren't consecutive: "
+                f"{dates[i-1]} -> {dates[i]}")
+    return dates
+
+
+def iter_wholesale_rows(ws):
+    """Yield ``{customer, sage, name, price, qtys}`` for every product
+    row on the WHOLESALE tab.
+
+    A row is kept iff both a customer name (col 0) and a product name
+    (col 2) are present — that excludes blank spacers between customer
+    blocks, the literal "Wholesale Customer" header label, leftover
+    customer-only rows (a name with no product, see the
+    TEALS-KITCHEN-only row in real sheets), and the totals row at the
+    bottom (no name, no product). ``qtys`` is a 7-long Mon..Sun list of
+    Decimals-or-None aligned to the day-ordered columns.
+    """
+    for row in ws.iter_rows(min_row=WHOLESALE_PRODUCT_FIRST_ROW,
+                            values_only=True):
+        if not row:
+            continue
+        cust = (_as_text(row[WHOLESALE_NAME_COL])
+                if len(row) > WHOLESALE_NAME_COL else "")
+        product = (_as_text(row[WHOLESALE_PRODUCT_COL])
+                   if len(row) > WHOLESALE_PRODUCT_COL else "")
+        if not cust or not product:
+            continue
+        if cust.strip().lower() == "wholesale customer":
+            continue
+        sku = (_as_text(row[WHOLESALE_SKU_COL])
+               if len(row) > WHOLESALE_SKU_COL else "")
+        price = _parse_price(row[WHOLESALE_PRICE_COL]
+                             if len(row) > WHOLESALE_PRICE_COL else None)
+        qtys = []
+        for col in WHOLESALE_DAY_COL_ORDERED:
+            qtys.append(_as_qty(row[col]) if col < len(row) else None)
+        yield {"customer": cust, "sage": sku, "name": product,
+               "price": price, "qtys": qtys}
+
+
+def _build_product_lookups_for_dept_or_bakery(dept):
+    """Same shape as :func:`_build_product_lookups` but defaults to the
+    Bakery dept's catalogue when the caller has no specific dept (the
+    wholesale path can encounter customers whose department field is
+    None — their bakery products still live under Bakery)."""
+    from .models import Department
+    target = dept or Department.objects.filter(name="Bakery").first()
+    return _build_product_lookups(target)
+
+
+@transaction.atomic
+def import_wholesale_tab(workbook):
+    """Import the WHOLESALE tab, splitting it into per-wholesale-customer
+    Orders that look first-class in the customer list / grid.
+
+    Every wholesale customer must ALREADY EXIST as a ``Customer`` row
+    (case-insensitive, trimmed name match). Unmatched names are
+    returned in ``customer_unmatched`` for the operator to reconcile —
+    auto-creating them would risk duplicating customers that exist
+    under a slightly different spelling, which is far worse to clean
+    up than a one-line report.
+
+    Idempotent on every (wholesale customer × date) the tab touches:
+    existing OrderLines for those days are wiped and rebuilt from the
+    sheet, so a re-run converges and never leaves orphans. Blank
+    Price cells snapshot as £0 (sheet authoritative, identical rule to
+    :func:`import_orders_for_tab`).
+
+    Returns:
+        {
+            "dates", "customers_imported",
+            "lines_imported", "products_matched",
+            "products_unmatched": [(sku, name)],
+            "customer_unmatched": [sheet_name],
+            "per_customer": {Customer.name: per-customer summary},
+        }
+    """
+    from .models import Customer, Department, Order, OrderLine
+
+    if WHOLESALE_TAB not in workbook.sheetnames:
+        return {
+            "dates": [],
+            "customers_imported": 0,
+            "lines_imported": 0,
+            "products_matched": 0,
+            "products_unmatched": [],
+            "customer_unmatched": [],
+            "per_customer": OrderedDict(),
+            "skipped": True,
+            "reason": f"workbook has no '{WHOLESALE_TAB}' tab",
+        }
+
+    ws = workbook[WHOLESALE_TAB]
+    dates = read_wholesale_dates(ws)
+    bakery = Department.objects.filter(name="Bakery").first()
+    by_sage, by_name = _build_product_lookups_for_dept_or_bakery(bakery)
+
+    # Group rows by wholesale customer name (preserving first-seen casing
+    # for display + reporting). One pass over the sheet — no DB hits.
+    grouped = OrderedDict()
+    for row in iter_wholesale_rows(ws):
+        key = row["customer"].strip().lower()
+        if key not in grouped:
+            grouped[key] = {"display_name": row["customer"].strip(),
+                            "rows": []}
+        grouped[key]["rows"].append(row)
+
+    # Resolve each wholesale name to an existing Customer. Auto-create
+    # is intentionally not an option here — the live sheet has a
+    # handful of legitimate wholesale customers (BISHOPSTROW HOTEL is
+    # the canonical example) that aren't yet in our Customers tab, and
+    # we'd rather surface them than silently fork the master list.
+    customer_unmatched = []
+    resolved = OrderedDict()
+    for key, block in grouped.items():
+        cust = Customer.objects.filter(name__iexact=block["display_name"]).first()
+        if cust is None:
+            customer_unmatched.append(block["display_name"])
+            continue
+        resolved[key] = (cust, block["rows"])
+
+    # Wipe existing wholesale lines for ONLY the resolved customers ×
+    # the sheet's dates. Other (non-wholesale) orders on those dates
+    # — e.g. the per-customer tabs already loaded — are untouched
+    # because they belong to different Customer rows.
+    resolved_customers = [cust for cust, _ in resolved.values()]
+    if resolved_customers:
+        OrderLine.objects.filter(
+            order__customer__in=resolved_customers,
+            order__order_date__in=dates,
+        ).delete()
+
+    # Cache (customer_pk, date) → Order
+    order_cache = {
+        (o.customer_id, o.order_date): o
+        for o in Order.objects.filter(
+            customer__in=resolved_customers, order_date__in=dates)
+    }
+
+    lines_imported = 0
+    products_matched = set()
+    products_unmatched = []
+    per_customer = OrderedDict()
+
+    for key, (customer, rows) in resolved.items():
+        dept = customer.department or bakery
+        if dept is None:
+            # No fallback department — record as a customer-level
+            # failure and keep going. Extremely unlikely (the seed
+            # data always has a Bakery dept), but defensive.
+            per_customer[customer.name] = {
+                "lines_imported": 0, "value": Decimal("0"),
+                "matched": 0, "unmatched": 0,
+                "skipped": "no department"}
+            continue
+
+        cust_lines = 0
+        cust_value = Decimal("0")
+        cust_matched = 0
+        cust_unmatched = 0
+
+        for row in rows:
+            sp = _match_product(row, by_sage, by_name)
+            sheet_name = (row.get("name") or "").strip()
+            sheet_price = row.get("price")
+            unit_price = sheet_price if sheet_price is not None else Decimal("0")
+            if sp is None:
+                products_unmatched.append((row.get("sage") or "", sheet_name))
+
+            for i, qty in enumerate(row["qtys"]):
+                if qty is None:
+                    continue
+                day = dates[i]
+                order = order_cache.get((customer.pk, day))
+                if order is None:
+                    order = Order.objects.create(
+                        customer=customer, department=dept, order_date=day)
+                    order_cache[(customer.pk, day)] = order
+                OrderLine.objects.create(
+                    order=order, sale_product=sp,
+                    product_name=sheet_name,
+                    unit_price=unit_price,
+                    qty_ordered=qty)
+                lines_imported += 1
+                cust_lines += 1
+                cust_value += qty * unit_price
+                if sp is not None:
+                    products_matched.add(sp.pk)
+                    cust_matched += 1
+                else:
+                    cust_unmatched += 1
+
+        per_customer[customer.name] = {
+            "lines_imported": cust_lines,
+            "value": cust_value.quantize(Decimal("0.01")),
+            "matched": cust_matched,
+            "unmatched": cust_unmatched,
+        }
+
+    # Sweep empty orders left behind for resolved customers (a
+    # wholesale customer who had orders BEFORE the re-run but whose
+    # tab block this run is entirely blank). Mirrors the same
+    # convergence the per-customer importer does.
+    if resolved_customers:
+        Order.objects.filter(
+            customer__in=resolved_customers, order_date__in=dates,
+            lines__isnull=True,
+        ).delete()
+
+    return {
+        "dates": dates,
+        "customers_imported": sum(
+            1 for v in per_customer.values() if v.get("lines_imported", 0) > 0),
+        "lines_imported": lines_imported,
+        "products_matched": len(products_matched),
+        "products_unmatched": products_unmatched,
+        "customer_unmatched": customer_unmatched,
+        "per_customer": per_customer,
+    }
 
 
 def _resolve_week_dates(wb):
@@ -318,18 +595,26 @@ def _resolve_week_dates(wb):
 
     Historical workbooks have ~30 customer tabs, all sharing the same
     layout — any one with a valid date row tells us the week. We try in
-    sheet order and return the first tab that parses cleanly; tabs
-    whose date row is missing/malformed (or that aren't customer tabs
-    at all) are silently skipped here — they surface again per-tab in
-    ``import_historical_workbook``'s failures list.
+    sheet order and return the first tab that parses cleanly. The
+    WHOLESALE tab is skipped here because its date row sits at a
+    different column offset; if every customer tab failed somehow the
+    wholesale parser would still be the fallback.
     """
     for tab in wb.sheetnames:
         if tab.strip().lower() in META_TABS:
+            continue
+        if tab == WHOLESALE_TAB:
             continue
         try:
             return read_tab_dates(wb[tab])
         except Exception:  # noqa: BLE001 — try the next tab
             continue
+    # Last resort: WHOLESALE's date row also carries the week.
+    if WHOLESALE_TAB in wb.sheetnames:
+        try:
+            return read_wholesale_dates(wb[WHOLESALE_TAB])
+        except Exception:  # noqa: BLE001
+            pass
     return None
 
 
@@ -400,24 +685,32 @@ def import_historical_workbook(file_or_path, *, force=False):
 
         per_tab = OrderedDict()
         failures = []
+        wholesale_customer_unmatched = []
         bakery_fallback = Department.objects.filter(name="Bakery").first()
         for tab in wb.sheetnames:
             if tab.strip().lower() in META_TABS:
                 continue
             try:
-                customer = Customer.objects.filter(name__iexact=tab).first()
-                if customer is None:
-                    failures.append(
-                        (tab, "no Customer with that name — run "
-                              "import_customers first"))
-                    continue
-                dept = customer.department or bakery_fallback
-                if dept is None:
-                    failures.append(
-                        (tab, "customer has no department and no Bakery "
-                              "fallback exists"))
-                    continue
-                result = import_orders_for_tab(wb, tab, customer, dept)
+                if tab == WHOLESALE_TAB:
+                    result = import_wholesale_tab(wb)
+                    # Bubble up unmatched wholesale names so the
+                    # caller can report them once at the top level.
+                    wholesale_customer_unmatched.extend(
+                        result.get("customer_unmatched", []))
+                else:
+                    customer = Customer.objects.filter(name__iexact=tab).first()
+                    if customer is None:
+                        failures.append(
+                            (tab, "no Customer with that name — run "
+                                  "import_customers first"))
+                        continue
+                    dept = customer.department or bakery_fallback
+                    if dept is None:
+                        failures.append(
+                            (tab, "customer has no department and no Bakery "
+                                  "fallback exists"))
+                        continue
+                    result = import_orders_for_tab(wb, tab, customer, dept)
             except Exception as e:  # noqa: BLE001 — keep going past a bad tab
                 failures.append((tab, f"{type(e).__name__}: {e}"))
                 continue
@@ -435,6 +728,7 @@ def import_historical_workbook(file_or_path, *, force=False):
             "products_matched": sum(r["products_matched"] for r in per_tab.values()),
             "products_unmatched_count": sum(
                 len(r["products_unmatched"]) for r in per_tab.values()),
+            "wholesale_customer_unmatched": wholesale_customer_unmatched,
             "per_tab": per_tab,
             "failures": failures,
         }
@@ -447,8 +741,10 @@ def import_orders(file_or_path, *, tabs=None):
 
     ``tabs`` defaults to ``["GARDEN CAFE"]`` — chunk 2 only imports the
     Garden Café tab so the whole pipeline can be verified end-to-end
-    on a single customer before scaling. Returns a dict per tab plus
-    a top-level summary.
+    on a single customer before scaling. The ``WHOLESALE`` tab can be
+    listed here too — it's routed to :func:`import_wholesale_tab` and
+    its per-tab summary carries ``customer_unmatched`` for any
+    wholesale customer name with no matching ``Customer`` row.
 
     Streams the workbook in ``read_only=True, data_only=True`` mode
     so a heavily formatted source doesn't blow the deploy worker's
@@ -466,8 +762,14 @@ def import_orders(file_or_path, *, tabs=None):
     try:
         results = OrderedDict()
         failures = []
+        wholesale_customer_unmatched = []
         for tab in tabs:
             try:
+                if tab == WHOLESALE_TAB:
+                    results[tab] = import_wholesale_tab(wb)
+                    wholesale_customer_unmatched.extend(
+                        results[tab].get("customer_unmatched", []))
+                    continue
                 customer = Customer.objects.filter(name__iexact=tab).first()
                 if customer is None:
                     failures.append(
@@ -489,6 +791,7 @@ def import_orders(file_or_path, *, tabs=None):
             "tabs_processed": len(tabs),
             "tabs_imported": len(results),
             "per_tab": results,
+            "wholesale_customer_unmatched": wholesale_customer_unmatched,
             "failures": failures,
         }
     finally:
