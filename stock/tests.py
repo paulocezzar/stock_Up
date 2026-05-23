@@ -3838,22 +3838,33 @@ class CustomersImportTests(TestCase):
         self.assertEqual(y.customer_type, Customer.WHOLESALE)
         self.assertTrue(y.is_type_manual)
 
-    def test_import_updates_location_and_contact_on_existing_rows(self):
-        # A customer's location/ordered_by must still update on re-import
-        # even when is_type_manual is True (only the TYPE is preserved).
+    def test_import_updates_location_on_existing_rows(self):
+        # Location is always authoritative from the Customers tab — it
+        # refreshes on every import (the manual flag protects type and
+        # contact, NOT location).
         from django.core.management import call_command
         c = Customer.objects.get(name="FARMSHOP")
         c.location = "WRONG"
-        c.ordered_by = "WRONG"
-        c.is_type_manual = True
-        c.customer_type = Customer.WHOLESALE   # bogus override to test it sticks
         c.save()
         call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
         c.refresh_from_db()
-        self.assertEqual(c.location, "Estate")           # updated
-        self.assertEqual(c.ordered_by, "Alan Stewart")   # updated
-        self.assertEqual(c.customer_type, Customer.WHOLESALE)  # respected
+        self.assertEqual(c.location, "Estate")
+
+    def test_manual_flag_preserves_both_type_and_contact(self):
+        # is_type_manual=True is the "operator edited this row" flag and
+        # must protect BOTH customer_type AND ordered_by from re-import.
+        from django.core.management import call_command
+        c = Customer.objects.get(name="FARMSHOP")
+        c.ordered_by = "Custom Contact"
+        c.customer_type = Customer.WHOLESALE   # bogus override
+        c.is_type_manual = True
+        c.save()
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        c.refresh_from_db()
+        self.assertEqual(c.ordered_by, "Custom Contact")     # preserved
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)  # preserved
         self.assertTrue(c.is_type_manual)
+        self.assertEqual(c.location, "Estate")               # still refreshed
 
     def test_summary_reports_internal_and_wholesale_counts(self):
         from django.core.management import call_command
@@ -3864,6 +3875,55 @@ class CustomersImportTests(TestCase):
         text = out.getvalue().lower()
         self.assertIn("internal", text)
         self.assertIn("wholesale", text)
+
+    def test_ordered_by_comes_from_own_tab_not_customers_tab_column(self):
+        # The Customers tab's "Ordered by" column is a misaligned
+        # alphabetical staff list and must NOT be used. Each customer's
+        # contact comes from a cell on their own order-form tab's header.
+        # ECOM's tab carries "Ordered by: Clare Stephens" — that's the
+        # value we want, not "Adam Flint" which is what the misaligned
+        # Customers-tab column had on the same row.
+        c = Customer.objects.get(name="ECOM")
+        self.assertEqual(c.ordered_by, "Clare Stephens")
+        self.assertNotEqual(c.ordered_by, "Adam Flint")
+
+    def test_ordered_by_for_several_real_customer_tabs(self):
+        # Spot-check three more tabs the spec calls out as known-good.
+        cases = {
+            "CREAMERY FARMSHOP": "Jessica Widdows",
+            "GARDEN CAFE": "Charles Marshall",
+            "FARMSHOP": "Daniel Smith",   # NOT "Alan Stewart" (Customers-tab row 3 col 3)
+        }
+        for name, expected in cases.items():
+            c = Customer.objects.get(name=name)
+            self.assertEqual(c.ordered_by, expected,
+                             f"{name} ordered_by should come from its own tab")
+
+    def test_customer_whose_tab_has_no_contact_has_blank_ordered_by(self):
+        # TN100's order-form tab has the "Ordered by" label but no contact
+        # name in the contact column (the only other text on that row is a
+        # far-right "w/c" date marker that must NOT be mistaken for a name).
+        c = Customer.objects.get(name="TN100")
+        self.assertEqual(c.ordered_by, "")
+
+    def test_wholesale_only_customer_has_blank_ordered_by(self):
+        # No per-customer order tab in the workbook for the PINKMANS
+        # branches, so their ordered_by stays blank.
+        c = Customer.objects.get(name="PINKMANS - WHITELADIES ROAD")
+        self.assertEqual(c.ordered_by, "")
+
+    def test_misaligned_customers_tab_column_is_not_used_anywhere(self):
+        # Aggregate check: not a single customer's ordered_by should equal
+        # the value the OLD code would have pulled from the misaligned
+        # Customers-tab "Ordered by" column on their row. We sample three
+        # of those known-bad values to prove the new code doesn't surface
+        # them anywhere by accident.
+        bad_values = {"Adam Flint", "Alan Stewart", "Aleisa Childs"}
+        actual = set(Customer.objects.exclude(ordered_by="")
+                     .values_list("ordered_by", flat=True))
+        # The intersection must be empty.
+        self.assertFalse(bad_values & actual,
+                         f"misaligned column leaked: {bad_values & actual}")
 
 
 class CustomersViewTests(TestCase):
