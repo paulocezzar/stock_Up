@@ -4233,6 +4233,108 @@ class CustomersCRUDTests(TestCase):
         self.assertIn("hand-created", body)
 
 
+class CustomersListRowActionsTests(TestCase):
+    """Per-row Edit + Delete actions on both customer list pages — the
+    same row-action treatment used on /products/ and /suppliers/.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.internal = Customer.objects.create(
+            name="GARDEN CAFE", location="Estate", ordered_by="Charles",
+            customer_type=Customer.INTERNAL, department=self.dept)
+        self.wholesale = Customer.objects.create(
+            name="TEALS", location="", ordered_by="",
+            customer_type=Customer.WHOLESALE, department=self.dept)
+
+    def _row(self, body, search_text):
+        # Cut out one customer's <tr> by anchoring on its data-search attr,
+        # so per-row assertions don't pick up siblings.
+        idx = body.find(f'data-search="{search_text}')
+        assert idx >= 0, f"row {search_text!r} not in body"
+        end = body.find("</tr>", idx)
+        return body[idx:end]
+
+    def test_internal_row_has_edit_link_to_edit_view(self):
+        body = self.client.get("/customers/").content.decode()
+        row = self._row(body, "garden cafe")
+        self.assertIn(f'href="/customers/{self.internal.pk}/edit/"', row)
+        self.assertIn("edit →", row)
+
+    def test_internal_row_has_delete_form_with_confirmation(self):
+        body = self.client.get("/customers/").content.decode()
+        row = self._row(body, "garden cafe")
+        # POSTs to the existing delete view
+        self.assertIn(f'action="/customers/{self.internal.pk}/delete/"', row)
+        # JS confirm matches the ingredients/suppliers pattern
+        self.assertIn("onsubmit=\"return confirm('Delete GARDEN CAFE?')\"", row)
+        # Same .btn.ghost button styling
+        self.assertIn('class="btn ghost"', row)
+        # Carries a csrf token like every other delete form
+        self.assertIn("csrfmiddlewaretoken", row)
+
+    def test_wholesale_row_has_edit_link_to_edit_view(self):
+        body = self.client.get("/customers/wholesale/").content.decode()
+        row = self._row(body, "teals")
+        self.assertIn(f'href="/customers/{self.wholesale.pk}/edit/"', row)
+        self.assertIn("edit →", row)
+
+    def test_wholesale_row_has_delete_form_with_confirmation(self):
+        body = self.client.get("/customers/wholesale/").content.decode()
+        row = self._row(body, "teals")
+        self.assertIn(f'action="/customers/{self.wholesale.pk}/delete/"', row)
+        self.assertIn("onsubmit=\"return confirm('Delete TEALS?')\"", row)
+        self.assertIn('class="btn ghost"', row)
+
+    def test_row_edit_link_reaches_edit_form(self):
+        # Follow the link from the row through to confirm it lands on the
+        # existing edit view (already covered backend-wise by CRUDTests,
+        # but this seals the row→backend wiring end-to-end).
+        r = self.client.get(f"/customers/{self.internal.pk}/edit/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('value="GARDEN CAFE"', r.content.decode())
+
+    def test_row_delete_form_actually_deletes(self):
+        # POST the same URL the row's delete form would.
+        r = self.client.post(f"/customers/{self.internal.pk}/delete/")
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(Customer.objects.filter(pk=self.internal.pk).exists())
+
+    def test_row_actions_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        c = Customer.objects.create(
+            name="OUTSIDER", customer_type=Customer.INTERNAL, department=other)
+        # The list pages only show this department's customers, so OUTSIDER
+        # doesn't even appear in the rows — but the URLs the row actions
+        # would point at must still be guarded against cross-dept hits.
+        self.assertNotIn("OUTSIDER",
+                         self.client.get("/customers/").content.decode())
+        self.assertEqual(
+            self.client.get(f"/customers/{c.pk}/edit/").status_code, 403)
+        self.assertEqual(
+            self.client.post(f"/customers/{c.pk}/delete/").status_code, 403)
+        self.assertTrue(Customer.objects.filter(pk=c.pk).exists())
+
+    def test_header_row_has_two_extra_columns_for_actions(self):
+        # Mirror the Ingredients pattern: two trailing empty <th>s in the
+        # header so the two action cells align with their columns.
+        import re
+        body = self.client.get("/customers/").content.decode()
+        thead_start = body.index('id="customers-tbl"')
+        thead_end = body.index("</thead>", thead_start)
+        thead = body[thead_start:thead_end]
+        # 5 <th> cells total: Name, Location, Ordered by, (edit), (delete).
+        # Match <th> or <th class="…">, NOT <thead>.
+        n_cells = len(re.findall(r"<th(?:>|\s)", thead))
+        self.assertEqual(n_cells, 5)
+
+
 class CustomersImportProtectionTests(TestCase):
     """Re-running the import must leave hand-created and manually-edited
     customers strictly alone."""
