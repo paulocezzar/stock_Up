@@ -107,15 +107,39 @@
             <p class="muted" style="margin:0 0 4px">No close-enough name matches.</p>
           {% endif %}
           <form method="post" action="{% url 'sale_product_link_set' row.product.pk %}"
-                class="other-pick">{% csrf_token %}
+                class="other-pick lr-pick" data-row="{{ row.product.pk }}">{% csrf_token %}
             <input type="hidden" name="next" value="{% url 'sale_product_link_review' %}">
-            <div class="recipe-picker" data-seed="{{ row.product.name }}">
+            <input type="hidden" name="link_target_type" value="recipe" class="lr-target-type">
+            <select class="lr-target-switch" aria-label="Link target type"
+                    style="width:auto;padding:3px 8px;font-size:11px">
+              <option value="recipe">recipe</option>
+              <option value="product">product</option>
+            </select>
+            <div class="recipe-picker lr-target-recipe" data-seed="{{ row.product.name }}">
               <input type="text" class="rcp-search" autocomplete="off"
-                     placeholder="search recipes by name or code…"
+                     placeholder="search recipes…"
                      aria-label="Search recipes for {{ row.product.code }}">
               <input type="hidden" class="rcp-id" name="recipe_id" value="">
               <div class="rcp-list" hidden role="listbox"></div>
             </div>
+            <div class="recipe-picker lr-target-product" data-source="product-picker-data"
+                 data-seed="{{ row.product.name }}" style="display:none">
+              <input type="text" class="rcp-search" autocomplete="off"
+                     placeholder="search products…"
+                     aria-label="Search products for {{ row.product.code }}">
+              <input type="hidden" class="rcp-id" name="product_id" value="">
+              <div class="rcp-list" hidden role="listbox"></div>
+            </div>
+            <input type="text" name="link_quantity" value="1" inputmode="decimal"
+                   style="width:64px;padding:3px 6px;font-size:11px"
+                   aria-label="Quantity">
+            <select name="link_unit"
+                    style="width:auto;padding:3px 6px;font-size:11px"
+                    aria-label="Unit">
+              {% for value, label in link_unit_choices %}
+                <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
             <button class="btn" type="submit" style="padding:3px 12px;font-size:11px">link</button>
           </form>
         </div>
@@ -131,5 +155,31 @@
 </p>
 
 {{ recipe_picker_payload|json_script:"recipe-picker-data" }}
+{{ product_picker_payload|json_script:"product-picker-data" }}
 {% include "stock/_recipe_picker_assets.html" %}
+<script>
+(function(){
+  // Per-row target switch: flips the hidden link_target_type and
+  // shows/hides the corresponding picker. Sage / name suggestions
+  // still POST recipe_id only (defaulting target_type=recipe is the
+  // back-compat path), so the simple one-click confirm is unaffected.
+  document.querySelectorAll('form.lr-pick').forEach(function(form){
+    var sw = form.querySelector('.lr-target-switch');
+    var tt = form.querySelector('.lr-target-type');
+    var rPick = form.querySelector('.lr-target-recipe');
+    var pPick = form.querySelector('.lr-target-product');
+    if(!sw) return;
+    function apply(){
+      tt.value = sw.value;
+      if(sw.value === 'recipe'){
+        rPick.style.display = ''; pPick.style.display = 'none';
+      } else {
+        rPick.style.display = 'none'; pPick.style.display = '';
+      }
+    }
+    sw.addEventListener('change', apply);
+    apply();
+  });
+})();
+</script>
 {% endblock %}

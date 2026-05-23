@@ -6148,13 +6148,13 @@ class SaleProductsViewsTests(TestCase):
         # (link_confirmed=True). Only the unlinked one should remain
         # in the queue, and the "N products still to review" header
         # should report 1.
-        SaleProduct.objects.create(
+        u = SaleProduct.objects.create(
             name="Unlinked SKU", department=self.dept)
-        SaleProduct.objects.create(
+        s = SaleProduct.objects.create(
             name="Sage SKU", department=self.dept,
             recipe=self.apple, link_source=SaleProduct.SAGE,
             link_confirmed=True)
-        SaleProduct.objects.create(
+        m = SaleProduct.objects.create(
             name="Manual SKU", department=self.dept,
             recipe=self.mince, link_source=SaleProduct.MANUAL,
             link_confirmed=True)
@@ -6162,16 +6162,26 @@ class SaleProductsViewsTests(TestCase):
         # Count badge / header — current copy is "N product(s) still to review".
         self.assertIn("1 product still to review", body)
         # Only the unconfirmed product is rendered as an unresolved row.
-        self.assertIn("Unlinked SKU", body)
-        self.assertNotIn("Sage SKU", body)
-        self.assertNotIn("Manual SKU", body)
+        # (The other products still appear inside the product-picker
+        # JSON payload at the bottom of the page, so we look for the
+        # row anchor rather than the raw name.)
+        self.assertIn(f'href="/sale-products/{u.pk}/"', body)
+        # Confirmed rows aren't rendered in the queue.
+        import re
+        link_rows = re.findall(r'<div class="link-row">.*?</div>\s*</div>',
+                               body, re.DOTALL)
+        joined = "\n".join(link_rows)
+        self.assertNotIn("Sage SKU", joined)
+        self.assertNotIn("Manual SKU", joined)
 
     def test_link_review_confirms_drops_item_from_queue(self):
         # Before: one unresolved. After confirming a suggestion: zero.
         sp = SaleProduct.objects.create(name="Mystery", department=self.dept)
         body = self.client.get("/sale-products/link-review/").content.decode()
         self.assertIn("1 product still to review", body)
-        self.assertIn("Mystery", body)
+        # The product appears as a queue row (and also inside the product-
+        # picker JSON payload). Check the row specifically.
+        self.assertIn(f'href="/sale-products/{sp.pk}/"', body)
         # Confirm a link.
         self.client.post(f"/sale-products/{sp.pk}/link/",
                          {"recipe_id": str(self.mince.pk)})
@@ -6181,7 +6191,11 @@ class SaleProductsViewsTests(TestCase):
         self.client.get("/sale-products/")
         body = self.client.get("/sale-products/link-review/").content.decode()
         self.assertIn("0 products still to review", body)
-        self.assertNotIn("Mystery", body)
+        # No queue row for Mystery now.
+        import re
+        link_rows = re.findall(r'<div class="link-row">.*?</div>\s*</div>',
+                               body, re.DOTALL)
+        self.assertNotIn("Mystery", "\n".join(link_rows))
 
     def test_link_review_includes_link_confirmed_false_recipe_match(self):
         # A product that has a recipe but link_confirmed=False is still
@@ -6286,11 +6300,20 @@ class SaleProductsViewsTests(TestCase):
             name="Crumble Topped Mince Pies Retail (Pack/6)",
             department=self.dept)
         body = self.client.get("/sale-products/link-review/").content.decode()
-        # Per-row picker container.
-        self.assertIn('class="recipe-picker"', body)
-        # Search input + hidden recipe_id (the form posts the latter).
+        # Per-row picker container (allows extra classes like
+        # lr-target-recipe alongside the base class).
+        self.assertIn("recipe-picker", body)
+        # Search input + hidden ids (recipe + product) — the form posts
+        # the one matching the chosen link_target_type.
         self.assertIn('class="rcp-search"', body)
         self.assertIn('class="rcp-id"', body)
+        self.assertIn('name="recipe_id"', body)
+        self.assertIn('name="product_id"', body)
+        # Target-type switcher present so the operator can flip target.
+        self.assertIn('name="link_target_type"', body)
+        # Quantity + unit inputs present.
+        self.assertIn('name="link_quantity"', body)
+        self.assertIn('name="link_unit"', body)
         # data-seed carries the product name (the JS strips parentheticals
         # client-side, so we don't assert on the cleaned form here).
         self.assertIn(f'data-seed="{sp.name}"', body)
@@ -6356,3 +6379,363 @@ class SaleProductsViewsTests(TestCase):
         body = self.client.get(f"/sale-products/{sp.pk}/").content.decode()
         self.assertIn(">sold<", body)
         self.assertIn(">component<", body)
+
+
+class SaleProductPolymorphicLinkTests(TestCase):
+    """The quantified, polymorphic link: Recipe OR another SaleProduct + qty/unit."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.other_dept = Department.objects.create(name="Butchery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.apple = Recipe.objects.create(
+            code="NPD-R800", name="Apple Waste Sourdough (Loose)",
+            department=self.dept)
+        self.focaccia = Recipe.objects.create(
+            code="NPD-R700", name="Focaccia",
+            department=self.dept, finished_weight_g=Decimal("1000"))
+
+    # ---- model semantics ----
+
+    def test_xor_constraint_blocks_both_targets_set_at_once(self):
+        # The DB CheckConstraint refuses a row with both link_recipe and
+        # link_product set simultaneously.
+        from django.db import IntegrityError, transaction
+        loose = SaleProduct.objects.create(
+            name="Loose", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SaleProduct.objects.create(
+                    name="Pack/6", department=self.dept,
+                    link_recipe=self.apple,
+                    link_product=loose,
+                    link_quantity=Decimal("6"),
+                    link_unit=SaleProduct.COUNT)
+
+    def test_xor_constraint_allows_one_target_or_neither(self):
+        # Recipe-only.
+        a = SaleProduct.objects.create(
+            name="A", department=self.dept,
+            link_recipe=self.apple, link_quantity=1, link_unit=SaleProduct.COUNT)
+        # Product-only.
+        b = SaleProduct.objects.create(
+            name="B", department=self.dept,
+            link_product=a, link_quantity=6, link_unit=SaleProduct.COUNT)
+        # Both null (unlinked).
+        c = SaleProduct.objects.create(name="C", department=self.dept)
+        self.assertEqual(a.link_recipe, self.apple)
+        self.assertEqual(b.link_product, a)
+        self.assertIsNone(c.link_recipe)
+        self.assertIsNone(c.link_product)
+
+    def test_resolved_recipe_consumption_count_chain(self):
+        # Pack/6 → Loose (1 × count → recipe) resolves to 6 × the recipe.
+        loose = SaleProduct.objects.create(
+            name="Loose", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        pack = SaleProduct.objects.create(
+            name="Pack/6", department=self.dept,
+            link_product=loose, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT)
+        recipe, total, unit = pack.resolved_recipe_consumption()
+        self.assertEqual(recipe, self.apple)
+        self.assertEqual(total, Decimal("6"))
+        self.assertEqual(unit, SaleProduct.COUNT)
+
+    def test_resolved_recipe_consumption_weight_kg(self):
+        # 3.75 × weight_kg → focaccia recipe.
+        slab = SaleProduct.objects.create(
+            name="Focaccia 3.75kg", department=self.dept,
+            link_recipe=self.focaccia, link_quantity=Decimal("3.75"),
+            link_unit=SaleProduct.WEIGHT_KG)
+        recipe, total, unit = slab.resolved_recipe_consumption()
+        self.assertEqual(recipe, self.focaccia)
+        self.assertEqual(total, Decimal("3.75"))
+        self.assertEqual(unit, SaleProduct.WEIGHT_KG)
+
+    def test_resolved_recipe_consumption_chain_with_weight_terminal(self):
+        # Pack/6 (count) → Loose (1 × weight_kg → recipe). Each loose
+        # bun is 1 kg, the pack is 6 of those → 6 kg of the recipe.
+        loose = SaleProduct.objects.create(
+            name="Heavy Loose", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.WEIGHT_KG)
+        pack = SaleProduct.objects.create(
+            name="Heavy Pack/6", department=self.dept,
+            link_product=loose, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT)
+        recipe, total, unit = pack.resolved_recipe_consumption()
+        self.assertEqual(recipe, self.apple)
+        self.assertEqual(total, Decimal("6"))
+        self.assertEqual(unit, SaleProduct.WEIGHT_KG)
+
+    def test_resolved_recipe_consumption_unlinked_returns_none(self):
+        sp = SaleProduct.objects.create(
+            name="Floating", department=self.dept)
+        recipe, total, unit = sp.resolved_recipe_consumption()
+        self.assertIsNone(recipe)
+        self.assertEqual(total, Decimal("0"))
+        self.assertIsNone(unit)
+
+    def test_resolved_recipe_consumption_cycle_raises(self):
+        # Bypass the model layer's manual setter by writing the FK
+        # directly through update() — the model's clean rules don't
+        # detect cycles, but resolved_recipe_consumption does.
+        from stock.models import SaleProductCycleError
+        a = SaleProduct.objects.create(name="A", department=self.dept)
+        b = SaleProduct.objects.create(
+            name="B", department=self.dept,
+            link_product=a, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        # Now point a → b to close the cycle.
+        SaleProduct.objects.filter(pk=a.pk).update(
+            link_product=b, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        a.refresh_from_db()
+        with self.assertRaises(SaleProductCycleError):
+            a.resolved_recipe_consumption()
+
+    # ---- migration semantics ----
+
+    def test_default_link_is_recipe_qty_1_count(self):
+        # Existing rows from a previous migration land with link_recipe
+        # populated, link_quantity=1, link_unit=count — every imported
+        # sale product is a simple loose link by default.
+        sp = SaleProduct.objects.create(
+            name="Simple", department=self.dept, link_recipe=self.apple)
+        sp.refresh_from_db()
+        self.assertEqual(sp.link_recipe, self.apple)
+        self.assertIsNone(sp.link_product)
+        self.assertEqual(sp.link_quantity, Decimal("1"))
+        self.assertEqual(sp.link_unit, SaleProduct.COUNT)
+
+    # ---- create / edit form ----
+
+    def test_create_product_with_recipe_link_and_quantity(self):
+        # Hand-creating "Focaccia 3.75kg" → recipe + 3.75 weight_kg.
+        resp = self.client.post("/sale-products/new/", {
+            "name": "Focaccia 3.75kg", "price": "12.50",
+            "link_target_type": "recipe",
+            "recipe_id": str(self.focaccia.pk),
+            "link_quantity": "3.75",
+            "link_unit": SaleProduct.WEIGHT_KG,
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp = SaleProduct.objects.get(name="Focaccia 3.75kg")
+        self.assertEqual(sp.link_recipe, self.focaccia)
+        self.assertIsNone(sp.link_product)
+        self.assertEqual(sp.link_quantity, Decimal("3.75"))
+        self.assertEqual(sp.link_unit, SaleProduct.WEIGHT_KG)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+        self.assertTrue(sp.link_confirmed)
+        self.assertTrue(sp.is_manual_entry)
+
+    def test_create_product_with_product_link_and_quantity(self):
+        loose = SaleProduct.objects.create(
+            name="Sticky Apple & Cinnamon Bun (Loose)",
+            department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        resp = self.client.post("/sale-products/new/", {
+            "name": "Sticky Apple & Cinnamon Bun (Pack/6)",
+            "price": "10.00",
+            "link_target_type": "product",
+            "product_id": str(loose.pk),
+            "link_quantity": "6",
+            "link_unit": SaleProduct.COUNT,
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp = SaleProduct.objects.get(
+            name="Sticky Apple & Cinnamon Bun (Pack/6)")
+        self.assertIsNone(sp.link_recipe)
+        self.assertEqual(sp.link_product, loose)
+        self.assertEqual(sp.link_quantity, Decimal("6"))
+        self.assertEqual(sp.link_unit, SaleProduct.COUNT)
+        # And the chain resolves to the apple recipe with multiplier 6.
+        recipe, total, unit = sp.resolved_recipe_consumption()
+        self.assertEqual(recipe, self.apple)
+        self.assertEqual(total, Decimal("6"))
+
+    def test_create_form_rejects_duplicate_name(self):
+        SaleProduct.objects.create(name="Existing", department=self.dept)
+        resp = self.client.post("/sale-products/new/", {
+            "name": "EXISTING", "price": "1.00",
+            "link_target_type": "recipe",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"already exists", resp.content)
+
+    def test_edit_changes_link_target_type_recipe_to_product(self):
+        # Start out linked to a recipe; edit to point at another product.
+        loose = SaleProduct.objects.create(
+            name="Loose", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        pack = SaleProduct.objects.create(
+            name="Pack", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        resp = self.client.post(f"/sale-products/{pack.pk}/edit/", {
+            "name": pack.name, "price": "",
+            "sage_number": "", "pack_size": "",
+            "link_target_type": "product",
+            "product_id": str(loose.pk),
+            "link_quantity": "6",
+            "link_unit": SaleProduct.COUNT,
+        })
+        self.assertEqual(resp.status_code, 302)
+        pack.refresh_from_db()
+        self.assertIsNone(pack.link_recipe)
+        self.assertEqual(pack.link_product, loose)
+        self.assertEqual(pack.link_quantity, Decimal("6"))
+        self.assertEqual(pack.link_unit, SaleProduct.COUNT)
+        # Resolves through the chain back to the apple recipe.
+        recipe, total, _ = pack.resolved_recipe_consumption()
+        self.assertEqual(recipe, self.apple)
+        self.assertEqual(total, Decimal("6"))
+
+    def test_edit_refuses_self_link(self):
+        sp = SaleProduct.objects.create(
+            name="Loop", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        resp = self.client.post(f"/sale-products/{sp.pk}/edit/", {
+            "name": sp.name, "price": "",
+            "sage_number": "", "pack_size": "",
+            "link_target_type": "product",
+            "product_id": str(sp.pk),
+            "link_quantity": "1", "link_unit": SaleProduct.COUNT,
+        })
+        self.assertEqual(resp.status_code, 200)
+        # The HTML-escaped apostrophe survives — match on the
+        # unambiguous tail of the error message.
+        self.assertIn(b"link to itself", resp.content)
+        sp.refresh_from_db()
+        # Unchanged.
+        self.assertEqual(sp.link_recipe, self.apple)
+        self.assertIsNone(sp.link_product)
+
+    # ---- link-set (link-review confirm path) ----
+
+    def test_link_set_with_product_target_and_quantity(self):
+        loose = SaleProduct.objects.create(
+            name="Loose", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+        pack = SaleProduct.objects.create(name="Pack/6", department=self.dept)
+        resp = self.client.post(f"/sale-products/{pack.pk}/link/", {
+            "link_target_type": "product",
+            "product_id": str(loose.pk),
+            "link_quantity": "6",
+            "link_unit": SaleProduct.COUNT,
+        })
+        self.assertEqual(resp.status_code, 302)
+        pack.refresh_from_db()
+        self.assertEqual(pack.link_product, loose)
+        self.assertEqual(pack.link_quantity, Decimal("6"))
+        self.assertEqual(pack.link_source, SaleProduct.MANUAL)
+        self.assertTrue(pack.link_confirmed)
+
+    def test_link_set_legacy_recipe_id_only_still_works(self):
+        # The Sage/exact-name quick-confirm buttons on the review page
+        # still POST just recipe_id; the link-set view treats that as
+        # "recipe + qty 1 + count".
+        sp = SaleProduct.objects.create(name="Quick", department=self.dept)
+        resp = self.client.post(f"/sale-products/{sp.pk}/link/", {
+            "recipe_id": str(self.apple.pk),
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp.refresh_from_db()
+        self.assertEqual(sp.link_recipe, self.apple)
+        self.assertEqual(sp.link_quantity, Decimal("1"))
+        self.assertEqual(sp.link_unit, SaleProduct.COUNT)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+        self.assertTrue(sp.link_confirmed)
+
+    def test_link_set_refuses_self_link(self):
+        sp = SaleProduct.objects.create(name="Loop", department=self.dept)
+        resp = self.client.post(f"/sale-products/{sp.pk}/link/", {
+            "link_target_type": "product",
+            "product_id": str(sp.pk),
+            "link_quantity": "1", "link_unit": SaleProduct.COUNT,
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp.refresh_from_db()
+        self.assertIsNone(sp.link_product)
+
+    # ---- importer preservation ----
+
+    def test_existing_recipe_link_imports_with_qty_1_count(self):
+        # Run the bulk importer with a row that matches by Sage code,
+        # and verify the link defaults to quantity 1 / unit count.
+        import os
+        import tempfile
+        from django.core.management import call_command
+        Recipe.objects.create(
+            code="660130103", name="Mince Pie SKU shadow",
+            department=self.dept)
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            from openpyxl import Workbook
+            wb = Workbook()
+            wb.remove(wb.active)
+            ws = wb.create_sheet(title="Products")
+            ws.append(["Product", "Price", "Sage No.", None,
+                       "Stock Managed", "Pack Size"])
+            ws.append(["Mince Test SKU", 2.25, "660130103", None, None, "1"])
+            wb.save(path)
+            call_command("import_sale_products", path,
+                         "--department", "Bakery")
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        sp = SaleProduct.objects.get(name="Mince Test SKU")
+        self.assertEqual(sp.link_recipe.code, "660130103")
+        self.assertIsNone(sp.link_product)
+        self.assertEqual(sp.link_quantity, Decimal("1"))
+        self.assertEqual(sp.link_unit, SaleProduct.COUNT)
+
+    def test_section_nav_has_create_product_action(self):
+        # "Create product" lives in the section sub-nav alongside Link review.
+        body = self.client.get("/sale-products/").content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn(">Create product<", nav)
+        self.assertIn(">Link review<", nav)
+        # Order: Products | Link review | Create product.
+        products_pos = nav.find(">Products<")
+        review_pos = nav.find(">Link review<")
+        create_pos = nav.find(">Create product<")
+        self.assertLess(products_pos, review_pos)
+        self.assertLess(review_pos, create_pos)
+
+    def test_detail_page_renders_resolved_link(self):
+        loose = SaleProduct.objects.create(
+            name="Loose Bun", department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        pack = SaleProduct.objects.create(
+            name="Pack/6 of Bun", department=self.dept,
+            link_product=loose, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        body = self.client.get(f"/sale-products/{pack.pk}/").content.decode()
+        # "6" "Units (count)" of "Loose Bun".
+        self.assertIn("Loose Bun", body)
+        self.assertIn("Units (count)", body)
+        # Resolves-to banner names the recipe + the multiplier 6.
+        self.assertIn("Resolves to", body)
+        self.assertIn("NPD-R800", body)

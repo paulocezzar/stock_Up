@@ -187,7 +187,13 @@ def import_sale_products(file_or_path, department):
                 department=department,
                 is_manual_entry=False,
             )
-            sp.recipe = recipe
+            # Sage/exact-name auto-links default to "1 × count" — a
+            # simple loose product. Pack/N and weight-based products
+            # need a hand-edit afterwards to set the right multiplier.
+            sp.link_recipe = recipe
+            sp.link_product = None
+            sp.link_quantity = 1
+            sp.link_unit = SaleProduct.COUNT
             sp.link_source = source
             sp.link_confirmed = source in (SaleProduct.SAGE, SaleProduct.NAME)
             sp.save()
@@ -206,9 +212,16 @@ def import_sale_products(file_or_path, department):
             existing.department = department
             # Manual links: NEVER override. Otherwise refresh the auto-
             # link from the current Recipe set so a renamed Sage code or
-            # a newly-imported recipe wires up on the next deploy.
+            # a newly-imported recipe wires up on the next deploy. The
+            # auto-link is always recipe-typed at "1 × count"; operators
+            # adjust the quantity/unit by hand for Pack/N or kg-based
+            # SKUs (and that flips link_source=manual so we'd be in
+            # the protected branch above).
             if existing.link_source != SaleProduct.MANUAL:
-                existing.recipe = recipe
+                existing.link_recipe = recipe
+                existing.link_product = None
+                existing.link_quantity = 1
+                existing.link_unit = SaleProduct.COUNT
                 existing.link_source = source
                 existing.link_confirmed = source in (
                     SaleProduct.SAGE, SaleProduct.NAME)

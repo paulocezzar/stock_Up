@@ -32,11 +32,11 @@
 <table id="sp-tbl">
   <thead><tr>
     <th>Name</th><th class="num">Price</th><th>Pack</th><th>Sage No.</th>
-    <th>Linked recipe</th><th></th><th></th>
+    <th>Link</th><th></th><th></th>
   </tr></thead>
   <tbody>
   {% for p in products %}
-    <tr data-search="{{ p.name|lower }} {{ p.sage_number|lower }} {% if p.recipe %}{{ p.recipe.code|lower }} {{ p.recipe.name|lower }}{% endif %}">
+    <tr data-search="{{ p.name|lower }} {{ p.sage_number|lower }} {% if p.link_recipe %}{{ p.link_recipe.code|lower }} {{ p.link_recipe.name|lower }}{% endif %} {% if p.link_product %}{{ p.link_product.name|lower }}{% endif %}">
       <td>
         <a href="{% url 'sale_product_detail' p.pk %}">{{ p.name }}</a>
         {% if p.is_manual_entry %}<span class="muted" title="Hand-created — importer leaves it alone">·M</span>{% endif %}
@@ -45,9 +45,14 @@
       <td>{{ p.pack_size|default:"—" }}</td>
       <td>{{ p.sage_number|default:"—" }}</td>
       <td>
-        {% if p.recipe %}
-          <a href="{% url 'recipe_detail' p.recipe.pk %}">{{ p.recipe.code }} — {{ p.recipe.name }}</a>
+        {% if p.link_recipe %}
+          <span class="muted" style="font-size:11px">{{ p.link_quantity|floatformat:"-3" }} {% if p.link_unit == 'count' %}×{% elif p.link_unit == 'weight_kg' %}kg of{% elif p.link_unit == 'weight_g' %}g of{% endif %}</span>
+          <a href="{% url 'recipe_detail' p.link_recipe.pk %}">{{ p.link_recipe.code }} — {{ p.link_recipe.name }}</a>
           <span class="link-tag {{ p.link_source }}">{% if p.link_source == 'sage' %}sage{% elif p.link_source == 'name' %}name{% elif p.link_source == 'manual' %}manual{% endif %}</span>
+        {% elif p.link_product %}
+          <span class="muted" style="font-size:11px">{{ p.link_quantity|floatformat:"-3" }} {% if p.link_unit == 'count' %}×{% elif p.link_unit == 'weight_kg' %}kg of{% elif p.link_unit == 'weight_g' %}g of{% endif %}</span>
+          <a href="{% url 'sale_product_detail' p.link_product.pk %}">{{ p.link_product.name }}</a>
+          <span class="link-tag manual">product</span>
         {% else %}
           <span class="muted">— not linked —</span>
           <span class="link-tag none">unlinked</span>

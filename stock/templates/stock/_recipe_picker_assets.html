@@ -34,20 +34,34 @@ the input opens with that recipe's "code — name" label.
     text-transform:uppercase;padding:1px 6px;border:1px solid;line-height:1.3}
   .recipe-picker .rcp-role.sold{color:var(--amber);border-color:var(--amber)}
   .recipe-picker .rcp-role.component{color:var(--muted);border-color:var(--muted)}
+  .recipe-picker .rcp-role.product{color:var(--green);border-color:var(--green)}
+  .recipe-picker .rcp-list .rcp-item .info{font-size:11px;color:var(--muted)}
   .recipe-picker .rcp-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);
     background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 6px;font-size:14px}
   .recipe-picker .rcp-clear:hover{color:var(--amber)}
 </style>
 <script>
 (function(){
+  function loadSource(id){
+    var el = document.getElementById(id);
+    if(!el) return [];
+    try { return JSON.parse(el.textContent || '[]'); }
+    catch(e){ return []; }
+  }
   function init(){
-    var dataEl = document.getElementById('recipe-picker-data');
-    if(!dataEl) return;
-    var catalogue;
-    try { catalogue = JSON.parse(dataEl.textContent || '[]'); }
-    catch(e){ catalogue = []; }
-    var byId = {};
-    catalogue.forEach(function(r){ byId[r.pk] = r; });
+    // Each picker reads from its own configured source (defaults to
+    // the recipe catalogue); cache each source's parsed catalogue + id
+    // lookup so we only JSON.parse once per source on the page.
+    var sources = {};
+    function getSource(id){
+      if(!sources[id]){
+        var cat = loadSource(id);
+        var byId = {};
+        cat.forEach(function(r){ byId[r.pk] = r; });
+        sources[id] = {catalogue: cat, byId: byId};
+      }
+      return sources[id];
+    }
 
     function tokens(q){
       return (q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -74,7 +88,7 @@ the input opens with that recipe's "code — name" label.
       }
       return score;
     }
-    function search(q, limit){
+    function search(catalogue, q, limit){
       limit = limit || 12;
       var scored = [];
       for(var i=0; i<catalogue.length; i++){
@@ -88,19 +102,30 @@ the input opens with that recipe's "code — name" label.
       return scored.slice(0, limit).map(function(x){ return x.r; });
     }
     function fmtItem(r){
-      // Build a DOM node for one result row. Using innerHTML on
-      // server-controlled fields (code/name) is safe enough here —
-      // every recipe code/name has already round-tripped through the
-      // database — but stay defensive by escaping anyway.
+      // Build a DOM node for one result row. Defensive textContent
+      // assignment everywhere — fields originate from the database,
+      // but treat all of them as untrusted strings just in case.
       var item = document.createElement('div');
       item.className = 'rcp-item';
       item.setAttribute('role', 'option');
       item.dataset.recipeId = r.pk;
-      var code = document.createElement('span'); code.className = 'code';
-      code.textContent = r.code || '';
+      if(r.code){
+        var code = document.createElement('span'); code.className = 'code';
+        code.textContent = r.code;
+        item.appendChild(code);
+      }
       var name = document.createElement('span'); name.className = 'name';
       name.textContent = r.name || '';
-      item.appendChild(code); item.appendChild(name);
+      item.appendChild(name);
+      if(r.info){
+        var info = document.createElement('span'); info.className = 'info';
+        info.textContent = r.info;
+        item.appendChild(info);
+      }
+      if(r.kind === 'product'){
+        var pt = document.createElement('span'); pt.className = 'rcp-role product';
+        pt.textContent = 'product'; item.appendChild(pt);
+      }
       if(r.sold){
         var t = document.createElement('span'); t.className = 'rcp-role sold';
         t.textContent = 'sold'; item.appendChild(t);
@@ -116,7 +141,9 @@ the input opens with that recipe's "code — name" label.
       if(r.sold && r.component) role = ' (sold, component)';
       else if(r.sold) role = ' (sold)';
       else if(r.component) role = ' (component)';
-      return (r.code || '') + ' — ' + (r.name || '') + role;
+      else if(r.kind === 'product') role = ' (product)';
+      var prefix = r.code ? (r.code + ' — ') : '';
+      return prefix + (r.name || '') + role;
     }
 
     document.querySelectorAll('.recipe-picker').forEach(function(picker){
@@ -126,7 +153,14 @@ the input opens with that recipe's "code — name" label.
       var clearBtn = picker.querySelector('.rcp-clear');
       if(!input || !hidden || !list) return;
 
-      // Pre-seed: if a recipe is already selected, show its label.
+      // Each picker picks its catalogue via data-source — defaults to
+      // the recipe set so existing callers don't need to change.
+      var sourceId = picker.dataset.source || 'recipe-picker-data';
+      var src = getSource(sourceId);
+      var catalogue = src.catalogue;
+      var byId = src.byId;
+
+      // Pre-seed: if a target is already selected, show its label.
       // Otherwise show the optional data-seed text (typically the
       // product name with parentheticals stripped) so the operator
       // sees relevant matches the moment the field opens.
@@ -207,13 +241,13 @@ the input opens with that recipe's "code — name" label.
         // searching anew). Clear the hidden id; submitting now with
         // nothing picked sends "" which the server treats as unlink.
         hidden.value = '';
-        render(search(input.value, 12));
+        render(search(catalogue, input.value, 12));
       }
 
       input.addEventListener('focus', function(){
         // Open with the current query — first focus on a pre-seeded
         // input shows matches immediately.
-        render(search(input.value, 12));
+        render(search(catalogue, input.value, 12));
       });
       input.addEventListener('input', onInput);
       input.addEventListener('blur', function(){
@@ -222,7 +256,7 @@ the input opens with that recipe's "code — name" label.
       });
       input.addEventListener('keydown', function(e){
         if(list.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')){
-          render(search(input.value, 12));
+          render(search(catalogue, input.value, 12));
           e.preventDefault();
           return;
         }
@@ -250,7 +284,7 @@ the input opens with that recipe's "code — name" label.
           hidden.value = '';
           input.value = '';
           input.focus();
-          render(search('', 12));
+          render(search(catalogue, '', 12));
         });
       }
     });

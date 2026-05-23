@@ -28,9 +28,25 @@
   </div>
 </div>
 
-<div class="card"><h3>Linked recipe</h3>
-  <p class="muted" style="margin:0 0 10px;font-size:12px">Picking a recipe (or clearing it) sets a MANUAL link — the next deploy's importer won't override your choice. Type a few letters of the recipe name or code; arrow keys + Enter pick.</p>
+<div class="card"><h3>Link</h3>
+  <p class="muted" style="margin:0 0 10px;font-size:12px">A product can either link to a RECIPE (the bill of materials) or to another PRODUCT (e.g. Pack/6 → Loose). Either choice carries a quantity + unit, so "Focaccia 3.75kg" links to its recipe at 3.75 weight_kg, and "Pack/6" links to the Loose product at 6 count.</p>
   <div class="field">
+    <label>Link target</label>
+    <div class="row" style="gap:18px;align-items:center;margin:0 0 10px">
+      <label style="display:inline-flex;align-items:center;gap:6px">
+        <input type="radio" name="link_target_type" value="recipe"
+               {% if form.link_target_type == 'recipe' or not form.link_target_type %}checked{% endif %}>
+        a recipe
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px">
+        <input type="radio" name="link_target_type" value="product"
+               {% if form.link_target_type == 'product' %}checked{% endif %}>
+        another product
+      </label>
+    </div>
+  </div>
+  <div class="field link-target-recipe"
+       style="{% if form.link_target_type == 'product' %}display:none{% endif %}">
     <label>Recipe</label>
     <div class="recipe-picker"
          {% if form.recipe_id %}data-selected-id="{{ form.recipe_id }}"{% elif product %}data-seed="{{ product.name }}"{% elif form.name %}data-seed="{{ form.name }}"{% endif %}>
@@ -42,6 +58,33 @@
       <div class="rcp-list" hidden role="listbox"></div>
     </div>
   </div>
+  <div class="field link-target-product"
+       style="{% if form.link_target_type != 'product' %}display:none{% endif %}">
+    <label>Product</label>
+    <div class="recipe-picker" data-source="product-picker-data"
+         {% if form.product_id %}data-selected-id="{{ form.product_id }}"{% elif product %}data-seed="{{ product.name }}"{% elif form.name %}data-seed="{{ form.name }}"{% endif %}>
+      <input type="text" class="rcp-search" autocomplete="off"
+             placeholder="search products by name…"
+             aria-label="Product search">
+      <input type="hidden" class="rcp-id" name="product_id" value="{{ form.product_id }}">
+      <button type="button" class="rcp-clear" aria-label="Clear product">×</button>
+      <div class="rcp-list" hidden role="listbox"></div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="field"><label>Quantity *</label>
+      <input type="text" name="link_quantity"
+             value="{{ form.link_quantity|default:'1' }}"
+             inputmode="decimal" style="width:120px"></div>
+    <div class="field"><label>Unit</label>
+      <select name="link_unit" style="width:160px">
+        {% for value, label in link_unit_choices %}
+          <option value="{{ value }}" {% if form.link_unit == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <p class="muted" style="margin:10px 0 0;font-size:11px">Examples: <code>1</code> + units = a simple loose product; <code>6</code> + units = Pack/6; <code>3.75</code> + kilograms = a 3.75 kg slab.</p>
 </div>
 
 <p>
@@ -55,5 +98,28 @@
 </p>
 
 {{ recipe_picker_payload|json_script:"recipe-picker-data" }}
+{{ product_picker_payload|json_script:"product-picker-data" }}
 {% include "stock/_recipe_picker_assets.html" %}
+<script>
+(function(){
+  // Show/hide the right picker as the radio flips; the unused picker's
+  // hidden input remains "" so the server-side parser only sees the
+  // chosen target via link_target_type.
+  function syncTargetVisibility(){
+    var pick = document.querySelector('input[name="link_target_type"]:checked');
+    if(!pick) return;
+    var isRecipe = pick.value === 'recipe';
+    document.querySelectorAll('.link-target-recipe').forEach(function(el){
+      el.style.display = isRecipe ? '' : 'none';
+    });
+    document.querySelectorAll('.link-target-product').forEach(function(el){
+      el.style.display = isRecipe ? 'none' : '';
+    });
+  }
+  document.querySelectorAll('input[name="link_target_type"]').forEach(function(el){
+    el.addEventListener('change', syncTargetVisibility);
+  });
+  syncTargetVisibility();
+})();
+</script>
 {% endblock %}

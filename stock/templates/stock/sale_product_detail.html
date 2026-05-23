@@ -35,21 +35,36 @@
 </dl>
 </div>
 
-<div class="card"><h3>Linked recipe</h3>
-{% if product.recipe %}
+<div class="card"><h3>Link</h3>
+{% if product.link_recipe or product.link_product %}
   <p>
-    <a href="{% url 'recipe_detail' product.recipe.pk %}"><code>{{ product.recipe.code }}</code> — {{ product.recipe.name }}</a>
+    <strong>{{ product.link_quantity|floatformat:"-3" }} {{ link_unit_label }}</strong>
+    of
+    {% if product.link_recipe %}
+      <a href="{% url 'recipe_detail' product.link_recipe.pk %}"><code>{{ product.link_recipe.code }}</code> — {{ product.link_recipe.name }}</a>
+    {% elif product.link_product %}
+      <a href="{% url 'sale_product_detail' product.link_product.pk %}">{{ product.link_product.name }}</a>
+      <span class="link-tag manual" title="Another sale product (chain)">product chain</span>
+    {% endif %}
     <span class="link-tag {{ product.link_source }}">
       {% if product.link_source == 'sage' %}matched by Sage No.{% elif product.link_source == 'name' %}matched by exact name{% elif product.link_source == 'manual' %}linked manually{% endif %}
     </span>
   </p>
+  {% if resolved and resolved.recipe %}
+    <p class="muted" style="margin:6px 0 0;font-size:12px">
+      Resolves to <strong>{{ resolved.total_quantity|floatformat:"-3" }} {{ resolved.unit_label }}</strong>
+      of <a href="{% url 'recipe_detail' resolved.recipe.pk %}"><code>{{ resolved.recipe.code }}</code> — {{ resolved.recipe.name }}</a> after walking the link chain.
+    </p>
+  {% elif resolved and resolved.error %}
+    <p class="muted" style="margin:6px 0 0;font-size:12px;color:var(--red)">Could not resolve the link chain ({{ resolved.error }}).</p>
+  {% endif %}
   <form method="post" action="{% url 'sale_product_link_set' product.pk %}" style="margin:10px 0 0">{% csrf_token %}
-    <input type="hidden" name="recipe_id" value="">
+    <input type="hidden" name="link_target_type" value="">
     <input type="hidden" name="next" value="{% url 'sale_product_detail' product.pk %}">
-    <button class="btn ghost" type="submit" style="padding:4px 12px">unlink recipe</button>
+    <button class="btn ghost" type="submit" style="padding:4px 12px">clear link</button>
   </form>
 {% else %}
-  <p>This product isn't linked to a recipe yet. <span class="link-tag none">unlinked</span></p>
+  <p>This product isn't linked yet. <span class="link-tag none">unlinked</span></p>
   {% if suggestions %}
     <style>
       .role-tag{font-family:var(--disp);font-size:9px;letter-spacing:.5px;text-transform:uppercase;

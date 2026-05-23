@@ -1811,7 +1811,7 @@ def customer_delete(request, pk):
 # ---- sale products (sellable SKUs, distinct from ingredient Products) ----
 def _sale_product_qs(dept):
     return (SaleProduct.objects.filter(department=dept)
-            .select_related("recipe")
+            .select_related("link_recipe", "link_product")
             .order_by("name"))
 
 
@@ -1918,22 +1918,51 @@ def sale_product_detail(request, pk):
     if product.department and not product.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
     suggestions = []
-    if not product.recipe_id:
+    has_link = bool(product.link_recipe_id or product.link_product_id)
+    if not has_link:
         all_recipes = _annotate_recipe_roles(
             list(Recipe.objects.filter(archived=False)))
         suggestions = _recipe_suggestions(product.name, all_recipes)
+    resolved = None
+    if has_link:
+        try:
+            recipe, total_qty, unit = product.resolved_recipe_consumption()
+            if recipe is not None:
+                resolved = {
+                    "recipe": recipe,
+                    "total_quantity": total_qty,
+                    "unit": unit,
+                    "unit_label": dict(SaleProduct.LINK_UNIT_CHOICES).get(unit, unit),
+                }
+        except Exception:
+            # SaleProductCycleError or any odd state → swallow so the
+            # detail page still renders; the resolve banner shows the
+            # error inline below.
+            resolved = {"error": "cycle detected in link chain"}
     return render(request, "stock/sale_product_detail.html", {
         "product": product,
         "suggestions": suggestions,
+        "resolved": resolved,
+        "link_unit_label": dict(SaleProduct.LINK_UNIT_CHOICES).get(
+            product.link_unit, product.link_unit),
     })
 
 
 def _sale_product_form_context(form, mode, product=None, error=None,
-                                recipes=None):
+                                recipes=None, dept=None):
     recipes = recipes if recipes is not None else []
-    # The form template renders a search-as-you-type recipe picker
-    # driven by an embedded JSON blob; precompute it here so both new
-    # and edit branches go through the same path.
+    # The form template renders TWO search-as-you-type pickers — one
+    # for recipes, one for other SaleProducts (so a Pack/6 can link to
+    # the Loose product). Both are powered by the same widget reading
+    # from separate JSON blobs.
+    if dept is None and product is not None:
+        dept = product.department
+    products_qs = SaleProduct.objects.all()
+    if dept is not None:
+        products_qs = products_qs.filter(department=dept)
+    # Don't let a product link to itself; downstream cycles get caught
+    # at resolution time, but exclude the obvious case from the picker.
+    exclude_pk = product.pk if product else None
     return {
         "form": form,
         "mode": mode,
@@ -1941,6 +1970,9 @@ def _sale_product_form_context(form, mode, product=None, error=None,
         "error": error,
         "recipes": recipes,
         "recipe_picker_payload": _recipe_picker_payload(recipes),
+        "product_picker_payload": _product_picker_payload(
+            products_qs, exclude_pk=exclude_pk),
+        "link_unit_choices": SaleProduct.LINK_UNIT_CHOICES,
     }
 
 
@@ -1952,6 +1984,80 @@ def _parse_price(s):
         return Decimal(s)
     except InvalidOperation:
         return None
+
+
+def _product_picker_payload(products, exclude_pk=None):
+    """JSON-able list for the SaleProduct autocomplete (sister to recipes).
+
+    Each entry has the same ``{pk, code, name, sold, component, info,
+    kind}`` shape the recipe payload uses so the same widget can render
+    both — ``sold``/``component`` are always False for sale products,
+    ``code`` carries the Sage number (often empty) and ``info`` the
+    pack size, both small. ``kind`` lets the template tag the row
+    "product" to distinguish it visually.
+    """
+    return [
+        {"pk": p.pk, "code": p.sage_number or "",
+         "name": p.name, "sold": False, "component": False,
+         "info": p.pack_size or "", "kind": "product"}
+        for p in products
+        if exclude_pk is None or p.pk != exclude_pk
+    ]
+
+
+def _parse_link_form(post):
+    """Extract the polymorphic link choice from a POST.
+
+    Returns ``(link_recipe, link_product, quantity, unit, error)``.
+    Caller supplies the resolved Recipe/SaleProduct via
+    ``post["recipe_id"]`` / ``post["product_id"]`` and the form-level
+    ``post["link_target_type"]`` (``"recipe"`` / ``"product"`` /
+    empty = unlinked). Quantity defaults to 1 and unit to ``count``
+    when a target is set; an unlinked submission resets both to the
+    same defaults.
+
+    Backwards-compat: a POST that omits ``link_target_type`` but
+    carries a ``recipe_id`` is treated as the old "recipe + qty 1 +
+    count" shape — keeps the link-review's existing simple-confirm
+    button working unchanged.
+    """
+    target_type = (post.get("link_target_type") or "").strip().lower()
+    raw_recipe = (post.get("recipe_id") or "").strip()
+    raw_product = (post.get("product_id") or "").strip()
+    raw_qty = (post.get("link_quantity") or "").strip()
+    raw_unit = (post.get("link_unit") or "").strip()
+
+    if not target_type:
+        # Old shape: assume "recipe" iff recipe_id present, else
+        # unlinked. Quantity/unit not provided → default.
+        target_type = "recipe" if raw_recipe else ""
+
+    link_recipe = None
+    link_product = None
+    if target_type == "recipe" and raw_recipe and raw_recipe not in ("0", "none"):
+        link_recipe = Recipe.objects.filter(pk=raw_recipe).first()
+        if link_recipe is None:
+            return None, None, Decimal("1"), SaleProduct.COUNT, "That recipe doesn't exist."
+    elif target_type == "product" and raw_product and raw_product not in ("0", "none"):
+        link_product = SaleProduct.objects.filter(pk=raw_product).first()
+        if link_product is None:
+            return None, None, Decimal("1"), SaleProduct.COUNT, "That product doesn't exist."
+
+    # Quantity / unit only matter when a target is set. Empty → 1.
+    if raw_qty:
+        try:
+            qty = Decimal(raw_qty)
+        except InvalidOperation:
+            return None, None, Decimal("1"), SaleProduct.COUNT, "Quantity must be a number."
+        if qty <= 0:
+            return None, None, Decimal("1"), SaleProduct.COUNT, "Quantity must be greater than zero."
+    else:
+        qty = Decimal("1")
+
+    unit_choices = {k for k, _ in SaleProduct.LINK_UNIT_CHOICES}
+    unit = raw_unit if raw_unit in unit_choices else SaleProduct.COUNT
+
+    return link_recipe, link_product, qty, unit, None
 
 
 @login_required
@@ -1974,7 +2080,11 @@ def sale_product_new(request):
             "price": (request.POST.get("price") or "").strip(),
             "sage_number": (request.POST.get("sage_number") or "").strip(),
             "pack_size": (request.POST.get("pack_size") or "").strip(),
+            "link_target_type": (request.POST.get("link_target_type") or "").strip(),
             "recipe_id": request.POST.get("recipe_id") or "",
+            "product_id": request.POST.get("product_id") or "",
+            "link_quantity": (request.POST.get("link_quantity") or "").strip(),
+            "link_unit": (request.POST.get("link_unit") or "").strip(),
         }
         error = None
         if not form["name"]:
@@ -1982,37 +2092,53 @@ def sale_product_new(request):
         elif SaleProduct.objects.filter(name__iexact=form["name"]).exists():
             error = (f"A sale product named '{form['name']}' already "
                      "exists. Pick a different name.")
+        link_recipe = link_product = None
+        quantity = Decimal("1")
+        unit = SaleProduct.COUNT
+        if error is None:
+            link_recipe, link_product, quantity, unit, link_error = (
+                _parse_link_form(request.POST))
+            if link_error:
+                error = link_error
         if error:
             return render(request, "stock/sale_product_form.html",
                           _sale_product_form_context(
-                              form, mode="new", error=error, recipes=recipes))
-        recipe = None
-        if form["recipe_id"]:
-            recipe = Recipe.objects.filter(pk=form["recipe_id"]).first()
+                              form, mode="new", error=error, recipes=recipes,
+                              dept=dept))
+        has_target = link_recipe is not None or link_product is not None
         sp = SaleProduct.objects.create(
             name=form["name"],
             price=_parse_price(form["price"]),
             sage_number=form["sage_number"],
             pack_size=form["pack_size"],
-            recipe=recipe,
-            link_source=SaleProduct.MANUAL if recipe else SaleProduct.NONE,
-            link_confirmed=bool(recipe),
+            link_recipe=link_recipe,
+            link_product=link_product,
+            link_quantity=quantity if has_target else Decimal("1"),
+            link_unit=unit if has_target else SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL if has_target else SaleProduct.NONE,
+            link_confirmed=has_target,
             department=dept,
             is_manual_entry=True,
         )
         messages.success(request, f"Created sale product '{sp.name}'.")
         return redirect("sale_product_detail", pk=sp.pk)
 
-    form = {"name": "", "price": "", "sage_number": "",
-            "pack_size": "", "recipe_id": ""}
+    form = {"name": "", "price": "", "sage_number": "", "pack_size": "",
+            "link_target_type": "recipe", "recipe_id": "", "product_id": "",
+            "link_quantity": "1", "link_unit": SaleProduct.COUNT}
     return render(request, "stock/sale_product_form.html",
-                  _sale_product_form_context(form, mode="new", recipes=recipes))
+                  _sale_product_form_context(
+                      form, mode="new", recipes=recipes, dept=dept))
 
 
 @login_required
 def sale_product_edit(request, pk):
-    """Edit a sale product. Setting a recipe flips link_source=manual
-    so the next import won't re-derive (or clear) the link."""
+    """Edit a sale product including its quantified, polymorphic link.
+
+    The link may target a Recipe OR another SaleProduct (Pack/6 → Loose)
+    with a quantity + unit; setting any of those flips link_source=manual
+    so the next import won't re-derive (or clear) the choice.
+    """
     product = get_object_or_404(SaleProduct, pk=pk)
     if product.department and not product.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
@@ -2025,7 +2151,11 @@ def sale_product_edit(request, pk):
             "price": (request.POST.get("price") or "").strip(),
             "sage_number": (request.POST.get("sage_number") or "").strip(),
             "pack_size": (request.POST.get("pack_size") or "").strip(),
+            "link_target_type": (request.POST.get("link_target_type") or "").strip(),
             "recipe_id": request.POST.get("recipe_id") or "",
+            "product_id": request.POST.get("product_id") or "",
+            "link_quantity": (request.POST.get("link_quantity") or "").strip(),
+            "link_unit": (request.POST.get("link_unit") or "").strip(),
         }
         error = None
         if not form["name"]:
@@ -2034,34 +2164,62 @@ def sale_product_edit(request, pk):
               .exclude(pk=product.pk).exists()):
             error = (f"A sale product named '{form['name']}' already "
                      "exists. Pick a different name.")
+        link_recipe = link_product = None
+        quantity = Decimal("1")
+        unit = SaleProduct.COUNT
+        if error is None:
+            link_recipe, link_product, quantity, unit, link_error = (
+                _parse_link_form(request.POST))
+            if link_error:
+                error = link_error
+            elif link_product is not None and link_product.pk == product.pk:
+                error = "A product can't link to itself."
         if error:
             return render(request, "stock/sale_product_form.html",
                           _sale_product_form_context(
                               form, mode="edit", product=product,
                               error=error, recipes=recipes))
-        new_recipe = None
-        if form["recipe_id"]:
-            new_recipe = Recipe.objects.filter(pk=form["recipe_id"]).first()
+        has_target = link_recipe is not None or link_product is not None
         link_changed = (
-            (product.recipe_id or None) != (new_recipe.pk if new_recipe else None))
+            (product.link_recipe_id or None,
+             product.link_product_id or None,
+             product.link_quantity,
+             product.link_unit) !=
+            (link_recipe.pk if link_recipe else None,
+             link_product.pk if link_product else None,
+             quantity if has_target else Decimal("1"),
+             unit if has_target else SaleProduct.COUNT))
         product.name = form["name"]
         product.price = _parse_price(form["price"])
         product.sage_number = form["sage_number"]
         product.pack_size = form["pack_size"]
         if link_changed:
-            product.recipe = new_recipe
-            product.link_source = SaleProduct.MANUAL if new_recipe else SaleProduct.NONE
-            product.link_confirmed = bool(new_recipe)
+            product.link_recipe = link_recipe
+            product.link_product = link_product
+            product.link_quantity = quantity if has_target else Decimal("1")
+            product.link_unit = unit if has_target else SaleProduct.COUNT
+            product.link_source = SaleProduct.MANUAL if has_target else SaleProduct.NONE
+            product.link_confirmed = has_target
         product.save()
         messages.success(request, f"Saved changes to '{product.name}'.")
         return redirect("sale_product_detail", pk=product.pk)
 
+    current_target = "recipe"
+    if product.link_product_id:
+        current_target = "product"
+    elif not product.link_recipe_id:
+        current_target = "recipe"
     form = {
         "name": product.name,
         "price": (str(product.price) if product.price is not None else ""),
         "sage_number": product.sage_number,
         "pack_size": product.pack_size,
-        "recipe_id": str(product.recipe_id or ""),
+        "link_target_type": current_target,
+        "recipe_id": str(product.link_recipe_id or ""),
+        "product_id": str(product.link_product_id or ""),
+        "link_quantity": (str(product.link_quantity)
+                          if product.link_quantity is not None else "1"),
+        "link_unit": product.link_unit or SaleProduct.COUNT,
     }
     return render(request, "stock/sale_product_form.html",
                   _sale_product_form_context(
@@ -2127,45 +2285,62 @@ def sale_product_link_review(request):
         "n_sage_unconfirmed": n_sage_unconfirmed,
         "all_recipes": all_recipes,
         "recipe_picker_payload": _recipe_picker_payload(all_recipes),
+        # Products can link to each other (Pack/N → Loose etc.) so the
+        # link-review picker offers a product-typed search too. Exclude
+        # archived rows and never let a product target itself; per-row
+        # exclusion is enforced client- and server-side.
+        "product_picker_payload": _product_picker_payload(
+            SaleProduct.objects.filter(department=dept)),
+        "link_unit_choices": SaleProduct.LINK_UNIT_CHOICES,
     })
 
 
 @require_POST
 @login_required
 def sale_product_link_set(request, pk):
-    """Set or clear the recipe link via the review/detail page.
+    """Set or clear the quantified, polymorphic link via review/detail.
 
-    POST ``recipe_id`` (empty / "0" / "none" → unlink; otherwise a
-    Recipe pk to link to). Flips ``link_source=manual`` and
-    ``link_confirmed=True`` so the import never overrides the pick.
-    A future un-link sets ``link_source=manual`` too (the operator's
-    deliberate "no, none of these apply" decision survives re-import).
+    Accepts the polymorphic form fields parsed by
+    ``_parse_link_form``: ``link_target_type`` ("recipe" / "product"),
+    ``recipe_id`` / ``product_id``, ``link_quantity``, ``link_unit``.
+    Backwards-compat: a POST with only ``recipe_id`` (the legacy
+    one-click suggestion confirm) still works — it lands as
+    "recipe + qty 1 + count". Whatever lands, the link is flipped
+    ``link_source=manual`` and ``link_confirmed=True`` so re-imports
+    never override the operator's pick. Clearing (empty target) also
+    flips to manual — the deliberate "none of these apply" survives
+    re-import.
     """
     product = get_object_or_404(SaleProduct, pk=pk)
     if product.department and not product.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    raw = (request.POST.get("recipe_id") or "").strip()
-    if raw in ("", "0", "none"):
-        product.recipe = None
-        product.link_source = SaleProduct.MANUAL
-        product.link_confirmed = True
-        msg = f"Cleared the recipe link on '{product.name}'."
-    else:
-        try:
-            new_pk = int(raw)
-        except ValueError:
-            messages.error(request, "Pick a valid recipe.")
-            return redirect("sale_product_link_review")
-        recipe = Recipe.objects.filter(pk=new_pk).first()
-        if recipe is None:
-            messages.error(request, "That recipe no longer exists.")
-            return redirect("sale_product_link_review")
-        product.recipe = recipe
-        product.link_source = SaleProduct.MANUAL
-        product.link_confirmed = True
-        msg = f"Linked '{product.name}' to {recipe.code} — {recipe.name}."
+    link_recipe, link_product, quantity, unit, error = _parse_link_form(request.POST)
+    if error:
+        messages.error(request, error)
+        return redirect("sale_product_link_review")
+    if link_product is not None and link_product.pk == product.pk:
+        messages.error(request, "A product can't link to itself.")
+        return redirect("sale_product_link_review")
+    has_target = link_recipe is not None or link_product is not None
+    product.link_recipe = link_recipe
+    product.link_product = link_product
+    product.link_quantity = quantity if has_target else Decimal("1")
+    product.link_unit = unit if has_target else SaleProduct.COUNT
+    product.link_source = SaleProduct.MANUAL
+    product.link_confirmed = True
     product.save(update_fields=[
-        "recipe", "link_source", "link_confirmed"])
+        "link_recipe", "link_product", "link_quantity", "link_unit",
+        "link_source", "link_confirmed"])
+    if has_target:
+        if link_recipe is not None:
+            target_label = f"{link_recipe.code} — {link_recipe.name}"
+        else:
+            target_label = link_product.name
+        unit_label = dict(SaleProduct.LINK_UNIT_CHOICES).get(unit, unit)
+        msg = (f"Linked '{product.name}' to {target_label} "
+               f"({quantity} {unit_label}).")
+    else:
+        msg = f"Cleared the link on '{product.name}'."
     messages.success(request, msg)
     next_url = (request.POST.get("next") or "").strip()
     if next_url.startswith("/"):

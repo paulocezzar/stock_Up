@@ -474,13 +474,42 @@ class SaleProduct(models.Model):
         (NONE, "Not linked"),
     ]
 
+    # Link unit choices for the quantified, polymorphic link.
+    COUNT = "count"
+    WEIGHT_KG = "weight_kg"
+    WEIGHT_G = "weight_g"
+    LINK_UNIT_CHOICES = [
+        (COUNT, "Units (count)"),
+        (WEIGHT_KG, "Kilograms"),
+        (WEIGHT_G, "Grams"),
+    ]
+
     name = models.CharField(max_length=200, unique=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     sage_number = models.CharField(max_length=40, blank=True)
     pack_size = models.CharField(max_length=40, blank=True)
-    recipe = models.ForeignKey(
+    # Quantified, polymorphic link. EITHER link_recipe (a Recipe — the
+    # bill of materials), OR link_product (another SaleProduct — e.g.
+    # a Pack/6 points at the Loose product). Both nullable; at most one
+    # set at a time (DB CheckConstraint). Quantity + unit describe how
+    # much of the target this SaleProduct represents: 6 × count for
+    # "Pack/6 of Loose", or 3.75 × weight_kg for "Focaccia 3.75kg".
+    # ``resolved_recipe_consumption`` walks the chain (product → product
+    # → … → recipe) multiplying quantities so production maths can use
+    # the eventual recipe and total multiplier.
+    link_recipe = models.ForeignKey(
         "Recipe", related_name="sale_products",
         on_delete=models.SET_NULL, null=True, blank=True)
+    link_product = models.ForeignKey(
+        "self", related_name="linked_packs",
+        on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="Another SaleProduct this one is a multiple of "
+                  "(e.g. Pack/6 → Loose).")
+    link_quantity = models.DecimalField(
+        max_digits=12, decimal_places=3, default=1,
+        help_text="How many units / kg / g of the target.")
+    link_unit = models.CharField(
+        max_length=12, choices=LINK_UNIT_CHOICES, default=COUNT)
     link_source = models.CharField(
         max_length=10, choices=LINK_SOURCE_CHOICES, default=NONE)
     link_confirmed = models.BooleanField(default=False)
@@ -494,13 +523,89 @@ class SaleProduct(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            # Mirrors the RecipeLine ingredient/sub_recipe XOR. Both
+            # null = unlinked (fine); exactly one set = linked to a
+            # recipe OR another product; both set = ambiguous and
+            # rejected at the DB level.
+            models.CheckConstraint(
+                check=(Q(link_recipe__isnull=True) |
+                       Q(link_product__isnull=True)),
+                name="saleproduct_link_recipe_xor_product",
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
+    # Backwards-compat shim: a chunk of existing UI + tests reach for
+    # ``sale_product.recipe`` directly. The property mirrors
+    # ``link_recipe`` so old code keeps working while new code targets
+    # ``link_recipe`` explicitly. The setter assigns to ``link_recipe``
+    # so ``sp.recipe = some_recipe`` still updates the FK.
+    @property
+    def recipe(self):
+        return self.link_recipe
+
+    @recipe.setter
+    def recipe(self, value):
+        self.link_recipe = value
+
+    @property
+    def recipe_id(self):
+        return self.link_recipe_id
+
+    def resolved_recipe_consumption(self, *, max_hops=32):
+        """Walk product → product → … → recipe, multiplying quantities.
+
+        Returns ``(recipe, total_quantity, effective_unit)`` when the
+        chain ends at a Recipe, or ``(None, Decimal('0'), None)`` when
+        it terminates with an unlinked product. Cycle-protected: a
+        loop raises :class:`SaleProductCycleError`. ``max_hops`` caps
+        chain length defensively (a healthy chain is 1–3 hops).
+
+        ``total_quantity`` is the product of every ``link_quantity``
+        along the chain. ``effective_unit`` is the first non-count
+        unit encountered (closest to the surface wins) so a 6-count
+        Pack of a 1-kg Loose resolves to 6 kg of the recipe.
+        """
+        from decimal import Decimal
+        seen = {self.pk}
+        current = self
+        total = Decimal("1")
+        effective_unit = None
+        for _ in range(max_hops):
+            qty = current.link_quantity if current.link_quantity is not None else Decimal("1")
+            total *= qty
+            unit = current.link_unit or self.COUNT
+            if effective_unit is None and unit != self.COUNT:
+                effective_unit = unit
+            if current.link_recipe_id:
+                if effective_unit is None:
+                    effective_unit = self.COUNT
+                return current.link_recipe, total, effective_unit
+            if current.link_product_id is None:
+                return None, Decimal("0"), None
+            if current.link_product_id in seen:
+                raise SaleProductCycleError(
+                    f"SaleProduct chain cycles via {current.link_product_id}")
+            seen.add(current.link_product_id)
+            current = current.link_product
+        raise SaleProductCycleError(
+            f"SaleProduct chain longer than {max_hops} hops — refusing to resolve")
+
 
 class RecipeCycleError(Exception):
     """A recipe would (transitively) contain itself."""
+
+
+class SaleProductCycleError(Exception):
+    """A SaleProduct's link chain would (transitively) reference itself.
+
+    Raised by ``SaleProduct.resolved_recipe_consumption`` when walking
+    ``link_product`` references hits a previously-visited row or
+    overruns the defensive hop cap.
+    """
 
 
 class Recipe(models.Model):
