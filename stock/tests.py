@@ -4027,3 +4027,299 @@ class CustomersViewTests(TestCase):
         nav = body[body.index("<nav>"):body.index("</nav>")]
         self.assertIn(">Customers<", nav)
         self.assertIn('href="/customers/"', nav)
+
+
+class CustomersCRUDTests(TestCase):
+    """Hand-managed create / edit / delete from the Customers section UI."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_add_customer_button_on_internal_list(self):
+        r = self.client.get("/customers/")
+        body = r.content.decode()
+        self.assertIn('href="/customers/new/?type=internal"', body)
+        self.assertIn("Add customer", body)
+
+    def test_add_customer_button_on_wholesale_list(self):
+        r = self.client.get("/customers/wholesale/")
+        body = r.content.decode()
+        self.assertIn('href="/customers/new/?type=wholesale"', body)
+
+    def test_new_form_defaults_type_from_query_param(self):
+        r = self.client.get("/customers/new/?type=wholesale")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # The wholesale <option> renders selected
+        self.assertRegex(body, r'<option value="wholesale"\s+selected>')
+
+    def test_create_internal_customer_sets_manual_flags_and_appears_in_list(self):
+        r = self.client.post("/customers/new/", {
+            "name": "My Internal Co",
+            "location": "Bruton",
+            "ordered_by": "Some Contact",
+            "customer_type": "internal",
+        })
+        self.assertEqual(r.status_code, 302)
+        c = Customer.objects.get(name="My Internal Co")
+        self.assertEqual(c.customer_type, Customer.INTERNAL)
+        self.assertEqual(c.location, "Bruton")
+        self.assertEqual(c.ordered_by, "Some Contact")
+        self.assertTrue(c.is_type_manual)
+        self.assertTrue(c.is_manual_entry)
+        self.assertEqual(c.department, self.dept)
+        # And shows up on the internal list, not the wholesale list
+        self.assertIn("My Internal Co",
+                     self.client.get("/customers/").content.decode())
+        self.assertNotIn("My Internal Co",
+                         self.client.get("/customers/wholesale/").content.decode())
+
+    def test_create_wholesale_customer_appears_in_wholesale_list(self):
+        self.client.post("/customers/new/", {
+            "name": "My Wholesale Co",
+            "location": "",
+            "ordered_by": "",
+            "customer_type": "wholesale",
+        })
+        c = Customer.objects.get(name="My Wholesale Co")
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)
+        self.assertTrue(c.is_manual_entry)
+        self.assertIn("My Wholesale Co",
+                     self.client.get("/customers/wholesale/").content.decode())
+
+    def test_create_rejects_blank_name(self):
+        r = self.client.post("/customers/new/", {
+            "name": "",
+            "customer_type": "internal",
+        })
+        # Re-renders the form (200), doesn't redirect
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Customer.objects.filter(name="").exists())
+        self.assertIn("Name is required", r.content.decode())
+
+    def test_create_rejects_duplicate_name_case_insensitive(self):
+        Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        r = self.client.post("/customers/new/", {
+            "name": "teals",
+            "customer_type": "wholesale",
+        })
+        self.assertEqual(r.status_code, 200)
+        # Still exactly one TEALS row, no "teals" fork
+        self.assertEqual(Customer.objects.filter(
+            name__iexact="teals").count(), 1)
+        self.assertIn("already exists", r.content.decode())
+
+    def test_create_rejects_invalid_type(self):
+        r = self.client.post("/customers/new/", {
+            "name": "X",
+            "customer_type": "bogus",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Customer.objects.filter(name="X").exists())
+
+    def test_edit_form_pre_populates_fields(self):
+        c = Customer.objects.create(
+            name="EDIT ME", location="Loc", ordered_by="Ord",
+            customer_type=Customer.INTERNAL, department=self.dept)
+        r = self.client.get(f"/customers/{c.pk}/edit/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('value="EDIT ME"', body)
+        self.assertIn('value="Loc"', body)
+        self.assertIn('value="Ord"', body)
+        self.assertRegex(body, r'<option value="internal"\s+selected>')
+
+    def test_edit_changes_fields_and_sets_type_manual(self):
+        c = Customer.objects.create(
+            name="BEFORE", location="A", ordered_by="x",
+            customer_type=Customer.INTERNAL, department=self.dept,
+            is_type_manual=False)
+        r = self.client.post(f"/customers/{c.pk}/edit/", {
+            "name": "AFTER",
+            "location": "B",
+            "ordered_by": "y",
+            "customer_type": "wholesale",
+        })
+        self.assertEqual(r.status_code, 302)
+        c.refresh_from_db()
+        self.assertEqual(c.name, "AFTER")
+        self.assertEqual(c.location, "B")
+        self.assertEqual(c.ordered_by, "y")
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)
+        self.assertTrue(c.is_type_manual)
+
+    def test_edit_rejects_rename_collision(self):
+        Customer.objects.create(name="A", customer_type=Customer.INTERNAL,
+                                department=self.dept)
+        b = Customer.objects.create(name="B", customer_type=Customer.INTERNAL,
+                                    department=self.dept)
+        r = self.client.post(f"/customers/{b.pk}/edit/", {
+            "name": "a",  # case-insensitive clash with existing "A"
+            "customer_type": "internal",
+        })
+        self.assertEqual(r.status_code, 200)
+        b.refresh_from_db()
+        self.assertEqual(b.name, "B")
+
+    def test_edit_allows_keeping_same_name(self):
+        # Renaming to itself (same name) must not trigger a duplicate error.
+        c = Customer.objects.create(name="KEEP", customer_type=Customer.INTERNAL,
+                                    department=self.dept)
+        r = self.client.post(f"/customers/{c.pk}/edit/", {
+            "name": "KEEP",
+            "location": "new-loc",
+            "ordered_by": "",
+            "customer_type": "internal",
+        })
+        self.assertEqual(r.status_code, 302)
+        c.refresh_from_db()
+        self.assertEqual(c.location, "new-loc")
+
+    def test_edit_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        c = Customer.objects.create(name="OTHER", customer_type=Customer.INTERNAL,
+                                    department=other)
+        # GET
+        r = self.client.get(f"/customers/{c.pk}/edit/")
+        self.assertEqual(r.status_code, 403)
+        # POST
+        r = self.client.post(f"/customers/{c.pk}/edit/", {
+            "name": "OTHER2", "customer_type": "internal"})
+        self.assertEqual(r.status_code, 403)
+        c.refresh_from_db()
+        self.assertEqual(c.name, "OTHER")
+
+    def test_delete_removes_customer_and_redirects_to_correct_list(self):
+        c = Customer.objects.create(
+            name="GOING AWAY", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        r = self.client.post(f"/customers/{c.pk}/delete/")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/customers/wholesale/")
+        self.assertFalse(Customer.objects.filter(pk=c.pk).exists())
+
+    def test_delete_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        c = Customer.objects.create(name="STAYS", customer_type=Customer.INTERNAL,
+                                    department=other)
+        r = self.client.post(f"/customers/{c.pk}/delete/")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(Customer.objects.filter(pk=c.pk).exists())
+
+    def test_detail_page_has_edit_and_delete_actions_with_confirm(self):
+        c = Customer.objects.create(
+            name="ACTIONS", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        body = self.client.get(f"/customers/{c.pk}/").content.decode()
+        self.assertIn(f'href="/customers/{c.pk}/edit/"', body)
+        self.assertIn(f'action="/customers/{c.pk}/delete/"', body)
+        # JS confirmation step, per spec
+        self.assertIn("Delete ACTIONS?", body)
+        self.assertIn("can't be undone", body)
+
+    def test_detail_page_shows_hand_created_tag_for_manual_entries(self):
+        c = Customer.objects.create(
+            name="HAND MADE", customer_type=Customer.INTERNAL,
+            is_manual_entry=True, department=self.dept)
+        body = self.client.get(f"/customers/{c.pk}/").content.decode()
+        self.assertIn("hand-created", body)
+
+
+class CustomersImportProtectionTests(TestCase):
+    """Re-running the import must leave hand-created and manually-edited
+    customers strictly alone."""
+
+    @classmethod
+    def setUpTestData(cls):
+        import warnings
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported",
+        )
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+
+    def test_hand_created_customer_survives_reimport_untouched(self):
+        from django.core.management import call_command
+        c = Customer.objects.create(
+            name="HAND CREATED", location="my-loc", ordered_by="my-contact",
+            customer_type=Customer.INTERNAL,
+            is_type_manual=True, is_manual_entry=True,
+            department=self.dept)
+        original_pk = c.pk
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        # Still there, same PK, every field unchanged
+        c.refresh_from_db()
+        self.assertEqual(c.pk, original_pk)
+        self.assertEqual(c.name, "HAND CREATED")
+        self.assertEqual(c.location, "my-loc")
+        self.assertEqual(c.ordered_by, "my-contact")
+        self.assertEqual(c.customer_type, Customer.INTERNAL)
+        self.assertTrue(c.is_manual_entry)
+        self.assertTrue(c.is_type_manual)
+
+    def test_hand_created_with_same_name_as_a_sheet_customer_is_still_skipped(self):
+        # An operator might hand-create a row whose name happens to match
+        # one in the order sheet (e.g. "TEALS"). The is_manual_entry flag
+        # must keep the importer's hands off — even though the name is in
+        # the sheet, the importer must not touch this row.
+        from django.core.management import call_command
+        # Delete the sheet-imported TEALS so we can re-create it manually
+        Customer.objects.filter(name="TEALS").delete()
+        c = Customer.objects.create(
+            name="TEALS", location="hand-loc", ordered_by="hand-ord",
+            customer_type=Customer.INTERNAL,    # deliberately "wrong"
+            is_type_manual=True, is_manual_entry=True,
+            department=self.dept)
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        c.refresh_from_db()
+        # All fields preserved — type didn't flip back to wholesale,
+        # location/contact didn't reset to "" / blank.
+        self.assertEqual(c.location, "hand-loc")
+        self.assertEqual(c.ordered_by, "hand-ord")
+        self.assertEqual(c.customer_type, Customer.INTERNAL)
+        self.assertTrue(c.is_manual_entry)
+
+    def test_manually_edited_sheet_customer_keeps_edits_on_reimport(self):
+        # An existing sheet customer that was hand-edited (is_type_manual=
+        # True) keeps ALL its editable fields across re-import: type,
+        # ordered_by, AND location.
+        from django.core.management import call_command
+        c = Customer.objects.get(name="FARMSHOP")
+        c.location = "Custom Loc"
+        c.ordered_by = "Custom Contact"
+        c.customer_type = Customer.WHOLESALE   # deliberately changed
+        c.is_type_manual = True
+        c.save()
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        c.refresh_from_db()
+        self.assertEqual(c.location, "Custom Loc")
+        self.assertEqual(c.ordered_by, "Custom Contact")
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)
+        self.assertTrue(c.is_type_manual)
+        self.assertFalse(c.is_manual_entry)   # still a sheet customer
+
+    def test_reimport_summary_reports_skipped_manual_entries(self):
+        # A hand-created customer whose name is ALSO in the order sheet
+        # is the only case the importer notices and reports — sheet names
+        # not represented as manual entries are simply ignored.
+        from django.core.management import call_command
+        from io import StringIO
+        Customer.objects.filter(name="TEALS").delete()
+        Customer.objects.create(
+            name="TEALS", customer_type=Customer.INTERNAL,
+            is_manual_entry=True, is_type_manual=True, department=self.dept)
+        out = StringIO()
+        call_command("import_customers", ORDER_SHEET_XLSM,
+                     "--department", "Bakery", stdout=out)
+        text = out.getvalue().lower()
+        self.assertIn("skipped 1 hand-created", text)

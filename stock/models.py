@@ -410,7 +410,15 @@ class Customer(models.Model):
     ordered_by = models.CharField(max_length=120, blank=True)
     customer_type = models.CharField(
         max_length=12, choices=TYPE_CHOICES, default=INTERNAL)
+    # ``is_type_manual`` is the "operator touched this customer" flag — it
+    # protects ALL editable fields (customer_type, ordered_by, location)
+    # from being overwritten by the next import_customers run. The name is
+    # historical; the scope grew as the customers UI did.
     is_type_manual = models.BooleanField(default=False)
+    # ``is_manual_entry`` flags rows the operator created by hand (not from
+    # the order sheet). The importer skips these entirely on every run, so
+    # hand-added customers never get clobbered or deleted by a re-import.
+    is_manual_entry = models.BooleanField(default=False)
     department = models.ForeignKey(
         "Department", related_name="customers",
         on_delete=models.CASCADE, null=True, blank=True)

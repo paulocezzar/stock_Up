@@ -1158,3 +1158,160 @@ def customer_set_type(request, pk):
                      f"Marked {customer.name} as "
                      f"{customer.get_customer_type_display().lower()}.")
     return redirect("customer_detail", pk=pk)
+
+
+def _customer_list_redirect_url(customer_type):
+    """Where to send the operator after a create / edit / delete."""
+    if customer_type == Customer.WHOLESALE:
+        return "customers_wholesale"
+    return "customers"
+
+
+@login_required
+def customer_new(request):
+    """Create a customer by hand.
+
+    Pre-selects the type from the ?type= query parameter so the "Add
+    customer" button on each list page lands the operator on the right
+    default. The new row is flagged ``is_manual_entry=True`` (so the
+    importer will skip it forever) and ``is_type_manual=True`` (so its
+    fields can never be overwritten anyway — belt and braces).
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+
+    default_type = request.GET.get("type")
+    if default_type not in {k for k, _ in Customer.TYPE_CHOICES}:
+        default_type = Customer.INTERNAL
+
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()
+        location = (request.POST.get("location") or "").strip()
+        ordered_by = (request.POST.get("ordered_by") or "").strip()
+        customer_type = request.POST.get("customer_type")
+        valid_types = {k for k, _ in Customer.TYPE_CHOICES}
+        if not name:
+            messages.error(request, "Name is required.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(
+                              {"name": name, "location": location,
+                               "ordered_by": ordered_by,
+                               "customer_type": customer_type or default_type},
+                              mode="new", default_type=default_type))
+        if customer_type not in valid_types:
+            messages.error(request, "Pick a valid customer type.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(
+                              {"name": name, "location": location,
+                               "ordered_by": ordered_by,
+                               "customer_type": default_type},
+                              mode="new", default_type=default_type))
+        # Case-insensitive duplicate check — "TEALS" / "teals" are the same.
+        if Customer.objects.filter(name__iexact=name).exists():
+            messages.error(request,
+                           f"A customer named '{name}' already exists. "
+                           "Pick a different name.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(
+                              {"name": name, "location": location,
+                               "ordered_by": ordered_by,
+                               "customer_type": customer_type},
+                              mode="new", default_type=default_type))
+        customer = Customer.objects.create(
+            name=name, location=location, ordered_by=ordered_by,
+            customer_type=customer_type,
+            is_type_manual=True, is_manual_entry=True,
+            department=dept,
+        )
+        messages.success(request, f"Created customer '{customer.name}'.")
+        return redirect("customer_detail", pk=customer.pk)
+
+    return render(request, "stock/customer_form.html",
+                  _customer_form_context(
+                      {"name": "", "location": "", "ordered_by": "",
+                       "customer_type": default_type},
+                      mode="new", default_type=default_type))
+
+
+def _customer_form_context(form, mode, default_type, customer=None):
+    return {
+        "form": form,
+        "mode": mode,                         # "new" | "edit"
+        "default_type": default_type,
+        "customer": customer,
+        "type_choices": Customer.TYPE_CHOICES,
+    }
+
+
+@login_required
+def customer_edit(request, pk):
+    """Edit an existing customer.
+
+    Always sets ``is_type_manual=True`` on save so the next import
+    leaves every editable field alone — even if the operator only
+    changed one of them. Department-scoped.
+    """
+    customer = get_object_or_404(Customer, pk=pk)
+    if customer.department and not customer.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()
+        location = (request.POST.get("location") or "").strip()
+        ordered_by = (request.POST.get("ordered_by") or "").strip()
+        customer_type = request.POST.get("customer_type")
+        valid_types = {k for k, _ in Customer.TYPE_CHOICES}
+        form = {"name": name, "location": location,
+                "ordered_by": ordered_by, "customer_type": customer_type}
+        if not name:
+            messages.error(request, "Name is required.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(form, mode="edit",
+                                                 default_type=customer.customer_type,
+                                                 customer=customer))
+        if customer_type not in valid_types:
+            messages.error(request, "Pick a valid customer type.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(form, mode="edit",
+                                                 default_type=customer.customer_type,
+                                                 customer=customer))
+        # Renaming: refuse a name that collides with a DIFFERENT customer.
+        if Customer.objects.filter(name__iexact=name).exclude(pk=customer.pk).exists():
+            messages.error(request,
+                           f"A customer named '{name}' already exists. "
+                           "Pick a different name.")
+            return render(request, "stock/customer_form.html",
+                          _customer_form_context(form, mode="edit",
+                                                 default_type=customer.customer_type,
+                                                 customer=customer))
+        customer.name = name
+        customer.location = location
+        customer.ordered_by = ordered_by
+        customer.customer_type = customer_type
+        customer.is_type_manual = True  # operator owns this row's content now
+        customer.save()
+        messages.success(request, f"Saved changes to '{customer.name}'.")
+        return redirect("customer_detail", pk=customer.pk)
+
+    form = {"name": customer.name, "location": customer.location,
+            "ordered_by": customer.ordered_by,
+            "customer_type": customer.customer_type}
+    return render(request, "stock/customer_form.html",
+                  _customer_form_context(form, mode="edit",
+                                         default_type=customer.customer_type,
+                                         customer=customer))
+
+
+@require_POST
+@login_required
+def customer_delete(request, pk):
+    """Delete a customer (POST after JS confirm)."""
+    customer = get_object_or_404(Customer, pk=pk)
+    if customer.department and not customer.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    name = customer.name
+    list_url = _customer_list_redirect_url(customer.customer_type)
+    customer.delete()
+    messages.success(request, f"Deleted customer '{name}'.")
+    return redirect(list_url)

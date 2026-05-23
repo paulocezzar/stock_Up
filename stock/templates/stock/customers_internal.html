@@ -2,6 +2,7 @@
 {% block n_cust_internal %}on{% endblock %}
 {% block body %}
 <h2>Internal Customers <span class="muted" style="font-size:14px">{{ customers|length }} in this department</span></h2>
+<p style="margin:-8px 0 14px"><a href="{% url 'customer_new' %}?type=internal" class="btn">+ Add customer</a></p>
 <div class="filter">
   <input type="search" placeholder="filter by name or location…" data-filter="customers-tbl" autocomplete="off">
   <span class="count-out"></span>

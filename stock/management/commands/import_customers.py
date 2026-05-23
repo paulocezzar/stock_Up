@@ -26,10 +26,16 @@ own order-form tab:
 Wholesale accounts that exist ONLY in the WHOLESALE tab (PINKMANS,
 SOCIETY branches) are imported with empty location/contact.
 
-Idempotent on name (case-insensitive lookup). Operator-edited rows
-(``is_type_manual=True``) keep BOTH their ``customer_type`` AND their
-``ordered_by`` across re-imports; ``location`` always refreshes from
-the Customers tab (it's not edited via the UI).
+Idempotent on name (case-insensitive lookup). Two flags protect operator
+work from being clobbered by re-import:
+
+- ``is_type_manual=True`` — set whenever the operator edits an existing
+  row via the UI. Protects ALL editable fields (customer_type, ordered_by,
+  location) from being overwritten. Re-import touches only ``department``.
+- ``is_manual_entry=True`` — set when the operator creates a customer by
+  hand from the UI. The importer SKIPS these rows entirely: no field is
+  ever touched, and they're never deleted, even if their name happens to
+  later appear in the order sheet.
 """
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -167,7 +173,7 @@ class Command(BaseCommand):
         wholesale_keys = {n.lower() for n in wholesale_names}
         contact_by_tab = _build_contact_lookup(wb)
 
-        created = updated = preserved_manual = 0
+        created = updated = preserved_manual = skipped_manual_entry = 0
         n_internal = n_wholesale = 0
 
         # Case-insensitive lookup of existing Customer rows by name so we
@@ -175,7 +181,7 @@ class Command(BaseCommand):
         existing_by_key = {c.name.lower(): c for c in Customer.objects.all()}
 
         def _upsert(name, location, contact, is_wholesale):
-            nonlocal created, updated, preserved_manual
+            nonlocal created, updated, preserved_manual, skipped_manual_entry
             target_type = Customer.WHOLESALE if is_wholesale else Customer.INTERNAL
             key = name.lower()
             existing = existing_by_key.get(key)
@@ -183,21 +189,25 @@ class Command(BaseCommand):
                 c = Customer.objects.create(
                     name=name, location=location, ordered_by=contact,
                     customer_type=target_type, is_type_manual=False,
-                    department=dept,
+                    is_manual_entry=False, department=dept,
                 )
                 existing_by_key[key] = c
                 created += 1
                 return c
-            # Location always refreshes (Customers tab is authoritative,
-            # not edited via the UI). is_type_manual protects BOTH the
-            # type and the contact so operator edits survive re-import.
-            existing.location = location
+            # Hand-created rows are off-limits — the operator owns them.
+            if existing.is_manual_entry:
+                skipped_manual_entry += 1
+                return existing
+            # is_type_manual protects every editable field (type, contact,
+            # location) so operator edits survive re-import. Department is
+            # still kept in sync so a re-deployed dept rename can land.
             existing.department = dept
             if existing.is_type_manual:
                 preserved_manual += 1
             else:
                 existing.customer_type = target_type
                 existing.ordered_by = contact
+                existing.location = location
             existing.save()
             updated += 1
             return existing
@@ -235,4 +245,9 @@ class Command(BaseCommand):
             f"  {n_internal} internal, {n_wholesale} wholesale")
         if preserved_manual:
             self.stdout.write(self.style.WARNING(
-                f"  Preserved {preserved_manual} manual override(s) (type + contact)"))
+                f"  Preserved {preserved_manual} manually-edited row(s) "
+                f"(type + contact + location untouched)"))
+        if skipped_manual_entry:
+            self.stdout.write(self.style.WARNING(
+                f"  Skipped {skipped_manual_entry} hand-created customer(s) "
+                f"(is_manual_entry=True)"))

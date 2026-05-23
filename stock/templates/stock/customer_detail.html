@@ -14,7 +14,17 @@
 <h2>{{ customer.name }}
   <span class="type-tag {{ customer.customer_type }}{% if customer.is_type_manual %} manual{% endif %}"
         title="{% if customer.is_type_manual %}Manually set{% else %}Auto from order sheet{% endif %}">{{ customer.get_customer_type_display }}{% if customer.is_type_manual %} ·M{% endif %}</span>
+  {% if customer.is_manual_entry %}<span class="type-tag wholesale manual" title="Created by hand — the importer never touches this row">hand-created</span>{% endif %}
 </h2>
+
+<p style="margin:-10px 0 14px">
+  <a href="{% url 'customer_edit' customer.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  &nbsp;
+  <form method="post" action="{% url 'customer_delete' customer.pk %}" style="display:inline"
+        onsubmit="return confirm('Delete {{ customer.name|escapejs }}? This can't be undone.')">{% csrf_token %}
+    <button class="btn ghost" style="padding:4px 12px">delete</button>
+  </form>
+</p>
 
 <div class="card"><h3>Details</h3>
 <dl class="kv">
@@ -22,6 +32,7 @@
   <dt>Ordered by</dt><dd>{{ customer.ordered_by|default:"—" }}</dd>
   <dt>Department</dt><dd>{{ customer.department.name|default:"—" }}</dd>
   <dt>Status</dt><dd>{% if customer.active %}active{% else %}inactive{% endif %}</dd>
+  <dt>Source</dt><dd>{% if customer.is_manual_entry %}Hand-created{% else %}Order sheet{% endif %}{% if customer.is_type_manual %} · manually edited{% endif %}</dd>
 </dl>
 </div>
 

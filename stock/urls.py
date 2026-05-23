@@ -39,6 +39,9 @@ urlpatterns = [
     path("adjustments/", views.adjustments, name="adjustments"),
     path("customers/", views.customers_internal, name="customers"),
     path("customers/wholesale/", views.customers_wholesale, name="customers_wholesale"),
+    path("customers/new/", views.customer_new, name="customer_new"),
     path("customers/<int:pk>/", views.customer_detail, name="customer_detail"),
+    path("customers/<int:pk>/edit/", views.customer_edit, name="customer_edit"),
+    path("customers/<int:pk>/delete/", views.customer_delete, name="customer_delete"),
     path("customers/<int:pk>/type/", views.customer_set_type, name="customer_set_type"),
 ]
