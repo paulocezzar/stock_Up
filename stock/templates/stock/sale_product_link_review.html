@@ -109,12 +109,13 @@
           <form method="post" action="{% url 'sale_product_link_set' row.product.pk %}"
                 class="other-pick">{% csrf_token %}
             <input type="hidden" name="next" value="{% url 'sale_product_link_review' %}">
-            <select name="recipe_id">
-              <option value="">— or pick any recipe —</option>
-              {% for r in all_recipes %}
-                <option value="{{ r.pk }}">{{ r.code }} — {{ r.name }}{% if r.sold_as_product and r.cached_is_component %} (sold, component){% elif r.sold_as_product %} (sold){% elif r.cached_is_component %} (component){% endif %}</option>
-              {% endfor %}
-            </select>
+            <div class="recipe-picker" data-seed="{{ row.product.name }}">
+              <input type="text" class="rcp-search" autocomplete="off"
+                     placeholder="search recipes by name or code…"
+                     aria-label="Search recipes for {{ row.product.code }}">
+              <input type="hidden" class="rcp-id" name="recipe_id" value="">
+              <div class="rcp-list" hidden role="listbox"></div>
+            </div>
             <button class="btn" type="submit" style="padding:3px 12px;font-size:11px">link</button>
           </form>
         </div>
@@ -128,4 +129,7 @@
 <p class="muted" style="font-size:12px;margin:14px 0 0">
   Confirmed products live on the <a href="{% url 'sale_products' %}">Products list</a> — that's where to go to edit or re-link them later. Re-imports leave manual links untouched, so a confirmed pick survives every deploy.
 </p>
+
+{{ recipe_picker_payload|json_script:"recipe-picker-data" }}
+{% include "stock/_recipe_picker_assets.html" %}
 {% endblock %}

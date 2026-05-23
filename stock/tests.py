@@ -6234,41 +6234,112 @@ class SaleProductsViewsTests(TestCase):
         self.assertIn(">sold<", body)
         self.assertIn(">component<", body)
 
-    def test_link_review_pick_any_dropdown_carries_role_labels(self):
-        # Make Mince a component so the dropdown option carries the
-        # "(component)" suffix.
+    def _extract_picker_payload(self, body):
+        # The picker JSON is embedded via Django's json_script template
+        # filter as <script type="application/json" id="recipe-picker-data">…</script>
+        # Find it and return the parsed list.
+        import json
+        import re
+        m = re.search(
+            r'<script[^>]*id="recipe-picker-data"[^>]*>(.*?)</script>',
+            body, re.DOTALL)
+        self.assertIsNotNone(m, "recipe-picker-data script block missing")
+        return json.loads(m.group(1))
+
+    def test_link_review_embeds_recipe_picker_data(self):
+        # The picker is driven by an embedded JSON payload of every
+        # recipe with code/name/sold/component. Replaces the old
+        # <select> dropdown for 248-recipe scenarios.
         wrapper = Recipe.objects.create(
             code="NPD-R999", name="Mince Pie Bundle",
             department=self.dept, sold_as_product=True)
         RecipeLine.objects.create(
             recipe=wrapper, sub_recipe=self.mince,
             weight_g=Decimal("10"), ordering=0)
-        # Mark Mince not-sold so it labels as component only (sanity).
+        # Mark mince not-sold so it labels as component-only.
         self.mince.sold_as_product = False
         self.mince.is_sold_manual = True
         self.mince.save(update_fields=["sold_as_product", "is_sold_manual"])
         SaleProduct.objects.create(name="To Link", department=self.dept)
         body = self.client.get("/sale-products/link-review/").content.decode()
-        # The dropdown is a native <select>; option labels carry text
-        # suffixes since native options can't render tags.
-        self.assertIn(f"{self.apple.code} — {self.apple.name} (sold)", body)
-        self.assertIn(f"{self.mince.code} — {self.mince.name} (component)", body)
+        payload = self._extract_picker_payload(body)
+        by_code = {r["code"]: r for r in payload}
+        # Every active recipe carried into the payload, each with role flags.
+        self.assertIn(self.apple.code, by_code)
+        self.assertIn(self.mince.code, by_code)
+        self.assertIn(wrapper.code, by_code)
+        self.assertTrue(by_code[self.apple.code]["sold"])
+        self.assertFalse(by_code[self.apple.code]["component"])
+        self.assertFalse(by_code[self.mince.code]["sold"])
+        self.assertTrue(by_code[self.mince.code]["component"])
+        self.assertTrue(by_code[wrapper.code]["sold"])
+        # Required shape: pk + code + name + sold + component.
+        for r in payload:
+            self.assertEqual(set(r.keys()),
+                             {"pk", "code", "name", "sold", "component"})
 
-    def test_link_review_dropdown_shows_all_recipes_including_components(self):
-        # Non-sold, non-component recipes still appear (no label suffix).
+    def test_link_review_picker_input_present_and_pre_seeded(self):
+        # Each row's picker carries a search input the autocomplete
+        # widget attaches to, plus the data-seed for the product so
+        # the dropdown opens with relevant matches.
+        sp = SaleProduct.objects.create(
+            name="Crumble Topped Mince Pies Retail (Pack/6)",
+            department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        # Per-row picker container.
+        self.assertIn('class="recipe-picker"', body)
+        # Search input + hidden recipe_id (the form posts the latter).
+        self.assertIn('class="rcp-search"', body)
+        self.assertIn('class="rcp-id"', body)
+        # data-seed carries the product name (the JS strips parentheticals
+        # client-side, so we don't assert on the cleaned form here).
+        self.assertIn(f'data-seed="{sp.name}"', body)
+
+    def test_link_review_dropdown_includes_non_role_recipes(self):
+        # Non-sold, non-component recipes still surface in the picker
+        # payload (no filtering by role).
         plain = Recipe.objects.create(
             code="NPD-R500", name="Plain Recipe",
             department=self.dept, sold_as_product=False)
-        # Plain recipe isn't referenced as a sub_recipe anywhere → no
-        # "(component)" suffix, no "(sold)" suffix.
         SaleProduct.objects.create(name="To Link", department=self.dept)
         body = self.client.get("/sale-products/link-review/").content.decode()
-        self.assertIn(f"{plain.code} — {plain.name}", body)
-        # Make sure no role suffix is glued onto this option.
-        # Construct the option line robustly: the suffix would be
-        # "{name} (sold)" or "{name} (component)".
-        self.assertNotIn(f"{plain.name} (sold)", body)
-        self.assertNotIn(f"{plain.name} (component)", body)
+        payload = self._extract_picker_payload(body)
+        plain_row = next((r for r in payload if r["code"] == plain.code), None)
+        self.assertIsNotNone(plain_row)
+        self.assertFalse(plain_row["sold"])
+        self.assertFalse(plain_row["component"])
+
+    def test_form_pages_embed_recipe_picker_data_and_input(self):
+        # The product create + edit forms also use the autocomplete
+        # picker — same JSON payload + recipe-picker widget.
+        # New form:
+        body = self.client.get("/sale-products/new/").content.decode()
+        payload = self._extract_picker_payload(body)
+        self.assertGreaterEqual(len(payload), 2)  # apple + mince at least
+        self.assertIn('class="recipe-picker"', body)
+        self.assertIn('class="rcp-search"', body)
+        self.assertIn('class="rcp-id"', body)
+        # Edit form pre-seeds with the existing link via data-selected-id.
+        sp = SaleProduct.objects.create(
+            name="Linked SKU", department=self.dept,
+            recipe=self.apple, link_source=SaleProduct.MANUAL,
+            link_confirmed=True)
+        body = self.client.get(f"/sale-products/{sp.pk}/edit/").content.decode()
+        self.assertIn(f'data-selected-id="{self.apple.pk}"', body)
+
+    def test_form_submit_with_picker_recipe_id_links_correctly(self):
+        # The picker writes the chosen recipe's pk into the hidden
+        # recipe_id input the form already posts; the server side is
+        # unchanged from the old <select>, so submitting still flips
+        # link_source to manual.
+        resp = self.client.post("/sale-products/new/", {
+            "name": "Search-and-link SKU", "price": "1.20",
+            "recipe_id": str(self.mince.pk),
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp = SaleProduct.objects.get(name="Search-and-link SKU")
+        self.assertEqual(sp.recipe, self.mince)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
 
     def test_detail_page_suggestions_labelled(self):
         # The detail page's "Suggested by name similarity" block uses

@@ -1834,6 +1834,24 @@ def _annotate_recipe_roles(recipes):
     return recipes
 
 
+def _recipe_picker_payload(recipes):
+    """Plain list of dicts for the client-side recipe autocomplete.
+
+    Each entry is ``{pk, code, name, sold, component}``. The browser
+    filters this list as the operator types; nothing per-keystroke
+    hits the server. Pass a list already annotated by
+    ``_annotate_recipe_roles`` so the role flags are accurate. The
+    template renders it with ``{{ payload|json_script:"recipe-picker-data" }}``
+    so embedding is XSS-safe automatically (no ``</script>`` escape worries).
+    """
+    return [
+        {"pk": r.pk, "code": r.code, "name": r.name,
+         "sold": bool(r.sold_as_product),
+         "component": bool(getattr(r, "cached_is_component", False))}
+        for r in recipes
+    ]
+
+
 def _recipe_suggestions(name, all_recipes, *, n=5, threshold=0.5):
     """Top-N fuzzy recipe matches for a sale product name.
 
@@ -1912,12 +1930,17 @@ def sale_product_detail(request, pk):
 
 def _sale_product_form_context(form, mode, product=None, error=None,
                                 recipes=None):
+    recipes = recipes if recipes is not None else []
+    # The form template renders a search-as-you-type recipe picker
+    # driven by an embedded JSON blob; precompute it here so both new
+    # and edit branches go through the same path.
     return {
         "form": form,
         "mode": mode,
         "product": product,
         "error": error,
-        "recipes": recipes if recipes is not None else [],
+        "recipes": recipes,
+        "recipe_picker_payload": _recipe_picker_payload(recipes),
     }
 
 
@@ -1942,7 +1965,8 @@ def sale_product_new(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
-    recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
+    recipes = _annotate_recipe_roles(
+        list(Recipe.objects.filter(archived=False).order_by("code")))
 
     if request.method == "POST":
         form = {
@@ -1992,7 +2016,8 @@ def sale_product_edit(request, pk):
     product = get_object_or_404(SaleProduct, pk=pk)
     if product.department and not product.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
+    recipes = _annotate_recipe_roles(
+        list(Recipe.objects.filter(archived=False).order_by("code")))
 
     if request.method == "POST":
         form = {
@@ -2101,6 +2126,7 @@ def sale_product_link_review(request):
         "n_unresolved": len(unresolved),
         "n_sage_unconfirmed": n_sage_unconfirmed,
         "all_recipes": all_recipes,
+        "recipe_picker_payload": _recipe_picker_payload(all_recipes),
     })
 
 

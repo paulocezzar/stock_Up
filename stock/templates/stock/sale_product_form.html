@@ -29,15 +29,18 @@
 </div>
 
 <div class="card"><h3>Linked recipe</h3>
-  <p class="muted" style="margin:0 0 10px;font-size:12px">Picking a recipe (or clearing it) sets a MANUAL link — the next deploy's importer won't override your choice.</p>
+  <p class="muted" style="margin:0 0 10px;font-size:12px">Picking a recipe (or clearing it) sets a MANUAL link — the next deploy's importer won't override your choice. Type a few letters of the recipe name or code; arrow keys + Enter pick.</p>
   <div class="field">
     <label>Recipe</label>
-    <select name="recipe_id" style="width:100%;max-width:480px">
-      <option value="">— no recipe linked —</option>
-      {% for r in recipes %}
-        <option value="{{ r.pk }}" {% if form.recipe_id == r.pk|stringformat:"s" %}selected{% endif %}>{{ r.code }} — {{ r.name }}</option>
-      {% endfor %}
-    </select>
+    <div class="recipe-picker"
+         {% if form.recipe_id %}data-selected-id="{{ form.recipe_id }}"{% elif product %}data-seed="{{ product.name }}"{% elif form.name %}data-seed="{{ form.name }}"{% endif %}>
+      <input type="text" class="rcp-search" autocomplete="off"
+             placeholder="search recipes by name or code…"
+             aria-label="Recipe search">
+      <input type="hidden" class="rcp-id" name="recipe_id" value="{{ form.recipe_id }}">
+      <button type="button" class="rcp-clear" aria-label="Clear recipe">×</button>
+      <div class="rcp-list" hidden role="listbox"></div>
+    </div>
   </div>
 </div>
 
@@ -50,4 +53,7 @@
 <p class="muted" style="font-size:12px;margin:14px 0 0">
   {% if mode == "new" %}Hand-created products are flagged so the order-sheet importer never touches them.{% else %}Editing a product preserves its name verbatim — the importer can refresh price / Sage / pack size but never the name.{% endif %}
 </p>
+
+{{ recipe_picker_payload|json_script:"recipe-picker-data" }}
+{% include "stock/_recipe_picker_assets.html" %}
 {% endblock %}
