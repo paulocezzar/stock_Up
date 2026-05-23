@@ -300,6 +300,148 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
     }
 
 
+# Workbook tabs that aren't customer order forms — never import as
+# orders. Mirrors ``import_customers.META_TABS`` (kept duplicated rather
+# than imported across modules to keep ordering imports independent of
+# the customer importer). WHOLESALE is meta here too: its layout is one
+# row per wholesale-customer name in column 0, not the per-customer
+# Ordered/Sent/Comments strip the parser expects.
+META_TABS = {
+    "start", "products", "customers", "customer lookup",
+    "production", "starter", "daily production", "weekly production",
+    "delivery note", "wholesale delivery note", "wholesale",
+}
+
+
+def _resolve_week_dates(wb):
+    """Find the 7-date Mon..Sun strip by trying each non-meta tab in turn.
+
+    Historical workbooks have ~30 customer tabs, all sharing the same
+    layout — any one with a valid date row tells us the week. We try in
+    sheet order and return the first tab that parses cleanly; tabs
+    whose date row is missing/malformed (or that aren't customer tabs
+    at all) are silently skipped here — they surface again per-tab in
+    ``import_historical_workbook``'s failures list.
+    """
+    for tab in wb.sheetnames:
+        if tab.strip().lower() in META_TABS:
+            continue
+        try:
+            return read_tab_dates(wb[tab])
+        except Exception:  # noqa: BLE001 — try the next tab
+            continue
+    return None
+
+
+def import_historical_workbook(file_or_path, *, force=False):
+    """Import an entire week's orders across every customer tab.
+
+    Designed for the historical archive (``data/historical/*.xlsm``)
+    where each file is one week — the deploy loops these and we never
+    want to re-do work or clobber operator edits on a re-run.
+
+    Idempotency gate: if ANY Order already exists for any of the
+    week's 7 dates, the file is skipped wholesale and reported as
+    ``skipped=True``. ``force=True`` overrides this for the rare manual
+    re-import. The gate is intentionally coarse (any order for the
+    week, regardless of customer) — it's the only safe way to protect
+    later hand-edits across all customers in one check.
+
+    Tab handling is non-fatal: a missing Customer, a malformed date
+    row, or a wholesale tab with a different layout lands in
+    ``failures`` and the rest of the workbook keeps going.
+
+    Returns:
+        {
+            "path", "skipped", "reason"?, "week_start"?,
+            "tabs_imported", "lines_imported",
+            "products_matched", "products_unmatched_count",
+            "per_tab": {tab: per-tab summary},
+            "failures": [(tab_or_marker, reason)],
+        }
+    """
+    from openpyxl import load_workbook
+    from .models import Customer, Department, Order
+
+    wb = load_workbook(file_or_path, read_only=True, data_only=True)
+    try:
+        week_dates = _resolve_week_dates(wb)
+        if week_dates is None:
+            return {
+                "path": str(file_or_path),
+                "skipped": True,
+                "reason": "could not derive a valid week from any tab",
+                "tabs_imported": 0,
+                "lines_imported": 0,
+                "products_matched": 0,
+                "products_unmatched_count": 0,
+                "per_tab": OrderedDict(),
+                "failures": [],
+            }
+        week_start = week_dates[0]
+
+        # Idempotency: a previous deploy already imported this week.
+        # Skip wholesale rather than refresh-and-clobber any hand-edits
+        # the operator made to those historical orders.
+        if not force and Order.objects.filter(order_date__in=week_dates).exists():
+            return {
+                "path": str(file_or_path),
+                "skipped": True,
+                "reason": ("orders already exist for w/c "
+                           f"{week_start.isoformat()} — pass --force to re-import"),
+                "week_start": week_start,
+                "tabs_imported": 0,
+                "lines_imported": 0,
+                "products_matched": 0,
+                "products_unmatched_count": 0,
+                "per_tab": OrderedDict(),
+                "failures": [],
+            }
+
+        per_tab = OrderedDict()
+        failures = []
+        bakery_fallback = Department.objects.filter(name="Bakery").first()
+        for tab in wb.sheetnames:
+            if tab.strip().lower() in META_TABS:
+                continue
+            try:
+                customer = Customer.objects.filter(name__iexact=tab).first()
+                if customer is None:
+                    failures.append(
+                        (tab, "no Customer with that name — run "
+                              "import_customers first"))
+                    continue
+                dept = customer.department or bakery_fallback
+                if dept is None:
+                    failures.append(
+                        (tab, "customer has no department and no Bakery "
+                              "fallback exists"))
+                    continue
+                result = import_orders_for_tab(wb, tab, customer, dept)
+            except Exception as e:  # noqa: BLE001 — keep going past a bad tab
+                failures.append((tab, f"{type(e).__name__}: {e}"))
+                continue
+            # Tabs with no ordered cells (a blank customer this week)
+            # come back with zero lines — keep them in per_tab anyway so
+            # the per-file summary surfaces that they were scanned.
+            per_tab[tab] = result
+
+        return {
+            "path": str(file_or_path),
+            "skipped": False,
+            "week_start": week_start,
+            "tabs_imported": len(per_tab),
+            "lines_imported": sum(r["lines_imported"] for r in per_tab.values()),
+            "products_matched": sum(r["products_matched"] for r in per_tab.values()),
+            "products_unmatched_count": sum(
+                len(r["products_unmatched"]) for r in per_tab.values()),
+            "per_tab": per_tab,
+            "failures": failures,
+        }
+    finally:
+        wb.close()
+
+
 def import_orders(file_or_path, *, tabs=None):
     """Read one or more customer tabs from the order-sheet workbook.
 

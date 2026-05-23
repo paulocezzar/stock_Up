@@ -7953,7 +7953,7 @@ class HistoricalOrderImportTests(TestCase):
     current catalogue product matches — so financial totals are
     complete."""
 
-    SHEET = "data/order_sheet_2026_03_30.xlsm"
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
 
     def setUp(self):
         U = get_user_model()
@@ -8032,3 +8032,177 @@ class HistoricalOrderImportTests(TestCase):
         # non-zero total — there's no day with only unpriced lines.
         for order in Order.objects.filter(customer=self.garden):
             self.assertGreater(order.total_value(), Decimal("0"))
+
+
+class HistoricalWorkbookImportTests(TestCase):
+    """End-to-end ``import_historical_orders`` against the real w/c
+    30 Mar 2026 file: ALL customer tabs (not just Garden Café),
+    idempotent at the week level, non-fatal on any single bad tab."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+    WEEK_START = datetime.date(2026, 3, 30)
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        # Two customers from the historical workbook so we can prove
+        # the importer walks more than one tab. The rest of the ~30
+        # tabs land in ``failures`` (no matching Customer) — that's
+        # the expected non-fatal path.
+        self.garden = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.farmshop = Customer.objects.create(
+            name="Farmshop", department=self.dept)
+        self.products = _seed_garden_cafe_products(self.dept)
+
+    def test_imports_lines_across_multiple_customer_tabs(self):
+        from stock.order_import import import_historical_workbook
+        summary = import_historical_workbook(self.SHEET)
+        self.assertFalse(summary["skipped"])
+        self.assertEqual(summary["week_start"], self.WEEK_START)
+        # Both seeded customers landed orders for the week.
+        for cust in (self.garden, self.farmshop):
+            self.assertTrue(
+                Order.objects.filter(
+                    customer=cust, order_date=self.WEEK_START).exists(),
+                f"{cust.name} got no orders for w/c {self.WEEK_START}")
+        # The per-tab breakdown surfaces both customers + counts > 0.
+        self.assertIn("GARDEN CAFE", summary["per_tab"])
+        self.assertIn("FARMSHOP", summary["per_tab"])
+        self.assertGreater(summary["per_tab"]["GARDEN CAFE"]["lines_imported"], 0)
+        self.assertGreater(summary["per_tab"]["FARMSHOP"]["lines_imported"], 0)
+
+    def test_every_line_has_snapshotted_name_and_price(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET)
+        # Every OrderLine landed by the historical import — matched
+        # OR unmatched — must carry the snapshot fields. Use the week
+        # range so we don't pick up anything outside the import.
+        lines = OrderLine.objects.filter(
+            order__order_date__range=(
+                self.WEEK_START,
+                self.WEEK_START + datetime.timedelta(days=6)))
+        self.assertGreater(lines.count(), 0)
+        for line in lines:
+            self.assertTrue(line.product_name,
+                f"line {line.pk} has no product_name snapshot")
+            self.assertIsNotNone(line.unit_price,
+                f"line {line.pk} has no unit_price snapshot")
+
+    def test_discontinued_products_kept_across_tabs(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET)
+        # Hot Cross Buns / Almond Pastry appear on the historical
+        # GARDEN CAFE tab but aren't in the current catalogue seed.
+        # They must land as unlinked OrderLines with the sheet's
+        # snapshotted price, not be silently dropped.
+        for name, price in (
+                ("Hot Cross Buns (Pack/10)", Decimal("6.25")),
+                ("Almond Pastry", Decimal("1.5"))):
+            lines = OrderLine.objects.filter(
+                order__customer=self.garden, product_name=name)
+            self.assertTrue(lines.exists(),
+                f"historical importer dropped discontinued {name!r}")
+            for line in lines:
+                self.assertIsNone(line.sale_product_id)
+                self.assertEqual(line.unit_price, price)
+
+    def test_matched_products_link_to_current_saleproduct(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET)
+        croissant = self.products["Croissant (Loose)"]
+        lines = OrderLine.objects.filter(
+            order__customer=self.garden, sale_product=croissant)
+        self.assertGreater(lines.count(), 0,
+            "Croissant should still link to the current catalogue entry")
+
+    def test_idempotent_second_run_skips_entire_week(self):
+        from stock.order_import import import_historical_workbook
+        first = import_historical_workbook(self.SHEET)
+        self.assertFalse(first["skipped"])
+        line_count_after_first = OrderLine.objects.count()
+        order_count_after_first = Order.objects.count()
+
+        # Touch one line so we can verify a second run leaves edits alone.
+        croissant = self.products["Croissant (Loose)"]
+        edited = OrderLine.objects.filter(
+            order__customer=self.garden, sale_product=croissant).first()
+        edited.qty_ordered = Decimal("999")
+        edited.save()
+
+        second = import_historical_workbook(self.SHEET)
+        self.assertTrue(second["skipped"])
+        self.assertIn("already exist", second["reason"])
+        self.assertEqual(second["week_start"], self.WEEK_START)
+        # Nothing was wiped or duplicated, and the hand-edit survived.
+        self.assertEqual(OrderLine.objects.count(), line_count_after_first)
+        self.assertEqual(Order.objects.count(), order_count_after_first)
+        edited.refresh_from_db()
+        self.assertEqual(edited.qty_ordered, Decimal("999"))
+
+    def test_force_reimports_and_does_not_duplicate(self):
+        from stock.order_import import import_historical_workbook
+        first = import_historical_workbook(self.SHEET)
+        line_count = OrderLine.objects.count()
+        # --force bypasses the idempotency gate; the per-tab importer
+        # still wipes + rebuilds, so counts match (not double).
+        again = import_historical_workbook(self.SHEET, force=True)
+        self.assertFalse(again["skipped"])
+        self.assertEqual(OrderLine.objects.count(), line_count)
+
+    def test_bad_tab_is_non_fatal_other_tabs_still_import(self):
+        # Make one tab's per-tab call raise; the wrapper must capture
+        # the failure, keep going on every other tab, and still
+        # complete the run.
+        from stock import order_import as oi
+        real = oi.import_orders_for_tab
+
+        def fail_on_farmshop(workbook, tab_name, customer, dept):
+            if tab_name == "FARMSHOP":
+                raise RuntimeError("synthetic per-tab boom")
+            return real(workbook, tab_name, customer, dept)
+
+        with patch.object(oi, "import_orders_for_tab", side_effect=fail_on_farmshop):
+            summary = oi.import_historical_workbook(self.SHEET)
+        self.assertFalse(summary["skipped"])
+        self.assertIn("GARDEN CAFE", summary["per_tab"])
+        self.assertNotIn("FARMSHOP", summary["per_tab"])
+        # FARMSHOP shows up as a failure with the synthetic message.
+        failed = dict(summary["failures"])
+        self.assertIn("FARMSHOP", failed)
+        self.assertIn("synthetic per-tab boom", failed["FARMSHOP"])
+        # And Garden Café's orders are still in place.
+        self.assertTrue(Order.objects.filter(
+            customer=self.garden, order_date=self.WEEK_START).exists())
+
+    def test_meta_tabs_are_skipped(self):
+        # The Products / Customers / WHOLESALE tabs aren't customer
+        # order forms — they should never appear in per_tab or failures.
+        from stock.order_import import import_historical_workbook
+        summary = import_historical_workbook(self.SHEET)
+        seen = set(summary["per_tab"]) | {t for t, _ in summary["failures"]}
+        for meta in ("Start", "Products", "Customers",
+                     "Customer Lookup", "WHOLESALE", "Production"):
+            self.assertNotIn(meta, seen,
+                f"meta tab {meta!r} should have been skipped silently")
+
+    def test_management_command_runs_and_then_skips(self):
+        from django.core.management import call_command
+        # First call imports; second is skipped wholesale. Both must
+        # exit 0 (no CommandError) — the deploy depends on it.
+        call_command("import_historical_orders", self.SHEET)
+        first_count = OrderLine.objects.count()
+        self.assertGreater(first_count, 0)
+        call_command("import_historical_orders", self.SHEET)
+        self.assertEqual(OrderLine.objects.count(), first_count)
+
+    def test_missing_file_raises_command_error_caught_by_build(self):
+        # The management command surfaces FileNotFoundError as
+        # CommandError so build.sh's ``|| echo`` non-fatal pattern
+        # logs it and moves on instead of aborting the deploy.
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command("import_historical_orders", "data/historical/does_not_exist.xlsm")

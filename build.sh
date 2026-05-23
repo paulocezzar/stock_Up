@@ -62,3 +62,18 @@ python manage.py import_sale_products data/order_sheet.xlsm
 # deploy after the imports above have already run.
 python manage.py import_orders data/order_sheet.xlsm \
     || echo "import_orders had errors; continuing deploy."
+
+# Historical order sheets in data/historical/ — one full week per file
+# (e.g. order_sheet_2026_03_30.xlsm = w/c 30 Mar 2026). Each file is
+# imported across ALL customer tabs, but ONLY ONCE: import_historical_orders
+# skips a file whose week's Orders already exist, so a second deploy
+# never re-does work or clobbers hand-edits. New historical files
+# added to the folder land on the next deploy.
+# DELIBERATELY non-fatal: a bad file/tab logs and the deploy continues.
+if [ -d data/historical ]; then
+  for f in data/historical/*.xlsm; do
+    [ -e "$f" ] || continue  # no-match glob — empty folder, nothing to do
+    python manage.py import_historical_orders "$f" \
+        || echo "import_historical_orders $f had errors; continuing deploy."
+  done
+fi
