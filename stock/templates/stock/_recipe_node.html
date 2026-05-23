@@ -5,6 +5,11 @@ Expects ``node = {recipe, depth, lines, cycle}``. Layout for each block:
 header -> ingredients (sub-recipes are collapsed rows you expand inline)
 -> "show method" toggle (collapsed). Sub-recipes never auto-expand, so
 deep formulas stay readable.
+
+The ingredient block is a CSS Grid (not a <table>) so leaf rows AND
+sub-recipe summary rows share the same column template: gutter, weight,
+code, name. Weights line up under the WEIGHT header, codes under CODE,
+names under COMPONENT — at every nesting depth.
 {% endcomment %}<div class="recipe-block depth-{{ node.depth }}">
   <div class="rec-head">
     <span class="rec-code">{{ node.recipe.code }}</span>
@@ -16,37 +21,40 @@ deep formulas stay readable.
 
   <div class="rec-section-label">Ingredients</div>
   {% if node.lines %}
-  <table class="rec-lines">
-    <thead><tr><th class="num">Weight</th><th>Code</th><th>Component</th></tr></thead>
-    <tbody>
+  <div class="rec-lines">
+    <div class="rec-row rec-row--head">
+      <span class="rec-gutter" aria-hidden="true"></span>
+      <span class="rec-cell--weight">Weight</span>
+      <span class="rec-cell--code">Code</span>
+      <span class="rec-cell--name">Component</span>
+    </div>
     {% for entry in node.lines %}
       {% if entry.line.sub_recipe_id %}
-      <tr class="sub-line"><td colspan="3" class="sub-cell">
-        <details class="rec-sub">
-          <summary>
-            <span class="rec-weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
-            <span class="rec-code small">{{ entry.line.sub_recipe.code }}</span>
-            <span class="rec-name small">{{ entry.line.sub_recipe.name }}</span>
-            <span class="tag prov">sub-recipe</span>{% if entry.cycle %} <span class="tag low">cycle</span>{% endif %}
-            <span class="rec-expand muted">expand</span>
-          </summary>
+      <details class="rec-sub">
+        <summary class="rec-row rec-row-inner">
+          <span class="rec-gutter rec-chev" aria-hidden="true"></span>
+          <span class="rec-cell--weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
+          <span class="rec-cell--code"><a href="{% url 'recipe_detail' entry.line.sub_recipe.pk %}">{{ entry.line.sub_recipe.code }}</a></span>
+          <span class="rec-cell--name">{{ entry.line.sub_recipe.name }} <span class="tag prov">sub-recipe</span>{% if entry.cycle %} <span class="tag low">cycle</span>{% endif %}</span>
+        </summary>
+        <div class="rec-sub-body">
           {% if entry.cycle %}
-            <p class="muted" style="margin:10px 0 0">Cycle detected — this sub-recipe is already on the current path. Inline expansion stops here to keep the page finite.</p>
+            <p class="muted" style="margin:0">Cycle detected — this sub-recipe is already on the current path. Inline expansion stops here to keep the page finite.</p>
           {% elif entry.subtree %}
             {% include "stock/_recipe_node.html" with node=entry.subtree %}
           {% endif %}
-        </details>
-      </td></tr>
+        </div>
+      </details>
       {% else %}
-      <tr>
-        <td class="num">{{ entry.line.weight_g|floatformat:1 }}g</td>
-        <td><a href="{% url 'product_detail' entry.line.ingredient.pk %}">{{ entry.line.ingredient.code }}</a></td>
-        <td>{{ entry.line.ingredient.name }}</td>
-      </tr>
+      <div class="rec-row">
+        <span class="rec-gutter" aria-hidden="true"></span>
+        <span class="rec-cell--weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
+        <span class="rec-cell--code"><a href="{% url 'product_detail' entry.line.ingredient.pk %}">{{ entry.line.ingredient.code }}</a></span>
+        <span class="rec-cell--name">{{ entry.line.ingredient.name }}</span>
+      </div>
       {% endif %}
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
   <p class="muted" style="margin:6px 0 0">No lines yet — this recipe is a stub.</p>
   {% endif %}

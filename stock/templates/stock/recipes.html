@@ -48,11 +48,8 @@
 
 <h2>Recipes <span class="muted" style="font-size:14px">{{ n_recipes }} in this department</span></h2>
 
-<div class="card" style="border-left:3px solid var(--amber)">
-  <h3>Import a recipe</h3>
-  <p style="margin:0 0 10px">Upload a Recipe Breakdown <code>.xlsx</code> export. The main recipe and every sub-recipe section get imported, nested in the order the workbook references them.</p>
-  <p style="margin:0"><a href="{% url 'recipe_upload' %}" class="btn">Upload recipe →</a></p>
-</div>
+{# Importing lives on its own page in the section nav (the Import link). #}
+{# The redundant upload card that used to live here was removed. #}
 
 <div class="view-toggle" role="tablist">
   <a href="{% url 'recipes' %}" class="{% if view_mode == 'by_product' %}on{% endif %}">By product</a>

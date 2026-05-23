@@ -22,23 +22,43 @@
   .rec-open{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
   .rec-section-label{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 6px}
 
-  /* ---- the ingredient table inside each recipe block ---- */
-  .rec-lines{margin:0;width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--line)}
-  .rec-lines th,.rec-lines td{padding:7px 10px;border-bottom:1px solid var(--line)}
-  .rec-lines tr:last-child > td{border-bottom:0}
-  .rec-lines .sub-cell{padding:0}
+  /* ---- the ingredient block inside each recipe (CSS Grid table) ---- */
+  /* A single grid template shared by header, leaf rows, and sub-recipe
+     summary rows so weights, codes and names line up under their headers
+     at every depth. The first column is a fixed-width gutter that holds
+     the expand chevron on sub-recipe rows (hidden on leaves), so the
+     arrow never disrupts column alignment. */
+  .rec-lines{margin:0;border:1px solid var(--line);display:flex;flex-direction:column}
+  .rec-row,
+  .rec-sub > .rec-row-inner{
+    display:grid;
+    grid-template-columns:16px minmax(80px,max-content) minmax(110px,max-content) 1fr;
+    column-gap:14px;
+    align-items:baseline;
+    padding:7px 12px;
+    border-bottom:1px solid var(--line);
+  }
+  .rec-lines > .rec-row:last-child,
+  .rec-lines > .rec-sub:last-child{border-bottom:0}
+  .rec-lines > .rec-sub:last-child > .rec-row-inner{border-bottom:0}
+  .rec-row--head > *{font-family:var(--disp);font-size:11px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);font-weight:500}
+  .rec-cell--weight{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rec-cell--code{font-family:var(--disp);color:var(--amber);white-space:nowrap;letter-spacing:.5px}
+  .rec-cell--name{min-width:0;overflow-wrap:anywhere}
+  .rec-cell--name .tag{margin-left:6px;vertical-align:middle}
+  .rec-gutter{align-self:center;font-size:11px;color:var(--amber);line-height:1}
 
   /* ---- a sub-recipe row: collapsed by default, click to expand inline ---- */
-  .rec-sub{margin:0}
-  .rec-sub > summary{cursor:pointer;list-style:none;padding:8px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:transparent}
-  .rec-sub > summary:hover{background:var(--low-bg)}
-  .rec-sub > summary::-webkit-details-marker{display:none}
-  .rec-sub > summary::before{content:"▸";color:var(--muted);font-size:11px;margin-right:2px;width:10px;display:inline-block}
-  .rec-sub[open] > summary::before{content:"▾"}
-  .rec-sub .rec-weight{font-variant-numeric:tabular-nums;min-width:60px;text-align:right}
-  .rec-sub .rec-expand{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
-  .rec-sub[open] > summary .rec-expand{display:none}
-  .rec-sub[open] > .recipe-block{margin-left:18px;margin-top:6px}
+  .rec-sub{margin:0;padding:0;border-bottom:1px solid var(--line);background:transparent}
+  .rec-sub > .rec-row-inner{cursor:pointer;list-style:none;border-bottom:0}
+  .rec-sub > .rec-row-inner::-webkit-details-marker{display:none}
+  .rec-sub > .rec-row-inner:hover{background:var(--low-bg)}
+  .rec-chev::before{content:"\25B8"}     /* ▸ */
+  .rec-sub[open] > .rec-row-inner .rec-chev::before{content:"\25BE"}  /* ▾ */
+  /* Expanded body: indented to align with the Weight column above so the
+     parent and child tables read as a continuous tree. */
+  .rec-sub > .rec-sub-body{padding:10px 12px 12px 42px;border-top:1px solid var(--line)}
 
   /* ---- the method toggle and method body ---- */
   .rec-method{margin:12px 0 0}
