@@ -4909,6 +4909,195 @@ class RecipeDeleteEditTests(TestCase):
         self.assertIn(f'href="/recipes/{r.pk}/edit/"', body)
         self.assertIn(f'href="/recipes/{r.pk}/delete/"', body)
 
+    # ---- bulk-select + delete from the All-recipes list ----
+
+    def test_flat_list_shows_checkboxes_and_bulk_delete_button(self):
+        Recipe.objects.create(code="NPD-R100", name="Alpha", department=self.dept)
+        Recipe.objects.create(code="NPD-R101", name="Beta", department=self.dept)
+        r = self.client.get("/recipes/?view=flat")
+        body = r.content.decode()
+        self.assertIn('id="bulk-form"', body)
+        self.assertIn('name="recipe_ids"', body)
+        self.assertIn("Delete selected", body)
+
+    def test_bulk_delete_confirmation_lists_selected(self):
+        a = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R101", name="Beta",
+                                  department=self.dept)
+        # Untouched recipe — must not appear on the confirmation page.
+        Recipe.objects.create(code="NPD-R102", name="Gamma",
+                              department=self.dept)
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+        })
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("NPD-R100", body)
+        self.assertIn("Alpha", body)
+        self.assertIn("NPD-R101", body)
+        self.assertIn("Beta", body)
+        self.assertNotIn("NPD-R102", body)
+        # Count visible
+        self.assertIn("Delete 2 recipe", body)
+        # Confirmation NOT performed yet — both recipes still exist.
+        self.assertEqual(Recipe.objects.filter(code__in=("NPD-R100", "NPD-R101")).count(), 2)
+        self.assertFalse(SuppressedRecipe.objects.filter(code__in=("NPD-R100", "NPD-R101")).exists())
+
+    def test_bulk_delete_confirmation_warns_about_external_dependents(self):
+        # Two selected: NPD-R900 (used by NPD-R800 which is NOT selected),
+        # and NPD-R901 (used by NPD-R902 which IS selected).
+        ext_parent = Recipe.objects.create(code="NPD-R800", name="External Parent",
+                                           department=self.dept)
+        sel_parent = Recipe.objects.create(code="NPD-R902", name="Sel Parent",
+                                           department=self.dept)
+        a = Recipe.objects.create(code="NPD-R900", name="Sub A",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R901", name="Sub B",
+                                  department=self.dept)
+        RecipeLine.objects.create(recipe=ext_parent, sub_recipe=a,
+                                  weight_g=Decimal("10"), ordering=0)
+        RecipeLine.objects.create(recipe=sel_parent, sub_recipe=b,
+                                  weight_g=Decimal("10"), ordering=0)
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk), str(b.pk), str(sel_parent.pk)],
+        })
+        body = resp.content.decode()
+        # External parent listed, with its lost reference shown.
+        self.assertIn("External Parent", body)
+        self.assertIn(f'href="/recipes/{ext_parent.pk}/"', body)
+        self.assertIn("NPD-R900", body)
+        # The internal parent (also selected) must NOT appear in the
+        # "external" warning — it's being deleted itself.
+        # We check by looking inside the warning block specifically; an
+        # easy proxy: the count of "external" mentions is 1.
+        self.assertEqual(body.count("External Parent"), 1)
+        # Internal parent's code (NPD-R902) appears in the "Will delete"
+        # table but not in the external-warning row, so we don't make a
+        # negative assertion on it.
+
+    def test_bulk_delete_confirm_removes_all_and_suppresses_codes(self):
+        a = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R101", name="Beta",
+                                  department=self.dept)
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Recipe.objects.filter(
+            code__in=("NPD-R100", "NPD-R101")).exists())
+        self.assertEqual(
+            set(SuppressedRecipe.objects.values_list("code", flat=True)),
+            {"NPD-R100", "NPD-R101"})
+
+    def test_bulk_delete_clears_dangling_external_subrecipe_lines(self):
+        # External parent loses its sub-recipe line; its own ingredient
+        # line stays. RecipeLine.sub_recipe is PROTECT, so this must be
+        # cleaned up before the cascade.
+        ext_parent = Recipe.objects.create(code="NPD-R800", name="External",
+                                           department=self.dept)
+        sub = Recipe.objects.create(code="NPD-R900", name="Sub",
+                                    department=self.dept)
+        flour = Product.objects.create(
+            code="NPD-I9001", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        RecipeLine.objects.create(recipe=ext_parent, ingredient=flour,
+                                  weight_g=Decimal("100"), ordering=0)
+        RecipeLine.objects.create(recipe=ext_parent, sub_recipe=sub,
+                                  weight_g=Decimal("50"), ordering=1)
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(sub.pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Recipe.objects.filter(code="NPD-R900").exists())
+        ext_parent.refresh_from_db()
+        self.assertEqual(ext_parent.lines.count(), 1)
+        self.assertEqual(ext_parent.lines.get().ingredient, flour)
+
+    def test_bulk_delete_is_atomic(self):
+        # Mock save inside the transaction to blow up — nothing should
+        # commit (no deletions, no suppression rows).
+        from unittest.mock import patch
+        a = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R101", name="Beta",
+                                  department=self.dept)
+        with patch.object(SuppressedRecipe.objects,
+                          "update_or_create",
+                          side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/recipes/bulk-delete/", {
+                    "recipe_ids": [str(a.pk), str(b.pk)],
+                    "confirm": "1",
+                })
+        # Atomic rollback: both still there, no suppression.
+        self.assertEqual(Recipe.objects.filter(
+            code__in=("NPD-R100", "NPD-R101")).count(), 2)
+        self.assertFalse(SuppressedRecipe.objects.filter(
+            code__in=("NPD-R100", "NPD-R101")).exists())
+
+    def test_bulk_delete_is_department_scoped(self):
+        mine = Recipe.objects.create(code="NPD-R100", name="Mine",
+                                     department=self.dept)
+        theirs = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                       department=self.other_dept)
+        # POST with both — only the in-dept one should land on the
+        # confirmation page; the cross-dept id is silently dropped.
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(mine.pk), str(theirs.pk)],
+        })
+        body = resp.content.decode()
+        self.assertIn("NPD-R100", body)
+        self.assertNotIn("NPD-R777", body)
+        # Confirming with both ids: the other dept's recipe still
+        # survives because the filter excludes it.
+        resp = self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(mine.pk), str(theirs.pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Recipe.objects.filter(code="NPD-R100").exists())
+        self.assertTrue(Recipe.objects.filter(code="NPD-R777").exists())
+        self.assertFalse(SuppressedRecipe.objects.filter(code="NPD-R777").exists())
+
+    def test_bulk_delete_with_empty_selection_redirects_with_message(self):
+        resp = self.client.post("/recipes/bulk-delete/", {})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/recipes/", resp.headers["Location"])
+
+    def test_bulk_delete_requires_login(self):
+        r = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept)
+        anon = Client()
+        resp = anon.post("/recipes/bulk-delete/", {"recipe_ids": [str(r.pk)]})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/login/", resp.headers["Location"])
+
+    def test_bulk_deleted_codes_survive_reimport(self):
+        # Bulk-delete two recipes from the committed sample workbook,
+        # then re-import — neither must come back.
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        a = Recipe.objects.get(code="NPD-R2031")
+        b = Recipe.objects.get(code="NPD-R2082")
+        self.client.post("/recipes/bulk-delete/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+            "confirm": "1",
+        })
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        codes = set(Recipe.objects.values_list("code", flat=True))
+        self.assertNotIn("NPD-R2031", codes)
+        self.assertNotIn("NPD-R2082", codes)
+        # And the suppression rows are still there for both.
+        self.assertEqual(
+            SuppressedRecipe.objects.filter(
+                code__in=("NPD-R2031", "NPD-R2082")).count(), 2)
+
     def test_bulk_import_skips_suppressed_subrecipe_reference(self):
         # A workbook references NPD-R901 as a sub-recipe of NPD-R900.
         # NPD-R901 is suppressed, so the bulk import must NOT auto-stub

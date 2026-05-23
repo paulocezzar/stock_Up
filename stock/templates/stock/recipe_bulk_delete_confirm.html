@@ -1,0 +1,56 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2>Delete {{ selected|length }} recipe{{ selected|length|pluralize }}?</h2>
+
+<div class="card">
+  <h3>Will delete</h3>
+  <table>
+    <thead><tr><th>Code</th><th>Name</th><th class="num">Lines</th></tr></thead>
+    <tbody>
+    {% for r in selected %}
+      <tr>
+        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
+        <td>{{ r.name }}</td>
+        <td class="num">{{ r.lines.count }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if external_rows %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>{{ external_rows|length }} other recipe{{ external_rows|length|pluralize }} use{{ external_rows|length|pluralize:"s," }} a selected recipe as a sub-recipe</h3>
+  <p class="muted" style="margin:0 0 10px">These recipes are NOT in the selection but reference one or more recipes you're about to delete. The sub-recipe lines pointing at the deleted recipes will be removed from them; the parents themselves are kept (you'll likely want to edit them afterwards).</p>
+  <table>
+    <thead><tr><th>Parent</th><th>Will lose reference to</th></tr></thead>
+    <tbody>
+    {% for row in external_rows %}
+      <tr>
+        <td><a href="{% url 'recipe_detail' row.parent.pk %}">{{ row.parent.code }} — {{ row.parent.name }}</a></td>
+        <td>{% for code in row.child_codes %}<code>{{ code }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Confirm</h3>
+  <p>Confirming will:</p>
+  <ul style="margin:0 0 14px;padding-left:20px">
+    <li>Delete <strong>{{ selected|length }}</strong> recipe{{ selected|length|pluralize }} and {{ selected|length|pluralize:"its,their" }} ingredient lines (raw ingredient Products are kept).</li>
+    {% if external_rows %}<li>Drop sub-recipe lines in {{ external_rows|length }} other recipe{{ external_rows|length|pluralize }}.</li>{% endif %}
+    <li>Record each code as suppressed so future deploys won't bring them back. Un-suppress via the Django admin if you change your mind.</li>
+  </ul>
+  <form method="post" action="{% url 'recipe_bulk_delete' %}"
+        onsubmit="return confirm('Really delete {{ selected|length }} recipe{{ selected|length|pluralize }}? This can\'t be undone from the UI.')">{% csrf_token %}
+    {% for r in selected %}<input type="hidden" name="recipe_ids" value="{{ r.pk }}">{% endfor %}
+    <input type="hidden" name="confirm" value="1">
+    <button class="btn" type="submit" style="background:var(--red);border-color:var(--red);color:#fff">Delete {{ selected|length }} recipe{{ selected|length|pluralize }}</button>
+    &nbsp;<a href="/recipes/?view=flat" class="muted">cancel</a>
+  </form>
+</div>
+{% endblock %}

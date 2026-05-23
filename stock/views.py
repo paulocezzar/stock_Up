@@ -4,6 +4,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
 from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe
@@ -606,6 +607,93 @@ def recipe_delete(request, pk):
     return render(request, "stock/recipe_delete_confirm.html", {
         "recipe": recipe,
         "parents": parents,
+    })
+
+
+@require_POST
+@login_required
+def recipe_bulk_delete(request):
+    """Bulk-delete recipes selected on the flat list page.
+
+    Two-step POST: the first submission carries ``recipe_ids`` from the
+    checkboxes and renders a confirmation page that names exactly which
+    recipes will be deleted, the count, and any external parents (parent
+    recipes that reference a selected sub-recipe but aren't themselves
+    selected). The second submission carries ``confirm=1`` and commits
+    the deletion in a single transaction:
+
+      * dangling ``RecipeLine.sub_recipe`` references in non-selected
+        parents are removed first (the FK is on_delete=PROTECT, so the
+        bare delete() would raise);
+      * each recipe is deleted;
+      * a ``SuppressedRecipe`` row is written per code so the next
+        deploy's ``import_recipes_bulk`` won't bring them back.
+
+    Department-scoped: only recipes in the operator's current department
+    are deletable. Selected IDs from other departments are silently
+    dropped from the candidate set, never surfaced.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    raw_ids = request.POST.getlist("recipe_ids")
+    try:
+        ids = {int(x) for x in raw_ids if x}
+    except ValueError:
+        ids = set()
+    selected = list(Recipe.objects.filter(pk__in=ids, department=dept)
+                    .order_by("code"))
+    if not selected:
+        messages.error(request, "Pick at least one recipe to delete.")
+        return redirect("/recipes/?view=flat")
+    selected_pks = {r.pk for r in selected}
+
+    if request.POST.get("confirm") == "1":
+        with transaction.atomic():
+            # Drop EVERY RecipeLine that references a selected recipe as
+            # its sub_recipe — including lines inside other selected
+            # recipes. Django's deletion collector raises ProtectedError
+            # the moment it sees any protected FK, even if the referrer
+            # is in the same delete batch and would be cascaded itself.
+            # Clearing them up front sidesteps that.
+            RecipeLine.objects.filter(sub_recipe_id__in=selected_pks).delete()
+            codes = [r.code for r in selected]
+            names = {r.code: r.name for r in selected}
+            Recipe.objects.filter(pk__in=selected_pks).delete()
+            for code in codes:
+                SuppressedRecipe.objects.update_or_create(
+                    code=code,
+                    defaults={"reason": f"Bulk delete: {names[code]}"[:200]},
+                )
+        # Former parents may have lost their last child reference; sold
+        # flags re-derive (manual overrides still respected).
+        Recipe.recompute_all_sold_defaults()
+        messages.success(
+            request,
+            f"Deleted {len(selected)} recipe(s): "
+            f"{', '.join(codes)}. "
+            "The next re-import will skip these codes.")
+        return redirect("/recipes/?view=flat")
+
+    # First submission — show the confirmation page. "External" parents
+    # are parents that use a selected sub-recipe but aren't themselves
+    # in the selection (so the operator sees the knock-on damage before
+    # confirming). Parents inside the selection are being deleted too,
+    # so they don't need their own warning row.
+    external = (Recipe.objects
+                .filter(lines__sub_recipe_id__in=selected_pks)
+                .exclude(pk__in=selected_pks)
+                .distinct()
+                .order_by("code"))
+    external_rows = []
+    for parent in external:
+        child_codes = sorted(
+            line.sub_recipe.code for line in parent.lines.all()
+            if line.sub_recipe_id in selected_pks)
+        external_rows.append({"parent": parent, "child_codes": child_codes})
+    return render(request, "stock/recipe_bulk_delete_confirm.html", {
+        "selected": selected,
+        "external_rows": external_rows,
     })
 
 

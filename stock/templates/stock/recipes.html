@@ -75,8 +75,13 @@
     <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
     <span class="count-out"></span>
   </div>
+  {# Bulk-delete form lives OUTSIDE the table so it doesn't nest with the
+     per-row Sold-toggle forms. Checkboxes and the submit button attach to
+     it via the HTML5 form="bulk-form" attribute. #}
+  <form method="post" action="{% url 'recipe_bulk_delete' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
+      <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all recipes"></th>
       <th>Code</th><th>Name</th>
       <th>Tags</th><th>Sold?</th><th>Used in</th>
       <th class="num">Lines</th><th class="num">Finished (g)</th><th class="num">Cook loss</th>
@@ -86,6 +91,8 @@
     {% for row in rows %}
       {% with r=row.r %}
       <tr data-search="{{ r.code|lower }} {{ r.name|lower }}">
+        <td><input type="checkbox" form="bulk-form" name="recipe_ids" value="{{ r.pk }}"
+                   class="bulk-cb" aria-label="Select {{ r.code }}"></td>
         <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
         <td>{{ r.name }}</td>
         <td>
@@ -123,7 +130,42 @@
     {% endfor %}
     </tbody>
   </table>
+  <p style="margin:10px 0 0">
+    <button class="btn ghost" type="submit" form="bulk-form" id="bulk-delete-btn"
+            disabled style="padding:4px 12px">Delete selected</button>
+    <span class="muted" style="font-size:12px;margin-left:8px" id="bulk-count">0 selected</span>
+  </p>
   <p class="muted" style="margin:10px 0 0;font-size:12px">"Sold" defaults to true for recipes nothing else uses, false for components. Toggle it manually and the choice sticks across re-imports.</p>
+  <script>
+  (function(){
+    var table = document.getElementById('recipes-tbl');
+    if(!table) return;
+    var all = document.getElementById('bulk-all');
+    var btn = document.getElementById('bulk-delete-btn');
+    var counter = document.getElementById('bulk-count');
+    function boxes(){ return table.querySelectorAll('.bulk-cb'); }
+    function refresh(){
+      var b = boxes();
+      var checked = 0;
+      b.forEach(function(cb){ if(cb.checked) checked++; });
+      btn.disabled = checked === 0;
+      counter.textContent = checked + ' selected';
+      if(checked === 0){ all.checked = false; all.indeterminate = false; }
+      else if(checked === b.length){ all.checked = true; all.indeterminate = false; }
+      else { all.indeterminate = true; }
+    }
+    if(all){
+      all.addEventListener('change', function(){
+        boxes().forEach(function(cb){ cb.checked = all.checked; });
+        refresh();
+      });
+    }
+    table.addEventListener('change', function(e){
+      if(e.target && e.target.classList.contains('bulk-cb')) refresh();
+    });
+    refresh();
+  })();
+  </script>
   {% else %}
   <p class="muted">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
   {% endif %}
