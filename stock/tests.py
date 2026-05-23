@@ -7377,6 +7377,30 @@ class OrdersTests(TestCase):
         ).content.decode()
         self.assertNotIn('class="order-grid"', body)
 
+    # ---- wide layout opt-in ----
+
+    def test_orders_weekly_view_uses_wide_main_layout(self):
+        # The weekly orders view opts into the wide-main layout so the
+        # per-customer grid can use most of the viewport. Assert the
+        # rendered <main> carries the `wide` class.
+        body = self.client.get("/orders/").content.decode()
+        # The <main> tag carries class="wide" (with no other classes).
+        self.assertIn('<main class="wide">', body)
+        # And the supporting CSS rule is loaded.
+        self.assertIn('main.wide{max-width:none', body)
+
+    def test_other_pages_do_not_opt_into_wide_layout(self):
+        # The wide layout is scoped to the orders weekly view ONLY —
+        # other pages (Home, New order form, Products, etc.) keep the
+        # default centred 1100px container. Assert their <main> carries
+        # an empty class attribute (no `wide`).
+        for path in ("/home/", "/orders/new/", "/products/", "/recipes/"):
+            body = self.client.get(path).content.decode()
+            self.assertIn('<main class="">', body,
+                          f"{path} should not opt into the wide layout")
+            self.assertNotIn('<main class="wide"', body,
+                             f"{path} should not have the wide class")
+
     # ---- sticky / frozen grid columns ----
 
     def test_grid_left_columns_are_sticky(self):

@@ -1,5 +1,8 @@
 {% extends "stock/_section_orders.html" %}
 {% block n_orders_list %}on{% endblock %}
+{# Opt the weekly-orders view into the wide layout so the per-customer
+   products × days grid fits more day columns without horizontal scroll. #}
+{% block main_class %}wide{% endblock %}
 {% block body %}
 <style>
   .week-nav{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
