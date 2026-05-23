@@ -5,11 +5,12 @@ Usage:
     python manage.py import_historical_orders <path> --force
 
 Designed for the ``data/historical/`` archive: each file is a single
-week of orders, and the deploy loops these. The importer is idempotent
-on the week as a whole — it refuses to re-import a week whose Orders
-already exist (so re-running this on a deploy never disturbs
-hand-edits). Meta tabs (Start, Products, Customers, WHOLESALE, …) are
-skipped; unknown customer tabs are reported but never abort the run.
+week of orders, and the deploy loops these. Idempotency is gated by
+``HISTORICAL_IMPORT_VERSION``: a week whose ``HistoricalImport`` stamp
+already matches the current importer version is skipped; bumping the
+version after a fix forces a one-time re-import on the next deploy.
+Meta tabs (Start, Products, Customers, …) are skipped; the WHOLESALE
+tab has its own per-row handler.
 """
 from django.core.management.base import BaseCommand, CommandError
 
@@ -18,16 +19,16 @@ from stock.order_import import import_historical_workbook
 
 class Command(BaseCommand):
     help = ("Import a historical week's orders across every customer "
-            "tab in the workbook. Idempotent on week — re-running skips "
-            "files whose orders already exist.")
+            "tab. Version-gated: skips if the week's HistoricalImport "
+            "stamp matches the current HISTORICAL_IMPORT_VERSION.")
 
     def add_arguments(self, parser):
         parser.add_argument("path", help="Path to a single historical .xlsm")
         parser.add_argument(
             "--force", action="store_true",
-            help="Re-import even if orders already exist for that week. "
-                 "Use sparingly — wipes and rebuilds every customer's "
-                 "lines for the week, which clobbers any hand-edits.")
+            help="Re-import even when the stamp is up to date. Wipes "
+                 "and rebuilds every customer's lines for the week — "
+                 "clobbers any hand-edits.")
 
     def handle(self, *args, **opts):
         path = opts["path"]
@@ -42,8 +43,13 @@ class Command(BaseCommand):
             return
 
         wk = summary.get("week_start")
+        stamp_was = summary.get("stamp_was")
+        cur_v = summary.get("import_version")
+        stamp_note = (f"first import" if stamp_was is None
+                      else f"upgraded from v{stamp_was}")
         self.stdout.write(self.style.SUCCESS(
-            f"Imported {path} (w/c {wk.isoformat() if wk else '?'}):"))
+            f"Imported {path} (w/c {wk.isoformat() if wk else '?'}) "
+            f"at v{cur_v} — {stamp_note}:"))
         self.stdout.write(
             f"  {summary['tabs_imported']} customer tab(s), "
             f"{summary['lines_imported']} line(s), "

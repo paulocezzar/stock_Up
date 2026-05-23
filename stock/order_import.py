@@ -326,6 +326,21 @@ META_TABS = {
 # layout is shifted by one to make room for the customer-name column.
 WHOLESALE_TAB = "WHOLESALE"
 
+# Data-semantics version for the historical importer. Bump this any
+# time a fix changes what the importer would write for the same input
+# — the next deploy then re-imports every historical week whose
+# ``HistoricalImport`` stamp is below this number, then settles back
+# to skip-if-current. See ``HistoricalImport`` docstring for the
+# trade-off this makes vs hand-edits.
+#
+# Changelog:
+#   v1 — initial historical importer (pre-blank-price-fix; WHOLESALE
+#        was a meta tab and its revenue was skipped).
+#   v2 — blank Price cells snapshot as £0 (not catalogue fallback);
+#        WHOLESALE routed through dedicated handler so each wholesale
+#        customer gets first-class Orders.
+HISTORICAL_IMPORT_VERSION = 2
+
 # WHOLESALE layout: column 0 is the wholesale customer name (repeated
 # on every product row of that customer's block), then SKU at 1,
 # Product at 2, Price at 3, and Ordered/Sent/Comments triples per day
@@ -622,18 +637,27 @@ def import_historical_workbook(file_or_path, *, force=False):
     """Import an entire week's orders across every customer tab.
 
     Designed for the historical archive (``data/historical/*.xlsm``)
-    where each file is one week — the deploy loops these and we never
-    want to re-do work or clobber operator edits on a re-run.
+    where each file is one week — the deploy loops these and we want
+    re-runs to be no-ops UNLESS the importer's data semantics have
+    changed since the last import for this week.
 
-    Idempotency gate: if ANY Order already exists for any of the
-    week's 7 dates, the file is skipped wholesale and reported as
-    ``skipped=True``. ``force=True`` overrides this for the rare manual
-    re-import. The gate is intentionally coarse (any order for the
-    week, regardless of customer) — it's the only safe way to protect
-    later hand-edits across all customers in one check.
+    Version-gated idempotency:
+      * if a ``HistoricalImport`` stamp exists for this week with
+        ``import_version >= HISTORICAL_IMPORT_VERSION`` → skip
+        (already imported under current importer; re-running would be
+        wasted work and would clobber any hand-edits).
+      * otherwise (no stamp OR stale stamp) → proceed; on success,
+        upsert the stamp to the current version.
+      * ``force=True`` overrides the gate but still updates the stamp.
+
+    Bumping ``HISTORICAL_IMPORT_VERSION`` after a fix to the importer
+    therefore forces a one-time re-import of every historical week on
+    the next deploy, then settles back to skip-if-current — without
+    an env flag or operator action. The cost is that any hand-edits
+    to historical lines for that week are lost when the bump lands.
 
     Tab handling is non-fatal: a missing Customer, a malformed date
-    row, or a wholesale tab with a different layout lands in
+    row, or the wholesale tab having a different layout lands in
     ``failures`` and the rest of the workbook keeps going.
 
     Returns:
@@ -641,12 +665,13 @@ def import_historical_workbook(file_or_path, *, force=False):
             "path", "skipped", "reason"?, "week_start"?,
             "tabs_imported", "lines_imported",
             "products_matched", "products_unmatched_count",
+            "import_version", "stamp_was"?,
             "per_tab": {tab: per-tab summary},
             "failures": [(tab_or_marker, reason)],
         }
     """
     from openpyxl import load_workbook
-    from .models import Customer, Department, Order
+    from .models import Customer, Department, HistoricalImport
 
     wb = load_workbook(file_or_path, read_only=True, data_only=True)
     try:
@@ -660,25 +685,30 @@ def import_historical_workbook(file_or_path, *, force=False):
                 "lines_imported": 0,
                 "products_matched": 0,
                 "products_unmatched_count": 0,
+                "import_version": HISTORICAL_IMPORT_VERSION,
                 "per_tab": OrderedDict(),
                 "failures": [],
             }
         week_start = week_dates[0]
 
-        # Idempotency: a previous deploy already imported this week.
-        # Skip wholesale rather than refresh-and-clobber any hand-edits
-        # the operator made to those historical orders.
-        if not force and Order.objects.filter(order_date__in=week_dates).exists():
+        stamp = HistoricalImport.objects.filter(week_start=week_start).first()
+        stamp_was = stamp.import_version if stamp else None
+        if not force and stamp is not None and \
+                stamp.import_version >= HISTORICAL_IMPORT_VERSION:
             return {
                 "path": str(file_or_path),
                 "skipped": True,
-                "reason": ("orders already exist for w/c "
-                           f"{week_start.isoformat()} — pass --force to re-import"),
+                "reason": (f"w/c {week_start.isoformat()} already imported "
+                           f"at v{stamp.import_version} (current v"
+                           f"{HISTORICAL_IMPORT_VERSION}) — pass --force "
+                           "to re-import"),
                 "week_start": week_start,
                 "tabs_imported": 0,
                 "lines_imported": 0,
                 "products_matched": 0,
                 "products_unmatched_count": 0,
+                "import_version": HISTORICAL_IMPORT_VERSION,
+                "stamp_was": stamp_was,
                 "per_tab": OrderedDict(),
                 "failures": [],
             }
@@ -719,6 +749,19 @@ def import_historical_workbook(file_or_path, *, force=False):
             # the per-file summary surfaces that they were scanned.
             per_tab[tab] = result
 
+        # Stamp this week as imported at the current version so the
+        # next deploy can skip it (until the next version bump).
+        # update_or_create handles both first-import and version-bump
+        # paths in one call; ``auto_now`` on imported_at refreshes
+        # the audit timestamp automatically.
+        HistoricalImport.objects.update_or_create(
+            week_start=week_start,
+            defaults={
+                "import_version": HISTORICAL_IMPORT_VERSION,
+                "file_path": str(file_or_path),
+            },
+        )
+
         return {
             "path": str(file_or_path),
             "skipped": False,
@@ -728,6 +771,8 @@ def import_historical_workbook(file_or_path, *, force=False):
             "products_matched": sum(r["products_matched"] for r in per_tab.values()),
             "products_unmatched_count": sum(
                 len(r["products_unmatched"]) for r in per_tab.values()),
+            "import_version": HISTORICAL_IMPORT_VERSION,
+            "stamp_was": stamp_was,
             "wholesale_customer_unmatched": wholesale_customer_unmatched,
             "per_tab": per_tab,
             "failures": failures,

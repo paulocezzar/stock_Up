@@ -8134,7 +8134,10 @@ class HistoricalWorkbookImportTests(TestCase):
 
         second = import_historical_workbook(self.SHEET)
         self.assertTrue(second["skipped"])
-        self.assertIn("already exist", second["reason"])
+        # Reason now references the version stamp, not "any Order
+        # exists for this week" — the new gate is HistoricalImport-
+        # version-driven so it doesn't get confused by manual edits.
+        self.assertIn("already imported", second["reason"])
         self.assertEqual(second["week_start"], self.WEEK_START)
         # Nothing was wiped or duplicated, and the hand-edit survived.
         self.assertEqual(OrderLine.objects.count(), line_count_after_first)
@@ -8503,3 +8506,109 @@ class HistoricalImportReconciliationTests(TestCase):
             "wholesale_customer_unmatched", [])), 0)
         names_lower = [n.lower() for n in summary["wholesale_customer_unmatched"]]
         self.assertIn("bishopstrow hotel", names_lower)
+
+
+class HistoricalImportVersionGateTests(TestCase):
+    """The historical importer skips a week only when its
+    ``HistoricalImport`` stamp's ``import_version`` is at or above the
+    current ``HISTORICAL_IMPORT_VERSION`` constant. Bumping the
+    constant on a fix forces a one-time re-import on the next deploy,
+    then the gate settles back to skip-if-current."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+    WEEK_START = datetime.date(2026, 3, 30)
+
+    def setUp(self):
+        from stock.models import HistoricalImport
+        self.HistoricalImport = HistoricalImport
+        self.dept = Department.objects.create(name="Bakery")
+        # Minimal seed — only Garden Café needs products for the
+        # version-gate tests; the wholesale + other tabs become
+        # "Customer not found" failures which is fine here.
+        self.garden = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        _seed_garden_cafe_products(self.dept)
+
+    def _current_version(self):
+        from stock.order_import import HISTORICAL_IMPORT_VERSION
+        return HISTORICAL_IMPORT_VERSION
+
+    def test_first_import_writes_stamp_at_current_version(self):
+        from stock.order_import import import_historical_workbook
+        self.assertFalse(self.HistoricalImport.objects.exists())
+        result = import_historical_workbook(self.SHEET)
+        self.assertFalse(result["skipped"])
+        self.assertIsNone(result["stamp_was"])
+        self.assertEqual(result["import_version"], self._current_version())
+        stamp = self.HistoricalImport.objects.get(week_start=self.WEEK_START)
+        self.assertEqual(stamp.import_version, self._current_version())
+        self.assertEqual(stamp.file_path, self.SHEET)
+
+    def test_current_stamp_makes_next_import_skip(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET)  # writes stamp v_current
+        second = import_historical_workbook(self.SHEET)
+        self.assertTrue(second["skipped"])
+        self.assertIn("already imported", second["reason"])
+        # Reason mentions both the recorded version + the current one.
+        self.assertIn(f"v{self._current_version()}", second["reason"])
+
+    def test_stale_stamp_triggers_reimport_and_upgrades(self):
+        # Simulate a week imported under an older version (v1). On
+        # the next call the gate should NOT skip — it should re-run
+        # and upgrade the stamp to the current version.
+        self.HistoricalImport.objects.create(
+            week_start=self.WEEK_START,
+            import_version=self._current_version() - 1,
+            file_path="data/historical/older-file.xlsm")
+        from stock.order_import import import_historical_workbook
+        result = import_historical_workbook(self.SHEET)
+        self.assertFalse(result["skipped"],
+            "stale stamp must trigger re-import, not skip")
+        self.assertEqual(result["stamp_was"], self._current_version() - 1)
+        self.assertEqual(result["import_version"], self._current_version())
+        stamp = self.HistoricalImport.objects.get(week_start=self.WEEK_START)
+        self.assertEqual(stamp.import_version, self._current_version())
+        # And the file_path is updated to the file actually used.
+        self.assertEqual(stamp.file_path, self.SHEET)
+
+    def test_force_overrides_current_stamp_and_keeps_it_current(self):
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET)
+        # Force re-run even though the stamp is up to date.
+        result = import_historical_workbook(self.SHEET, force=True)
+        self.assertFalse(result["skipped"])
+        stamp = self.HistoricalImport.objects.get(week_start=self.WEEK_START)
+        self.assertEqual(stamp.import_version, self._current_version())
+
+    def test_existing_orders_without_stamp_get_reimported(self):
+        # Pre-versioning state: Orders for the week exist but no
+        # HistoricalImport stamp. The new gate must NOT confuse this
+        # with "imported at current version" — it should treat the
+        # missing stamp as stale and re-import. (This is exactly the
+        # path the live site will follow on the first deploy after the
+        # version bump lands.)
+        Order.objects.create(
+            customer=self.garden, department=self.dept,
+            order_date=self.WEEK_START)
+        self.assertFalse(self.HistoricalImport.objects.exists())
+        from stock.order_import import import_historical_workbook
+        result = import_historical_workbook(self.SHEET)
+        self.assertFalse(result["skipped"],
+            "missing stamp must be treated as stale, not as 'imported'")
+        self.assertTrue(self.HistoricalImport.objects.filter(
+            week_start=self.WEEK_START).exists())
+
+    def test_management_command_announces_version_status(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("import_historical_orders", self.SHEET, stdout=out)
+        body = out.getvalue()
+        self.assertIn(f"at v{self._current_version()}", body)
+        self.assertIn("first import", body)
+        # Second run skips with version-stamp-based reason.
+        out2 = StringIO()
+        call_command("import_historical_orders", self.SHEET, stdout=out2)
+        body2 = out2.getvalue()
+        self.assertIn("already imported", body2)

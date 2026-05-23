@@ -66,11 +66,15 @@ python manage.py import_orders data/order_sheet.xlsm \
 
 # Historical order sheets in data/historical/ — one full week per file
 # (e.g. order_sheet_2026_03_30.xlsm = w/c 30 Mar 2026). Each file is
-# imported across ALL customer tabs, but ONLY ONCE: import_historical_orders
-# skips a file whose week's Orders already exist, so a second deploy
-# never re-does work or clobbers hand-edits. New historical files
-# added to the folder land on the next deploy.
-# DELIBERATELY non-fatal: a bad file/tab logs and the deploy continues.
+# imported across ALL customer tabs (including WHOLESALE, which is split
+# per wholesale customer). The importer is version-gated via the
+# HistoricalImport stamp + HISTORICAL_IMPORT_VERSION constant: a week
+# whose stamp matches the current version is skipped on the next deploy,
+# but bumping the version (after a bug fix to the parser) forces a
+# one-time re-import to push the corrected data to live, then settles
+# back to skip-if-current. New files in the folder always import on
+# their first deploy. DELIBERATELY non-fatal: a bad file/tab logs and
+# the deploy continues.
 if [ -d data/historical ]; then
   for f in data/historical/*.xlsm; do
     [ -e "$f" ] || continue  # no-match glob — empty folder, nothing to do

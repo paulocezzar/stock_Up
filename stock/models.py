@@ -1097,3 +1097,41 @@ class RecipePackaging(models.Model):
 
     def __str__(self):
         return f"{self.recipe.code} ↔ {self.packaging.code}"
+
+
+class HistoricalImport(models.Model):
+    """One row per historical week that has been imported, recording the
+    ``import_version`` used.
+
+    The historical importer's idempotency gate switched from "any Order
+    exists for the week → skip" to a version-based check: skip iff the
+    stamp's ``import_version`` is at or above the current
+    ``HISTORICAL_IMPORT_VERSION`` constant. Bumping that constant after
+    a fix to the importer (e.g. blank-price = £0, WHOLESALE handler)
+    therefore forces a ONE-TIME re-import of every historical week on
+    the next deploy, then settles back to skip-if-current — so live
+    catches up with the corrected logic without an infinite loop.
+
+    Trade-off this gate makes explicit: a re-import does wipe + rebuild
+    the week's orders. Any hand-edits to historical lines are lost
+    when the version bumps. That's the cost of correct financial
+    totals; the rare alternative is to walk back to the env-flag
+    one-time approach.
+    """
+    week_start = models.DateField(
+        unique=True,
+        help_text="Monday of the imported week.")
+    import_version = models.PositiveIntegerField(
+        help_text="Value of HISTORICAL_IMPORT_VERSION at import time; "
+                  "older stamps trigger a re-import on the next deploy.")
+    file_path = models.CharField(
+        max_length=255, blank=True,
+        help_text="Source workbook for the most recent import — pure "
+                  "audit; the gate doesn't consult this field.")
+    imported_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-week_start"]
+
+    def __str__(self):
+        return f"w/c {self.week_start:%d %b %Y} (v{self.import_version})"
