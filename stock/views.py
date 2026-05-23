@@ -2545,6 +2545,28 @@ def orders_home(request):
 
     customers = list(Customer.objects.filter(department=dept).order_by("name"))
     today_week = _monday_of(datetime.date.today())
+
+    # If a customer is picked AND no specific day filter is set, build
+    # the spreadsheet-style grid (products as rows × Mon..Sun columns).
+    # The grid is the main view for a single customer's week; the
+    # per-day strip stays available as a secondary read.
+    grid = None
+    selected_customer = None
+    if customer_pk:
+        selected_customer = next(
+            (c for c in customers if str(c.pk) == customer_pk), None)
+        if selected_customer is not None and not date_str:
+            grid = _build_order_grid(orders, days)
+
+    # When no customer is picked the list of dept customers doubles as
+    # a "drill into a customer's week" picker — render each as a link
+    # that preserves the current week.
+    customer_links = []
+    if not customer_pk:
+        for c in customers:
+            n_orders = sum(1 for o in orders if o.customer_id == c.pk)
+            customer_links.append({"customer": c, "n_orders": n_orders})
+
     return render(request, "stock/orders.html", {
         "orders": orders,
         "customers": customers,
@@ -2559,7 +2581,90 @@ def orders_home(request):
         "days": days,
         "week_total_orders": week_total_orders,
         "week_total_value": week_total_value,
+        "selected_customer": selected_customer,
+        "grid": grid,
+        "customer_links": customer_links,
     })
+
+
+def _build_order_grid(orders, days):
+    """Build a spreadsheet-style products × days grid for one customer.
+
+    ``orders`` is the dept-filtered list for the selected week and
+    customer; ``days`` is the Mon..Sun strip the view already
+    computed. Returns ``{rows, day_totals, day_values, grand_total,
+    grand_value}`` where each row is one SaleProduct with:
+      * ``product`` — the SaleProduct
+      * ``cells`` — list of 7 ``{qty}`` dicts aligned to Mon..Sun
+        (qty is a Decimal or ``None`` for blank cells, matching the
+        bakery sheet's blanks-for-zero convention)
+      * ``total_qty`` — sum of cells
+      * ``total_value`` — total_qty × product.price (or ``None`` when
+        the product has no price set)
+
+    Rows are sorted by SKU/Sage when present, then by name — mirrors
+    the sheet's order. Cells aggregate multiple lines for the same
+    product on the same day (rare but possible if a manual edit lands
+    a duplicate after the unique_together guard somehow lapses, e.g.
+    via the admin).
+    """
+    # Map (product_pk, day_index) -> running qty
+    qtys = {}
+    products_by_pk = {}
+    for o in orders:
+        # day index relative to week_start (Mon = 0, ..., Sun = 6).
+        try:
+            day_idx = next(i for i, d in enumerate(days)
+                           if d["date"] == o.order_date)
+        except StopIteration:
+            continue
+        for line in o.lines.select_related("sale_product").all():
+            sp = line.sale_product
+            products_by_pk[sp.pk] = sp
+            key = (sp.pk, day_idx)
+            qtys[key] = (qtys.get(key) or Decimal("0")) + (line.qty_ordered or Decimal("0"))
+
+    def _sort_key(sp):
+        sage = (sp.sage_number or "").strip()
+        # Numeric Sage codes sort numerically before non-numeric / blanks.
+        if sage and sage.isdigit() and sage != "0":
+            return (0, int(sage), "")
+        return (1, 0, (sp.name or "").lower())
+
+    rows = []
+    day_totals = [Decimal("0")] * 7
+    day_values = [Decimal("0")] * 7
+    grand_total = Decimal("0")
+    grand_value = Decimal("0")
+    for sp in sorted(products_by_pk.values(), key=_sort_key):
+        cells = []
+        total_qty = Decimal("0")
+        for i in range(7):
+            q = qtys.get((sp.pk, i))
+            cells.append({"qty": q})
+            if q is not None:
+                day_totals[i] += q
+                total_qty += q
+                if sp.price is not None:
+                    day_values[i] += (q * sp.price)
+        total_value = None
+        if sp.price is not None:
+            total_value = (total_qty * sp.price).quantize(Decimal("0.01"))
+            grand_value += total_value
+        grand_total += total_qty
+        rows.append({
+            "product": sp,
+            "cells": cells,
+            "total_qty": total_qty,
+            "total_value": total_value,
+        })
+    return {
+        "rows": rows,
+        "day_totals": day_totals,
+        "day_values": [v.quantize(Decimal("0.01")) for v in day_values],
+        "grand_total": grand_total,
+        "grand_value": grand_value.quantize(Decimal("0.01")),
+    }
 
 
 @login_required

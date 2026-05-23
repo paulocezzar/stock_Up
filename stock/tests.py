@@ -7283,3 +7283,225 @@ class OrdersTests(TestCase):
         body = resp.content.decode()
         # Default week (most recent) is 11 May.
         self.assertIn("week commencing 11 May 2026", body)
+
+    # ---- spreadsheet-style grid (products × Mon..Sun) ----
+
+    def test_grid_renders_when_customer_selected(self):
+        # 3 products on different days. The grid should carry one row
+        # per product and one column per day, plus row + column totals.
+        order_mon = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))  # Mon
+        OrderLine.objects.create(
+            order=order_mon, sale_product=self.loose, qty_ordered=Decimal("4"))
+        OrderLine.objects.create(
+            order=order_mon, sale_product=self.slab, qty_ordered=Decimal("1"))
+        order_sat = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 23))  # Sat
+        OrderLine.objects.create(
+            order=order_sat, sale_product=self.loose, qty_ordered=Decimal("7"))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+        ).content.decode()
+        # Grid card header references the customer + week.
+        self.assertIn("Garden Cafe — week commencing 18 May 2026", body)
+        # Product rows render with their names.
+        self.assertIn(self.loose.name, body)
+        self.assertIn(self.slab.name, body)
+        # Day columns Mon..Sun.
+        self.assertIn("Mon", body)
+        self.assertIn("Sun", body)
+        # Row totals: loose = 4 (Mon) + 7 (Sat) = 11; slab = 1.
+        self.assertIn(">11<", body)
+        # Slab is 1 × £18 = £18.00.
+        self.assertIn("£18.00", body)
+        # Loose: 11 × £2.20 = £24.20
+        self.assertIn("£24.20", body)
+        # Grand total = £18 + £24.20 = £42.20.
+        self.assertIn("£42.20", body)
+
+    def test_grid_hidden_when_no_customer_selected(self):
+        # Without a customer, the grid card doesn't render — the
+        # customer-picker list does.
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        self.assertNotIn("Mon", body[body.find("<table class=\"order-grid"):
+                                       body.find("<table class=\"order-grid") + 200]
+                         if 'order-grid' in body else body[:0])
+        self.assertNotIn('class="order-grid"', body)
+        # Customer picker list rendered instead.
+        self.assertIn("click a customer to see their grid", body)
+        self.assertIn(f"customer={self.alice_cust.pk}", body)
+
+    def test_grid_hidden_when_specific_day_filter_set(self):
+        # With ?date=… narrowing to one day, the grid steps aside (it
+        # only makes sense across the whole week).
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+            "&date=2026-05-18"
+        ).content.decode()
+        self.assertNotIn('class="order-grid"', body)
+
+
+def _seed_garden_cafe_products(dept):
+    """Pre-create the SaleProducts the GARDEN CAFE tab references so
+    the importer has something to match against. Sage codes mirror
+    the sheet exactly; products without a Sage code (the '0' SKU
+    rows) match by name."""
+    seeds = [
+        ("Croissant (Loose)", "660130013", Decimal("1.10")),
+        ("Pain au Chocolat (Loose)", "660130059", Decimal("1.50")),
+        ("Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY", "",
+         Decimal("1.20")),
+        ("Sourdough Sandwich Loaf 1.1kg (Loose)", "660260279",
+         Decimal("2.20")),
+        ("Brioche Loaf - 1.1kg", "", Decimal("5.00")),
+        # Trailing space matches the sheet's "Apple Waste Sourdough - 1.2kg ".
+        ("Apple Waste Sourdough - 1.2kg ", "", Decimal("4.50")),
+        ("Rhubarb and Custard Danish", "", Decimal("1.60")),
+        ("Pain Au Almond ( Loose)", "660260415", Decimal("1.50")),
+        ("Sultana Pain Suisse (Loose)", "660260411", Decimal("1.65")),
+        ("Seeded Sourdough", "660260409", Decimal("2.20")),
+    ]
+    out = {}
+    for name, sage, price in seeds:
+        sp = SaleProduct.objects.create(
+            name=name, sage_number=sage, price=price, department=dept)
+        out[name] = sp
+    return out
+
+
+class OrderImportTests(TestCase):
+    """End-to-end import of the GARDEN CAFE tab from the real workbook."""
+
+    SHEET = "data/order_sheet.xlsm"
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Garden Café customer — the importer matches the tab name
+        # case-insensitively against Customer.name.
+        self.garden = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.products = _seed_garden_cafe_products(self.dept)
+
+    def test_import_creates_per_day_lines_with_correct_qtys(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        # Croissant: Mon..Fri = 4, Sat..Sun = 7.
+        croissant = self.products["Croissant (Loose)"]
+        rows = {
+            o.order_date: o.lines.get(sale_product=croissant).qty_ordered
+            for o in Order.objects.filter(customer=self.garden,
+                                          lines__sale_product=croissant)
+        }
+        self.assertEqual(rows[datetime.date(2026, 5, 18)], Decimal("4"))
+        self.assertEqual(rows[datetime.date(2026, 5, 22)], Decimal("4"))
+        # Croissant 7 on Saturday (the spec calls this out specifically).
+        self.assertEqual(rows[datetime.date(2026, 5, 23)], Decimal("7"))
+        self.assertEqual(rows[datetime.date(2026, 5, 24)], Decimal("7"))
+
+    def test_import_seeded_sourdough_is_nine_each_day(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        seeded = self.products["Seeded Sourdough"]
+        for i in range(7):
+            day = datetime.date(2026, 5, 18) + datetime.timedelta(days=i)
+            line = OrderLine.objects.get(
+                order__customer=self.garden, order__order_date=day,
+                sale_product=seeded)
+            self.assertEqual(line.qty_ordered, Decimal("9"))
+
+    def test_import_skips_zero_blank_weeks(self):
+        # Rhubarb and Custard Danish — entire row blank — no lines.
+        # Pain Au Almond — entire row blank — no lines.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        self.assertFalse(OrderLine.objects.filter(
+            sale_product=self.products["Rhubarb and Custard Danish"]).exists())
+        self.assertFalse(OrderLine.objects.filter(
+            sale_product=self.products["Pain Au Almond ( Loose)"]).exists())
+
+    def test_import_matches_brioche_by_exact_name_no_sage(self):
+        # Brioche Loaf carries SKU '0' on the sheet — the importer
+        # falls back to exact-name match and still wires it up.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        brioche = self.products["Brioche Loaf - 1.1kg"]
+        # Sheet says 2 on Mon, blank Tue, 2 Wed, blank Thu, 2 Fri,
+        # blank Sat, 2 Sun.
+        qty_by_day = {
+            o.order_date: o.lines.get(sale_product=brioche).qty_ordered
+            for o in Order.objects.filter(customer=self.garden,
+                                          lines__sale_product=brioche)
+        }
+        self.assertEqual(qty_by_day.get(datetime.date(2026, 5, 18)),
+                         Decimal("2"))
+        self.assertNotIn(datetime.date(2026, 5, 19), qty_by_day)  # blank
+        self.assertEqual(qty_by_day.get(datetime.date(2026, 5, 24)),
+                         Decimal("2"))
+
+    def test_import_is_idempotent_and_replaces(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        first_lines = OrderLine.objects.count()
+        first_orders = Order.objects.count()
+        # Edit one line so we can verify it gets reset on re-run.
+        croissant = self.products["Croissant (Loose)"]
+        line = OrderLine.objects.get(
+            order__customer=self.garden,
+            order__order_date=datetime.date(2026, 5, 18),
+            sale_product=croissant)
+        line.qty_ordered = Decimal("999")
+        line.save()
+        # Re-run — same lines (no duplicates) and the edit is reverted.
+        # The importer wipes + recreates lines, so the original pk is
+        # gone; re-fetch by (order_date, sale_product).
+        call_command("import_orders", self.SHEET)
+        self.assertEqual(OrderLine.objects.count(), first_lines)
+        self.assertEqual(Order.objects.count(), first_orders)
+        fresh = OrderLine.objects.get(
+            order__customer=self.garden,
+            order__order_date=datetime.date(2026, 5, 18),
+            sale_product=croissant)
+        self.assertEqual(fresh.qty_ordered, Decimal("4"))
+
+    def test_imported_week_renders_in_grid_view(self):
+        # After importing, the grid for Garden Café week 18 May should
+        # show the right per-day quantities and totals.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.garden.pk}"
+        ).content.decode()
+        # Sage-coded SKU appears in the SKU column.
+        self.assertIn("660130013", body)
+        # Croissant row totals to 34, total value £37.40.
+        self.assertIn(">34<", body)
+        self.assertIn("£37.40", body)
+
+    def test_manual_create_still_works_after_import(self):
+        # Importing doesn't break the manual /orders/new/ path.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET)
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.garden.pk),
+            "order_date": "2026-06-01",
+            "product_id": [str(self.products["Croissant (Loose)"].pk)],
+            "qty_ordered": ["2"],
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(Order.objects.filter(
+            customer=self.garden,
+            order_date=datetime.date(2026, 6, 1)).exists())

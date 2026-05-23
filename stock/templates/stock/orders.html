@@ -71,6 +71,97 @@
   <div class="stat"><div class="k">Total value</div><div class="v">£{{ week_total_value }}</div></div>
 </div>
 
+{% if grid %}
+<style>
+  .order-grid{width:auto;font-variant-numeric:tabular-nums;border-collapse:collapse;background:var(--panel);border:1px solid var(--line)}
+  .order-grid th,.order-grid td{border:1px solid var(--line);padding:6px 10px;text-align:right;white-space:nowrap}
+  .order-grid th.l,.order-grid td.l{text-align:left}
+  .order-grid thead th{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500;background:var(--panel2)}
+  .order-grid thead th.day{min-width:54px}
+  .order-grid thead th.today{color:var(--amber);background:var(--bg)}
+  .order-grid tbody td.qty{font-family:var(--mono);min-width:48px}
+  .order-grid tbody td.qty.zero{color:var(--muted)}
+  .order-grid tbody td.total-qty,.order-grid tbody td.total-val{font-weight:600;background:var(--panel2)}
+  .order-grid tfoot td{font-weight:600;background:var(--panel2);border-top:2px solid var(--line)}
+  .order-grid td.sku{font-family:var(--disp);color:var(--amber);font-size:11px;letter-spacing:.5px}
+  .order-grid td.name a{font-weight:600}
+</style>
+<div class="card">
+  <h3>{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}</h3>
+  <p class="muted" style="margin:0 0 10px;font-size:12px">Rows = products. Columns = the seven days of the week. Blank cells = no order that day. <a href="?week={{ week_start|date:'Y-m-d' }}">← back to all customers</a></p>
+  <div style="overflow-x:auto">
+  <table class="order-grid">
+    <thead>
+      <tr>
+        <th class="l">SKU</th>
+        <th class="l">Product</th>
+        <th>Price</th>
+        {% for day in days %}
+          <th class="day{% if day.is_today %} today{% endif %}">{{ day.label|slice:":3" }}<br><span style="font-weight:400;color:var(--muted)">{{ day.date|date:"d M" }}</span></th>
+        {% endfor %}
+        <th>Total</th>
+        <th>Total £</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in grid.rows %}
+        <tr>
+          <td class="sku">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
+          <td class="l name"><a href="{% url 'sale_product_detail' row.product.pk %}">{{ row.product.name }}</a></td>
+          <td>{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
+          {% for cell in row.cells %}
+            {% if cell.qty is not None %}
+              <td class="qty">{{ cell.qty|floatformat:"-3" }}</td>
+            {% else %}
+              <td class="qty zero"></td>
+            {% endif %}
+          {% endfor %}
+          <td class="total-qty">{{ row.total_qty|floatformat:"-3" }}</td>
+          <td class="total-val">{% if row.total_value is not None %}£{{ row.total_value }}{% else %}—{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="12" class="muted">No orders for {{ selected_customer.name }} this week. <a href="{% url 'order_new' %}">+ New order</a>.</td></tr>
+      {% endfor %}
+    </tbody>
+    {% if grid.rows %}
+    <tfoot>
+      <tr>
+        <td colspan="3" class="l">Day totals (qty)</td>
+        {% for t in grid.day_totals %}
+          <td>{% if t %}{{ t|floatformat:"-3" }}{% else %}—{% endif %}</td>
+        {% endfor %}
+        <td>{{ grid.grand_total|floatformat:"-3" }}</td>
+        <td>£{{ grid.grand_value }}</td>
+      </tr>
+      <tr>
+        <td colspan="3" class="l">Day totals (£)</td>
+        {% for v in grid.day_values %}
+          <td>{% if v %}£{{ v }}{% else %}—{% endif %}</td>
+        {% endfor %}
+        <td></td>
+        <td>£{{ grid.grand_value }}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if customer_links and not grid %}
+<div class="card">
+  <h3>Customers <span class="muted" style="font-size:11px">click a customer to see their grid for this week</span></h3>
+  <ul style="margin:0;padding-left:20px;columns:2;column-gap:24px">
+    {% for cl in customer_links %}
+      <li style="margin:2px 0">
+        <a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a>
+        {% if cl.n_orders %}<span class="muted" style="font-size:11px">— {{ cl.n_orders }} order{{ cl.n_orders|pluralize }} this week</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% for day in days %}
   {% if day.count %}
     <div class="day-block{% if day.is_today %} today{% endif %}">

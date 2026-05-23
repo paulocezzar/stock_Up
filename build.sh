@@ -50,3 +50,15 @@ python manage.py import_recipes_bulk data/recipes_bulk_93.xlsx \
 # first by Sage No., then by exact name; ambiguous matches surface in
 # the Products → Link review screen for the operator to confirm.
 python manage.py import_sale_products data/order_sheet.xlsm
+
+# import_orders walks customer tabs in the order-sheet workbook and
+# loads each week's per-day product quantities. Chunk 2 only imports
+# the GARDEN CAFE tab — once we've verified one customer end-to-end
+# in the grid view we scale to the other tabs. Streams the workbook
+# in read_only + data_only mode (same defensive pattern as the bulk
+# recipe importer) and is idempotent on (customer, date): re-running
+# replaces that customer's lines for the sheet's dates. DELIBERATELY
+# non-fatal: a malformed tab or missing customer must not abort the
+# deploy after the imports above have already run.
+python manage.py import_orders data/order_sheet.xlsm \
+    || echo "import_orders had errors; continuing deploy."
