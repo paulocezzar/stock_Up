@@ -240,7 +240,7 @@ tile is a link that narrows the view to that specific day via ?date=.
       {% for row in grid.rows %}
         <tr>
           <td class="sku col-sku">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
-          <td class="l name col-name"><a href="{% url 'sale_product_detail' row.product.pk %}" title="{{ row.product.name }}">{{ row.product.name }}</a></td>
+          <td class="l name col-name">{% if row.product.sale_product %}<a href="{% url 'sale_product_detail' row.product.sale_product.pk %}" title="{{ row.product.name }}">{{ row.product.name }}</a>{% else %}<span title="{{ row.product.name }} — discontinued / not in current catalogue" class="muted">{{ row.product.name }}</span>{% endif %}</td>
           <td class="col-price">{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
           {% for cell in row.cells %}
             {% if cell.qty is not None %}

@@ -7843,3 +7843,192 @@ class OrderImportTests(TestCase):
         self.assertTrue(Order.objects.filter(
             customer=self.garden,
             order_date=datetime.date(2026, 6, 1)).exists())
+
+
+class OrderLineSnapshotTests(TestCase):
+    """OrderLine snapshots product_name + unit_price independently of
+    the SaleProduct catalogue so financial totals survive product
+    renames, price changes, and full discontinuation."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.cust = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.sp = SaleProduct.objects.create(
+            name="Croissant (Loose)", price=Decimal("1.10"),
+            department=self.dept)
+
+    def test_save_snapshots_name_and_price_from_sale_product(self):
+        order = Order.objects.create(
+            customer=self.cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        line = OrderLine.objects.create(
+            order=order, sale_product=self.sp, qty_ordered=Decimal("3"))
+        line.refresh_from_db()
+        self.assertEqual(line.product_name, "Croissant (Loose)")
+        self.assertEqual(line.unit_price, Decimal("1.10"))
+
+    def test_line_value_uses_snapshot_not_live_price(self):
+        order = Order.objects.create(
+            customer=self.cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        line = OrderLine.objects.create(
+            order=order, sale_product=self.sp, qty_ordered=Decimal("4"))
+        # Catalogue price drifts AFTER the order — line_value must not
+        # follow. Snapshot price was £1.10, so 4 × 1.10 = 4.40.
+        self.sp.price = Decimal("99.99")
+        self.sp.save()
+        line.refresh_from_db()
+        self.assertEqual(line.line_value, Decimal("4.40"))
+
+    def test_total_value_includes_discontinued_unlinked_line(self):
+        order = Order.objects.create(
+            customer=self.cust, department=self.dept,
+            order_date=datetime.date(2026, 3, 30))
+        # Linked, modern product.
+        OrderLine.objects.create(
+            order=order, sale_product=self.sp, qty_ordered=Decimal("2"))
+        # Historical, NO catalogue link — the kind of line the
+        # historical importer creates for a discontinued SKU like
+        # "Hot Cross Buns".
+        OrderLine.objects.create(
+            order=order, sale_product=None,
+            product_name="Hot Cross Buns (Pack/10)",
+            unit_price=Decimal("6.25"),
+            qty_ordered=Decimal("3"))
+        # 2 × 1.10 + 3 × 6.25 = 2.20 + 18.75 = 20.95
+        self.assertEqual(order.total_value(), Decimal("20.95"))
+
+    def test_explicit_snapshot_overrides_sale_product_defaults(self):
+        # Callers (e.g. the historical importer) can pass product_name
+        # + unit_price explicitly; save() must NOT clobber them with
+        # the linked SaleProduct's current values.
+        order = Order.objects.create(
+            customer=self.cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        line = OrderLine.objects.create(
+            order=order, sale_product=self.sp,
+            product_name="Old name", unit_price=Decimal("0.95"),
+            qty_ordered=Decimal("1"))
+        line.refresh_from_db()
+        self.assertEqual(line.product_name, "Old name")
+        self.assertEqual(line.unit_price, Decimal("0.95"))
+
+
+class OrderImportPriceParsingTests(SimpleTestCase):
+    """_parse_price handles the historical sheet's mixed Price column
+    (numeric cells like 1.1 vs string cells like "£6.25")."""
+
+    def test_parses_pound_prefixed_string(self):
+        from .order_import import _parse_price
+        self.assertEqual(_parse_price("£6.25"), Decimal("6.25"))
+
+    def test_parses_pound_prefixed_with_whitespace(self):
+        from .order_import import _parse_price
+        self.assertEqual(_parse_price("  £ 6.25 "), Decimal("6.25"))
+
+    def test_parses_plain_decimal_string(self):
+        from .order_import import _parse_price
+        self.assertEqual(_parse_price("1.1"), Decimal("1.1"))
+
+    def test_parses_numeric_cell(self):
+        from .order_import import _parse_price
+        self.assertEqual(_parse_price(1.1), Decimal("1.1"))
+
+    def test_blank_returns_none(self):
+        from .order_import import _parse_price
+        self.assertIsNone(_parse_price(None))
+        self.assertIsNone(_parse_price(""))
+        self.assertIsNone(_parse_price("   "))
+
+    def test_garbage_returns_none(self):
+        from .order_import import _parse_price
+        self.assertIsNone(_parse_price("not-a-price"))
+
+
+class HistoricalOrderImportTests(TestCase):
+    """End-to-end import of the historical GARDEN CAFE tab (w/c 30
+    March 2026). Proves that EVERY product row with an ordered qty
+    becomes an OrderLine — including discontinued SKUs that no
+    current catalogue product matches — so financial totals are
+    complete."""
+
+    SHEET = "data/order_sheet_2026_03_30.xlsm"
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.garden = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.products = _seed_garden_cafe_products(self.dept)
+
+    def test_discontinued_products_land_with_snapshot(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["GARDEN CAFE"])
+        # "Hot Cross Buns (Pack/10)" is on the historical sheet but
+        # NOT in the current catalogue seed — the line must still
+        # exist, with sale_product=None and the sheet's price snapshotted.
+        hxb = OrderLine.objects.filter(
+            order__customer=self.garden,
+            product_name="Hot Cross Buns (Pack/10)")
+        self.assertTrue(hxb.exists(),
+            "Hot Cross Buns line was dropped — historical importer "
+            "must keep discontinued SKUs")
+        for line in hxb:
+            self.assertIsNone(line.sale_product_id)
+            self.assertEqual(line.unit_price, Decimal("6.25"))
+            # And the value flows through.
+            self.assertEqual(
+                line.line_value, line.qty_ordered * Decimal("6.25"))
+
+    def test_almond_pastry_discontinued_line_exists(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["GARDEN CAFE"])
+        # "Almond Pastry" is the historical name; the modern
+        # catalogue uses "Pain Au Almond ( Loose)" — different name,
+        # so it stays unlinked.
+        ap = OrderLine.objects.filter(
+            order__customer=self.garden,
+            product_name="Almond Pastry")
+        self.assertTrue(ap.exists())
+        for line in ap:
+            self.assertIsNone(line.sale_product_id)
+            self.assertEqual(line.unit_price, Decimal("1.5"))
+
+    def test_matched_products_still_link(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["GARDEN CAFE"])
+        # Croissant (Loose) exists in both the historical sheet and
+        # the modern catalogue — it must still link.
+        croissant = self.products["Croissant (Loose)"]
+        lines = OrderLine.objects.filter(
+            order__customer=self.garden, sale_product=croissant)
+        self.assertTrue(lines.exists())
+        for line in lines:
+            self.assertEqual(line.product_name, "Croissant (Loose)")
+            self.assertEqual(line.unit_price, Decimal("1.1"))
+
+    def test_week_dates_derived_from_sheet(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["GARDEN CAFE"])
+        # Week-commencing 30 March 2026 (Monday) — orders only on
+        # those seven dates, derived from the sheet.
+        dates = set(Order.objects.filter(
+            customer=self.garden).values_list("order_date", flat=True))
+        self.assertEqual(dates, {
+            datetime.date(2026, 3, 30) + datetime.timedelta(days=i)
+            for i in range(7)
+        })
+
+    def test_order_total_includes_discontinued_values(self):
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["GARDEN CAFE"])
+        # Every order across the historical week should have a
+        # non-zero total — there's no day with only unpriced lines.
+        for order in Order.objects.filter(customer=self.garden):
+            self.assertGreater(order.total_value(), Decimal("0"))

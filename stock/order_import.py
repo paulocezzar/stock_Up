@@ -139,16 +139,29 @@ def iter_product_rows(ws):
                 return
             # Otherwise a blank spacer row — skip and keep scanning.
             continue
-        price = None
-        if len(row) > 2 and row[2] not in (None, ""):
-            try:
-                price = Decimal(str(row[2]))
-            except (InvalidOperation, ValueError):
-                price = None
+        price = _parse_price(row[2] if len(row) > 2 else None)
         qtys = []
         for col in DAY_COL_ORDERED:
             qtys.append(_as_qty(row[col]) if col < len(row) else None)
         yield {"sage": sku, "name": name, "price": price, "qtys": qtys}
+
+
+def _parse_price(v):
+    """Best-effort Decimal from a Price cell. Strips a leading "£" so
+    string cells like "£6.25" round-trip. Returns ``None`` on blanks
+    or unparseable values — historical lines may carry a name with no
+    price, and the importer should still record them rather than
+    silently dropping the row."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, str):
+        v = v.strip().lstrip("£").strip()
+        if not v:
+            return None
+    try:
+        return Decimal(str(v))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _build_product_lookups(dept):
@@ -240,10 +253,17 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
 
     for row in iter_product_rows(ws):
         sp = _match_product(row, by_sage, by_name)
+        # Snapshot the sheet's name + price on EVERY line — even when
+        # no current catalogue product matches. Historical lines
+        # (discontinued SKUs like "Almond Pastry", "Hot Cross Buns")
+        # need to keep their financial value; matched lines also keep
+        # the price the customer was actually charged on the day,
+        # which protects the total from later catalogue edits.
+        sheet_name = (row.get("name") or "").strip()
+        sheet_price = row.get("price")  # Decimal or None
         if sp is None:
             products_unmatched.append((row.get("sage") or "",
-                                       row.get("name") or ""))
-            continue
+                                       sheet_name))
         for i, qty in enumerate(row["qtys"]):
             if qty is None:
                 continue
@@ -255,9 +275,13 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
                     order_date=day)
                 order_by_date[day] = order
             OrderLine.objects.create(
-                order=order, sale_product=sp, qty_ordered=qty)
+                order=order, sale_product=sp,
+                product_name=sheet_name,
+                unit_price=sheet_price,
+                qty_ordered=qty)
             lines_imported += 1
-            products_matched.add(sp.pk)
+            if sp is not None:
+                products_matched.add(sp.pk)
 
     # Sweep orders that ended up with no lines after the rebuild —
     # mirrors the sheet exactly (a customer with no orders on a given

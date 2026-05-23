@@ -2621,24 +2621,33 @@ def _build_order_grid(orders, days):
     ``orders`` is the dept-filtered list for the selected week and
     customer; ``days`` is the Mon..Sun strip the view already
     computed. Returns ``{rows, day_totals, day_values, grand_total,
-    grand_value}`` where each row is one SaleProduct with:
-      * ``product`` — the SaleProduct
+    grand_value}`` where each row is one product (linked OR
+    discontinued / historical) with:
+      * ``product`` — a dict ``{name, sage_number, price,
+        sale_product}``; ``sale_product`` is the catalogue entry (or
+        None for a historical line whose product no longer exists),
+        and ``price`` is the SNAPSHOTTED ``unit_price`` from the
+        order line — not the live catalogue value
       * ``cells`` — list of 7 ``{qty}`` dicts aligned to Mon..Sun
         (qty is a Decimal or ``None`` for blank cells, matching the
         bakery sheet's blanks-for-zero convention)
       * ``total_qty`` — sum of cells
-      * ``total_value`` — total_qty × product.price (or ``None`` when
-        the product has no price set)
+      * ``total_value`` — sum of ``line.line_value`` for the grouped
+        lines (uses each line's snapshotted unit price so
+        discontinued products contribute their original value)
 
     Rows are sorted by SKU/Sage when present, then by name — mirrors
-    the sheet's order. Cells aggregate multiple lines for the same
-    product on the same day (rare but possible if a manual edit lands
-    a duplicate after the unique_together guard somehow lapses, e.g.
-    via the admin).
+    the sheet's order. Lines without a sale_product (historical /
+    discontinued) group together by ``(product_name, unit_price)``
+    so the same deprecated SKU on different days lands in one row.
     """
-    # Map (product_pk, day_index) -> running qty
+    # row_key → {name, sage_number, price, sale_product}
+    products = {}
+    # row_key → list of 7 Decimal-or-None qtys (Mon..Sun)
     qtys = {}
-    products_by_pk = {}
+    # row_key → running line value sum (Decimal)
+    values = {}
+
     for o in orders:
         # day index relative to week_start (Mon = 0, ..., Sun = 6).
         try:
@@ -2648,40 +2657,74 @@ def _build_order_grid(orders, days):
             continue
         for line in o.lines.select_related("sale_product").all():
             sp = line.sale_product
-            products_by_pk[sp.pk] = sp
-            key = (sp.pk, day_idx)
-            qtys[key] = (qtys.get(key) or Decimal("0")) + (line.qty_ordered or Decimal("0"))
+            line_price = line.unit_price
+            if sp is not None:
+                row_key = ("sp", sp.pk)
+                if row_key not in products:
+                    products[row_key] = {
+                        "name": line.product_name or sp.name,
+                        "sage_number": sp.sage_number,
+                        "price": line_price if line_price is not None else sp.price,
+                        "sale_product": sp,
+                    }
+            else:
+                # Discontinued / unlinked: group by (name, price) so
+                # the same deprecated SKU lands in one row even if it
+                # appears on several days.
+                row_key = ("unlinked",
+                           (line.product_name or "").lower(),
+                           str(line_price) if line_price is not None else "")
+                if row_key not in products:
+                    products[row_key] = {
+                        "name": line.product_name or "",
+                        "sage_number": "",
+                        "price": line_price,
+                        "sale_product": None,
+                    }
+            if row_key not in qtys:
+                qtys[row_key] = [None] * 7
+                values[row_key] = Decimal("0")
+            qty = line.qty_ordered or Decimal("0")
+            cur = qtys[row_key][day_idx]
+            qtys[row_key][day_idx] = (cur or Decimal("0")) + qty
+            lv = line.line_value
+            if lv is not None:
+                values[row_key] += lv
 
-    def _sort_key(sp):
-        sage = (sp.sage_number or "").strip()
-        # Numeric Sage codes sort numerically before non-numeric / blanks.
+    def _sort_key(item):
+        row_key, p = item
+        sage = (p.get("sage_number") or "").strip()
         if sage and sage.isdigit() and sage != "0":
             return (0, int(sage), "")
-        return (1, 0, (sp.name or "").lower())
+        return (1, 0, (p.get("name") or "").lower())
 
     rows = []
     day_totals = [Decimal("0")] * 7
     day_values = [Decimal("0")] * 7
     grand_total = Decimal("0")
     grand_value = Decimal("0")
-    for sp in sorted(products_by_pk.values(), key=_sort_key):
+    for row_key, p in sorted(products.items(), key=_sort_key):
         cells = []
         total_qty = Decimal("0")
         for i in range(7):
-            q = qtys.get((sp.pk, i))
+            q = qtys[row_key][i]
             cells.append({"qty": q})
             if q is not None:
                 day_totals[i] += q
                 total_qty += q
-                if sp.price is not None:
-                    day_values[i] += (q * sp.price)
-        total_value = None
-        if sp.price is not None:
-            total_value = (total_qty * sp.price).quantize(Decimal("0.01"))
-            grand_value += total_value
+                if p["price"] is not None:
+                    day_values[i] += (q * p["price"])
+        row_value = values[row_key].quantize(Decimal("0.01"))
+        total_value = row_value if values[row_key] != Decimal("0") or p["price"] is not None else None
+        # Only show "—" for truly priceless rows; even £0 totals
+        # still render as "£0.00".
+        if p["price"] is None and values[row_key] == Decimal("0"):
+            total_value = None
         grand_total += total_qty
+        if total_value is not None:
+            grand_value += total_value
         rows.append({
-            "product": sp,
+            "product": p,
             "cells": cells,
             "total_qty": total_qty,
             "total_value": total_value,

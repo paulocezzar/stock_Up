@@ -40,11 +40,10 @@
   <tbody>
   {% for line in lines %}
     <tr>
-      <td><a href="{% url 'sale_product_detail' line.sale_product.pk %}">{{ line.sale_product.name }}</a>
-        {% if line.sale_product.pack_size %} <span class="muted" style="font-size:11px">· {{ line.sale_product.pack_size }}</span>{% endif %}
+      <td>{% if line.sale_product %}<a href="{% url 'sale_product_detail' line.sale_product.pk %}">{{ line.display_name }}</a>{% if line.sale_product.pack_size %} <span class="muted" style="font-size:11px">· {{ line.sale_product.pack_size }}</span>{% endif %}{% else %}<span class="muted" title="discontinued / not in current catalogue">{{ line.display_name }}</span>{% endif %}
       </td>
       <td class="num">{{ line.qty_ordered|floatformat:"-3" }}</td>
-      <td class="num">{% if line.sale_product.price is not None %}£{{ line.sale_product.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if line.unit_price is not None %}£{{ line.unit_price }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{% if line.line_value is not None %}£{{ line.line_value }}{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>
   {% endfor %}
@@ -71,13 +70,15 @@
   <tbody>
   {% for r in resolved %}
     <tr>
-      <td>{{ r.sale_product.name }}</td>
+      <td>{% if r.sale_product %}{{ r.sale_product.name }}{% else %}<span class="muted">{{ r.line.display_name }}</span>{% endif %}</td>
       <td class="num">{{ r.line.qty_ordered|floatformat:"-3" }}</td>
       <td>
         {% if r.recipe %}
           <a href="{% url 'recipe_detail' r.recipe.pk %}"><code>{{ r.recipe.code }}</code> — {{ r.recipe.name }}</a>
         {% elif r.error %}
           <span class="muted">— cycle: {{ r.error }} —</span>
+        {% elif not r.sale_product %}
+          <span class="muted">— discontinued / no catalogue product —</span>
         {% else %}
           <span class="muted">— not linked to a recipe —</span>
         {% endif %}

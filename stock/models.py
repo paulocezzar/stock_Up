@@ -916,31 +916,36 @@ class Order(models.Model):
         return f"{self.customer.name} - {self.order_date:%d %b %Y}"
 
     def total_value(self):
-        """Sum of qty_ordered × sale_product.price across every line.
+        """Sum of ``qty_ordered × unit_price`` across every line.
 
-        Lines whose SaleProduct has no price are skipped silently; the
-        total is just the priced part. Two-decimal precision.
+        Reads the SNAPSHOTTED ``unit_price`` on each OrderLine — NOT
+        the current catalogue price — so the total matches what the
+        order was actually worth on the day it landed and stays
+        accurate even after a product is discontinued or its
+        catalogue price drifts. Lines without a captured price are
+        skipped silently; the total is the priced part only.
         """
         total = Decimal("0")
-        for line in self.lines.select_related("sale_product").all():
-            price = line.sale_product.price
-            if price is None or line.qty_ordered is None:
+        for line in self.lines.all():
+            if line.unit_price is None or line.qty_ordered is None:
                 continue
-            total += price * line.qty_ordered
+            total += line.unit_price * line.qty_ordered
         return total.quantize(Decimal("0.01"))
 
     def resolved_consumption(self):
         """Per-line resolved (recipe, total_quantity, unit) × qty_ordered.
 
-        For each OrderLine, walks its SaleProduct's link chain to a
-        Recipe and multiplies by ``qty_ordered`` so the caller sees the
-        eventual recipe load this order implies. Returns a list of
-        dicts in line ordering:
+        For each OrderLine that's linked to a current SaleProduct, walks
+        the link chain to a Recipe and multiplies by ``qty_ordered`` so
+        the caller sees the eventual recipe load this order implies.
+        Historical lines whose ``sale_product`` is null (discontinued
+        product, no current catalogue match) appear with
+        ``sale_product=None`` and ``recipe=None`` — they're kept for
+        financial completeness but the consumption flow can't compute
+        ingredient loads for them.
+
+        Returns a list of dicts in line ordering:
             [{line, sale_product, recipe, total_quantity, unit, error?}]
-        Lines whose product doesn't resolve (no chain to a Recipe, or
-        a cycle) still appear with ``recipe=None`` so the caller can
-        surface them. This is a data-only hook for the later
-        consumption flow — no ingredient maths is done here.
         """
         from .models import SaleProductCycleError
         out = []
@@ -950,6 +955,11 @@ class Order(models.Model):
             sp = line.sale_product
             entry = {"line": line, "sale_product": sp,
                      "recipe": None, "total_quantity": None, "unit": None}
+            if sp is None:
+                # Historical / discontinued line — kept for financial
+                # value, no catalogue product to walk to a recipe.
+                out.append(entry)
+                continue
             try:
                 recipe, base, unit = sp.resolved_recipe_consumption()
             except SaleProductCycleError as e:
@@ -970,36 +980,93 @@ class Order(models.Model):
 class OrderLine(models.Model):
     """One product on an order with its ordered quantity.
 
-    Identity is ``(order, sale_product)`` — the same product can't
-    appear twice on one order (enforced via ``unique_together``).
-    ``qty_ordered`` is decimal so kg-based products (e.g. focaccia
-    3.75 kg) can be ordered fractionally. ``qty_sent`` is deliberately
-    NOT in this model yet — the spec leaves room for it in a later
-    chunk and the existing layout makes that addition non-destructive.
+    Each line SNAPSHOTS the product name and unit price as they were
+    when the order landed (``product_name`` + ``unit_price``). The
+    ``sale_product`` FK is just a convenience link to the current
+    catalogue entry IF one matches — it's nullable, with on_delete
+    SET_NULL, because a historical line for a discontinued product
+    must keep its financial value even after the catalogue entry
+    disappears. ``qty_ordered`` is decimal so kg-based products
+    (e.g. focaccia 3.75 kg) can be ordered fractionally.
+
+    The uniqueness rule that "the same product can't appear twice
+    on one order" applies only to LINKED lines; multiple unlinked
+    (historical / discontinued) lines on one order are allowed,
+    because two different deprecated SKUs might both have a NULL
+    catalogue link. A partial UniqueConstraint on
+    ``(order, sale_product)`` with ``sale_product IS NOT NULL``
+    expresses that.
     """
     order = models.ForeignKey(
         Order, related_name="lines", on_delete=models.CASCADE)
     sale_product = models.ForeignKey(
-        SaleProduct, related_name="order_lines", on_delete=models.PROTECT)
+        SaleProduct, related_name="order_lines",
+        on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="Current catalogue product, if one matches; null for "
+                  "historical lines whose product is no longer sold.")
+    product_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="Name as it appeared on the order — independent of any "
+                  "later renames or removals in the catalogue.")
+    unit_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Price charged on this line — independent of any later "
+                  "catalogue price changes.")
     qty_ordered = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["id"]
-        unique_together = ("order", "sale_product")
+        constraints = [
+            # Linked lines can't duplicate on one order; null
+            # sale_product is allowed many times so two discontinued
+            # products on the same order both fit.
+            models.UniqueConstraint(
+                fields=["order", "sale_product"],
+                condition=models.Q(sale_product__isnull=False),
+                name="orderline_unique_order_saleproduct_when_linked",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.order_id}: {self.sale_product.name} ({self.qty_ordered})"
+        return f"{self.order_id}: {self.display_name} ({self.qty_ordered})"
+
+    def save(self, *args, **kwargs):
+        # Snapshot name + unit_price from the linked SaleProduct on
+        # the first save when callers didn't supply them. Manual CRUD
+        # paths (the order_new / order_edit views) thus keep working
+        # unchanged — they pass sale_product + qty and the snapshot
+        # falls out automatically. Historical import passes name +
+        # unit_price explicitly and may leave sale_product null.
+        if self.sale_product_id and not self.product_name:
+            self.product_name = self.sale_product.name
+        if self.sale_product_id and self.unit_price is None:
+            self.unit_price = self.sale_product.price
+        super().save(*args, **kwargs)
+
+    @property
+    def display_name(self):
+        """The name shown to the operator: the snapshot when set,
+        falling back to the linked SaleProduct's current name (the
+        case for legacy lines created before the snapshot fields
+        existed and not yet backfilled)."""
+        if self.product_name:
+            return self.product_name
+        if self.sale_product_id:
+            return self.sale_product.name
+        return ""
 
     @property
     def line_value(self):
-        """qty_ordered × sale_product.price, or None when the product
-        has no price set."""
-        price = self.sale_product.price
-        if price is None or self.qty_ordered is None:
+        """qty_ordered × unit_price (the SNAPSHOTTED price), or None
+        when no price was captured. Critically NOT
+        ``sale_product.price`` — that's the current catalogue value
+        and could have drifted since the order landed (or disappeared
+        if the product was discontinued)."""
+        if self.unit_price is None or self.qty_ordered is None:
             return None
-        return (price * self.qty_ordered).quantize(Decimal("0.01"))
+        return (self.unit_price * self.qty_ordered).quantize(Decimal("0.01"))
 
 
 class RecipePackaging(models.Model):
