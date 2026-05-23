@@ -388,6 +388,43 @@ class Adjustment(models.Model):
         return self.quantity if self.reason == "found" else -self.quantity
 
 
+class Customer(models.Model):
+    """A bakery customer — either an internal Estate outlet (the GARDEN CAFE,
+    FARMSHOP, BUTCHERY…) or a wholesale account (TEALS, PINKMANS, SOCIETY…).
+
+    Identity is the name (case-preserved, but cross-referenced case-insensitively
+    on import). customer_type is auto-classified by the importer based on
+    appearance in the order sheet's WHOLESALE tab; ``is_type_manual`` is set
+    when the operator picks the type by hand, so the next re-import won't
+    overwrite that choice (same pattern as ``Recipe.is_sold_manual``).
+    """
+    INTERNAL = "internal"
+    WHOLESALE = "wholesale"
+    TYPE_CHOICES = [
+        (INTERNAL, "Internal"),
+        (WHOLESALE, "Wholesale"),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    location = models.CharField(max_length=120, blank=True)
+    ordered_by = models.CharField(max_length=120, blank=True)
+    customer_type = models.CharField(
+        max_length=12, choices=TYPE_CHOICES, default=INTERNAL)
+    is_type_manual = models.BooleanField(default=False)
+    department = models.ForeignKey(
+        "Department", related_name="customers",
+        on_delete=models.CASCADE, null=True, blank=True)
+    active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class RecipeCycleError(Exception):
     """A recipe would (transitively) contain itself."""
 

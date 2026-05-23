@@ -37,4 +37,8 @@ urlpatterns = [
     path("deliveries/scan/", views.delivery_scan, name="delivery_scan"),
     path("deliveries/<int:pk>/", views.delivery_detail, name="delivery_detail"),
     path("adjustments/", views.adjustments, name="adjustments"),
+    path("customers/", views.customers_internal, name="customers"),
+    path("customers/wholesale/", views.customers_wholesale, name="customers_wholesale"),
+    path("customers/<int:pk>/", views.customer_detail, name="customer_detail"),
+    path("customers/<int:pk>/type/", views.customer_set_type, name="customer_set_type"),
 ]

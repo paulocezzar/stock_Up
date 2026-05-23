@@ -1,0 +1,47 @@
+{% extends "stock/_section_customers.html" %}
+{% block body %}
+<style>
+  .type-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;display:inline-block;margin-left:8px;vertical-align:middle}
+  .type-tag.internal{color:var(--muted);border-color:var(--muted)}
+  .type-tag.wholesale{color:var(--amber);border-color:var(--amber)}
+  .type-tag.manual{border-style:dashed}
+  .kv{display:grid;grid-template-columns:max-content 1fr;column-gap:14px;row-gap:6px;margin:0}
+  .kv dt{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .kv dd{margin:0}
+</style>
+
+<h2>{{ customer.name }}
+  <span class="type-tag {{ customer.customer_type }}{% if customer.is_type_manual %} manual{% endif %}"
+        title="{% if customer.is_type_manual %}Manually set{% else %}Auto from order sheet{% endif %}">{{ customer.get_customer_type_display }}{% if customer.is_type_manual %} ·M{% endif %}</span>
+</h2>
+
+<div class="card"><h3>Details</h3>
+<dl class="kv">
+  <dt>Location</dt><dd>{{ customer.location|default:"—" }}</dd>
+  <dt>Ordered by</dt><dd>{{ customer.ordered_by|default:"—" }}</dd>
+  <dt>Department</dt><dd>{{ customer.department.name|default:"—" }}</dd>
+  <dt>Status</dt><dd>{% if customer.active %}active{% else %}inactive{% endif %}</dd>
+</dl>
+</div>
+
+<div class="card"><h3>Customer type</h3>
+<form method="post" action="{% url 'customer_set_type' customer.pk %}" class="row">{% csrf_token %}
+  <div class="field"><label>Type</label>
+    <select name="customer_type" aria-label="Customer type for {{ customer.name }}">
+      {% for value, label in type_choices %}
+        <option value="{{ value }}" {% if customer.customer_type == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn" type="submit">set</button>
+</form>
+<p class="muted" style="margin:10px 0 0;font-size:12px">
+  {% if customer.is_type_manual %}Type is manually set — the next import won't overwrite it.{% else %}Type is auto-derived from the order sheet's WHOLESALE tab. Setting it manually locks the choice across re-imports.{% endif %}
+</p>
+</div>
+
+<p>
+  <a href="{% if customer.customer_type == 'wholesale' %}{% url 'customers_wholesale' %}{% else %}{% url 'customers' %}{% endif %}">← all {{ customer.get_customer_type_display|lower }} customers</a>
+</p>
+{% endblock %}

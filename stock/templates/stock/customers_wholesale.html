@@ -1,0 +1,22 @@
+{% extends "stock/_section_customers.html" %}
+{% block n_cust_wholesale %}on{% endblock %}
+{% block body %}
+<h2>Wholesale Customers <span class="muted" style="font-size:14px">{{ customers|length }} in this department</span></h2>
+<div class="filter">
+  <input type="search" placeholder="filter by name or location…" data-filter="customers-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="customers-tbl">
+  <thead><tr><th>Name</th><th>Location</th><th>Ordered by</th><th></th></tr></thead>
+  <tbody>
+  {% for c in customers %}
+    <tr data-search="{{ c.name|lower }} {{ c.location|lower }} {{ c.ordered_by|lower }}">
+      <td><a href="{% url 'customer_detail' c.pk %}">{{ c.name }}</a>{% if c.is_type_manual %} <span class="muted" title="Type manually set">·M</span>{% endif %}</td>
+      <td>{{ c.location|default:"—" }}</td>
+      <td>{{ c.ordered_by|default:"—" }}</td>
+      <td><a href="{% url 'customer_detail' c.pk %}">open →</a></td>
+    </tr>
+  {% empty %}<tr><td colspan="4" class="muted">No wholesale customers yet — run <code>import_customers</code>.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer
 from .ai_extract import extract_lines, auto_match, ExtractError
 from .recipe_import import (
     parse_recipe_workbook, save_recipes, summarize_parse,
@@ -1090,3 +1090,71 @@ def delivery_scan(request):
         "prefilled_supplier_id": supplier.pk,
         "default_show_all": True,
     })
+
+
+# ---- customers (per department) ----
+def _customer_qs(dept, customer_type):
+    return (Customer.objects.filter(department=dept,
+                                    customer_type=customer_type)
+            .order_by("name"))
+
+
+@login_required
+def customers_internal(request):
+    """Internal-customer list (Estate outlets like GARDEN CAFE, FARMSHOP, …).
+
+    Also the default landing for the Customers top-nav link.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    return render(request, "stock/customers_internal.html", {
+        "customers": _customer_qs(dept, Customer.INTERNAL),
+    })
+
+
+@login_required
+def customers_wholesale(request):
+    """Wholesale-customer list (TEALS, PINKMANS, SOCIETY …)."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    return render(request, "stock/customers_wholesale.html", {
+        "customers": _customer_qs(dept, Customer.WHOLESALE),
+    })
+
+
+@login_required
+def customer_detail(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+    if customer.department and not customer.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    return render(request, "stock/customer_detail.html", {
+        "customer": customer,
+        "type_choices": Customer.TYPE_CHOICES,
+    })
+
+
+@require_POST
+@login_required
+def customer_set_type(request, pk):
+    """Operator override for a customer's type — persists past re-imports.
+
+    Sets ``is_type_manual=True`` so the next ``import_customers`` keeps
+    the choice (mirrors ``Recipe.is_sold_manual``).
+    """
+    customer = get_object_or_404(Customer, pk=pk)
+    if customer.department and not customer.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    new_type = request.POST.get("customer_type")
+    valid = {k for k, _ in Customer.TYPE_CHOICES}
+    if new_type not in valid:
+        messages.error(request, "Pick a valid customer type.")
+        return redirect("customer_detail", pk=pk)
+    customer.customer_type = new_type
+    customer.is_type_manual = True
+    customer.save(update_fields=["customer_type", "is_type_manual"])
+    messages.success(request,
+                     f"Marked {customer.name} as "
+                     f"{customer.get_customer_type_display().lower()}.")
+    return redirect("customer_detail", pk=pk)

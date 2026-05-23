@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -3760,3 +3760,210 @@ class PackagingPageLayoutTests(TestCase):
         # Same edit-prices + delete affordance shape as ingredients
         self.assertIn("edit prices →", body)
         self.assertIn("delete", body)
+
+
+# ----------------------------------------------------------------------
+# Customers section
+# ----------------------------------------------------------------------
+
+ORDER_SHEET_XLSM = "data/order_sheet.xlsm"
+
+
+class CustomersImportTests(TestCase):
+    """import_customers classifies by WHOLESALE-tab membership and is
+    idempotent on name."""
+
+    @classmethod
+    def setUpTestData(cls):
+        import warnings
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported",
+        )
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+
+    def test_teals_is_classified_wholesale(self):
+        # TEALS appears in both Customers and WHOLESALE tabs → wholesale wins.
+        c = Customer.objects.get(name="TEALS")
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)
+        self.assertFalse(c.is_type_manual)
+
+    def test_garden_cafe_is_classified_internal(self):
+        # GARDEN CAFE is an Estate outlet in the Customers tab and is NOT in
+        # the WHOLESALE tab → internal.
+        c = Customer.objects.get(name="GARDEN CAFE")
+        self.assertEqual(c.customer_type, Customer.INTERNAL)
+        self.assertEqual(c.location, "Estate")
+        self.assertFalse(c.is_type_manual)
+
+    def test_wholesale_only_customer_is_imported_as_wholesale(self):
+        # PINKMANS - WHITELADIES ROAD exists ONLY in the WHOLESALE tab —
+        # the importer still creates a Customer row for it.
+        c = Customer.objects.get(name="PINKMANS - WHITELADIES ROAD")
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)
+        self.assertEqual(c.location, "")
+        self.assertEqual(c.ordered_by, "")
+
+    def test_idempotent_reimport(self):
+        from django.core.management import call_command
+        before_count = Customer.objects.count()
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        self.assertEqual(Customer.objects.count(), before_count)
+        # And the type of a normal classified row stays put
+        teals = Customer.objects.get(name="TEALS")
+        self.assertEqual(teals.customer_type, Customer.WHOLESALE)
+
+    def test_blank_named_rows_are_skipped(self):
+        # The Customers tab has trailing rows with only an "Ordered by"
+        # entry (no Customer Name) — those must not become customers.
+        # No customer should have name == "" or be tagged with one of the
+        # staff names that appears only in the trailing rows.
+        self.assertFalse(Customer.objects.filter(name="").exists())
+        for staff in ("Paulo Silva", "Sam Bobbett", "Lauren Edwards"):
+            self.assertFalse(Customer.objects.filter(name=staff).exists())
+
+    def test_manual_type_override_survives_reimport(self):
+        from django.core.management import call_command
+        # An operator flips YARLINGTON (auto-derived internal) to wholesale.
+        y = Customer.objects.get(name="YARLINGTON")
+        self.assertEqual(y.customer_type, Customer.INTERNAL)  # baseline
+        y.customer_type = Customer.WHOLESALE
+        y.is_type_manual = True
+        y.save(update_fields=["customer_type", "is_type_manual"])
+        # Re-import: type must stay wholesale, manual flag must stay True.
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        y.refresh_from_db()
+        self.assertEqual(y.customer_type, Customer.WHOLESALE)
+        self.assertTrue(y.is_type_manual)
+
+    def test_import_updates_location_and_contact_on_existing_rows(self):
+        # A customer's location/ordered_by must still update on re-import
+        # even when is_type_manual is True (only the TYPE is preserved).
+        from django.core.management import call_command
+        c = Customer.objects.get(name="FARMSHOP")
+        c.location = "WRONG"
+        c.ordered_by = "WRONG"
+        c.is_type_manual = True
+        c.customer_type = Customer.WHOLESALE   # bogus override to test it sticks
+        c.save()
+        call_command("import_customers", ORDER_SHEET_XLSM, "--department", "Bakery")
+        c.refresh_from_db()
+        self.assertEqual(c.location, "Estate")           # updated
+        self.assertEqual(c.ordered_by, "Alan Stewart")   # updated
+        self.assertEqual(c.customer_type, Customer.WHOLESALE)  # respected
+        self.assertTrue(c.is_type_manual)
+
+    def test_summary_reports_internal_and_wholesale_counts(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("import_customers", ORDER_SHEET_XLSM,
+                     "--department", "Bakery", stdout=out)
+        text = out.getvalue().lower()
+        self.assertIn("internal", text)
+        self.assertIn("wholesale", text)
+
+
+class CustomersViewTests(TestCase):
+    """The Customers section: list pages, detail page, type-change POST,
+    sub-nav, top-nav."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # One of each type
+        self.internal = Customer.objects.create(
+            name="GARDEN CAFE", location="Estate", ordered_by="Andy",
+            customer_type=Customer.INTERNAL, department=self.dept)
+        self.wholesale = Customer.objects.create(
+            name="TEALS", location="Wholesale", ordered_by="Jemima",
+            customer_type=Customer.WHOLESALE, department=self.dept)
+
+    def test_internal_list_shows_only_internal_customers(self):
+        r = self.client.get("/customers/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("GARDEN CAFE", body)
+        self.assertNotIn("TEALS", body)
+
+    def test_wholesale_list_shows_only_wholesale_customers(self):
+        r = self.client.get("/customers/wholesale/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("TEALS", body)
+        self.assertNotIn("GARDEN CAFE", body)
+
+    def test_customer_detail_renders_type_and_form(self):
+        r = self.client.get(f"/customers/{self.internal.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("GARDEN CAFE", body)
+        self.assertIn("Internal", body)
+        # Type-change form posts to customer_set_type
+        self.assertIn(f'action="/customers/{self.internal.pk}/type/"', body)
+        self.assertIn('name="customer_type"', body)
+
+    def test_type_change_post_sets_is_type_manual(self):
+        r = self.client.post(f"/customers/{self.internal.pk}/type/",
+                             {"customer_type": Customer.WHOLESALE})
+        self.assertEqual(r.status_code, 302)
+        self.internal.refresh_from_db()
+        self.assertEqual(self.internal.customer_type, Customer.WHOLESALE)
+        self.assertTrue(self.internal.is_type_manual)
+
+    def test_type_change_rejects_bad_value(self):
+        r = self.client.post(f"/customers/{self.internal.pk}/type/",
+                             {"customer_type": "bogus"})
+        self.assertEqual(r.status_code, 302)
+        self.internal.refresh_from_db()
+        # Unchanged
+        self.assertEqual(self.internal.customer_type, Customer.INTERNAL)
+        self.assertFalse(self.internal.is_type_manual)
+
+    def test_type_change_blocked_for_other_department(self):
+        other = Department.objects.create(name="Butchery")
+        c = Customer.objects.create(
+            name="OTHER", customer_type=Customer.INTERNAL, department=other)
+        r = self.client.post(f"/customers/{c.pk}/type/",
+                             {"customer_type": Customer.WHOLESALE})
+        self.assertEqual(r.status_code, 403)
+
+    def test_customer_pages_require_login(self):
+        c = Client()
+        for path in ("/customers/", "/customers/wholesale/",
+                     f"/customers/{self.internal.pk}/"):
+            r = c.get(path)
+            self.assertEqual(r.status_code, 302)
+            self.assertIn("/login/", r.headers["Location"])
+
+    def test_customer_pages_are_department_scoped(self):
+        other = Department.objects.create(name="Butchery")
+        Customer.objects.create(
+            name="OTHER", customer_type=Customer.INTERNAL, department=other)
+        r = self.client.get("/customers/")
+        self.assertNotIn("OTHER", r.content.decode())
+
+    def test_section_nav_lists_internal_and_wholesale(self):
+        r = self.client.get("/customers/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn(">Internal Customers<", nav)
+        self.assertIn(">Wholesale Customers<", nav)
+        self.assertIn('href="/customers/"', nav)
+        self.assertIn('href="/customers/wholesale/"', nav)
+        # Internal Customers is the active sub-nav link on /customers/
+        self.assertRegex(nav, r'class="on"[^>]*>Internal Customers')
+
+    def test_home_top_nav_includes_customers_link(self):
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn(">Customers<", nav)
+        self.assertIn('href="/customers/"', nav)
