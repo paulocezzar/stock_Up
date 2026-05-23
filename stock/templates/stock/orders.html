@@ -112,6 +112,56 @@ products × days grid fits more day columns without horizontal scroll.
   <div class="stat"><div class="k">Total value</div><div class="v">£{{ week_total_value }}</div></div>
 </div>
 
+{% comment %}
+Compact per-day totals strip — sits immediately under the headline
+stats block so the whole week shape (Mon..Sun + grand total) is
+visible at a glance before the operator scrolls. Each tile is a
+link that narrows the view to that specific day via ?date=.
+{% endcomment %}
+<div class="day-strip">
+  {% for day in days %}
+    <a class="day-tile{% if day.is_today %} today{% endif %}{% if not day.count %} empty{% endif %}"
+       href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}">
+      <span class="dn">{{ day.label|slice:":3" }}</span>
+      <span class="dd">{{ day.date|date:"d M" }}</span>
+      <span class="count">{% if day.count %}{{ day.count }} order{{ day.count|pluralize }}{% else %}—{% endif %}</span>
+      <span class="value">{% if day.total %}£{{ day.total }}{% else %}—{% endif %}</span>
+    </a>
+  {% endfor %}
+  <div class="day-tile total">
+    <span class="dn">Week</span>
+    <span class="dd">total</span>
+    <span class="count">{{ week_total_orders }} order{{ week_total_orders|pluralize }}</span>
+    <span class="value">£{{ week_total_value }}</span>
+  </div>
+</div>
+
+{% if customer_links and not grid %}
+<div class="card">
+  <h3>Customers <span class="muted" style="font-size:11px">click a customer to see their grid for this week</span></h3>
+  <ul class="cust-list">
+    {% if customer_links.0.active %}
+      <li class="divider">Ordered this week</li>
+    {% endif %}
+    {% for cl in customer_links %}
+      {% ifchanged cl.active %}
+        {% if not cl.active %}
+          <li class="divider">Other customers <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— no orders this week</span></li>
+        {% endif %}
+      {% endifchanged %}
+      <li class="cust {% if cl.active %}active{% else %}muted{% endif %}">
+        <span class="name"><a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a></span>
+        {% if cl.active %}
+          <span class="badge">{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}</span>
+        {% else %}
+          <span class="badge">no orders this week</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if grid %}
 <style>
   /* The wrap div keeps horizontal scrolling as a fallback for narrow
@@ -234,51 +284,6 @@ products × days grid fits more day columns without horizontal scroll.
   </div>
 </div>
 {% endif %}
-
-{% if customer_links and not grid %}
-<div class="card">
-  <h3>Customers <span class="muted" style="font-size:11px">click a customer to see their grid for this week</span></h3>
-  <ul class="cust-list">
-    {% if customer_links.0.active %}
-      <li class="divider">Ordered this week</li>
-    {% endif %}
-    {% for cl in customer_links %}
-      {% ifchanged cl.active %}
-        {% if not cl.active %}
-          <li class="divider">Other customers <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— no orders this week</span></li>
-        {% endif %}
-      {% endifchanged %}
-      <li class="cust {% if cl.active %}active{% else %}muted{% endif %}">
-        <span class="name"><a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a></span>
-        {% if cl.active %}
-          <span class="badge">{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}</span>
-        {% else %}
-          <span class="badge">no orders this week</span>
-        {% endif %}
-      </li>
-    {% endfor %}
-  </ul>
-</div>
-{% endif %}
-
-{# Compact per-day totals strip — replaces the old 7 verbose day cards. #}
-<div class="day-strip">
-  {% for day in days %}
-    <a class="day-tile{% if day.is_today %} today{% endif %}{% if not day.count %} empty{% endif %}"
-       href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}">
-      <span class="dn">{{ day.label|slice:":3" }}</span>
-      <span class="dd">{{ day.date|date:"d M" }}</span>
-      <span class="count">{% if day.count %}{{ day.count }} order{{ day.count|pluralize }}{% else %}—{% endif %}</span>
-      <span class="value">{% if day.total %}£{{ day.total }}{% else %}—{% endif %}</span>
-    </a>
-  {% endfor %}
-  <div class="day-tile total">
-    <span class="dn">Week</span>
-    <span class="dd">total</span>
-    <span class="count">{{ week_total_orders }} order{{ week_total_orders|pluralize }}</span>
-    <span class="value">£{{ week_total_value }}</span>
-  </div>
-</div>
 
 {% comment %}
 When ?date= narrows to one day, list that day's orders with the

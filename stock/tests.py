@@ -7535,6 +7535,66 @@ class OrdersTests(TestCase):
         # his row's <a href>.
         self.assertIn(f"customer={self.bob_cust.pk}", list_body)
 
+    # ---- summary placement (top of page, no bottom duplicate) ----
+
+    def test_week_summary_blocks_sit_at_top_of_page(self):
+        # Both summary blocks live near the top of the page, in this
+        # order: stats → day-strip → customer list / grid. The day
+        # strip appears immediately under the stats so the whole
+        # week's shape is visible without scrolling.
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        body = self.client.get("/orders/?week=2026-05-18").content.decode()
+        i_stats = body.find('class="stats"')
+        i_strip = body.find('class="day-strip"')
+        i_cust = body.find('class="cust-list"')
+        self.assertGreater(i_stats, -1, "stats block missing")
+        self.assertGreater(i_strip, -1, "day-strip block missing")
+        self.assertGreater(i_cust, -1, "customer list missing")
+        # Order: stats → day-strip → customer list.
+        self.assertLess(i_stats, i_strip,
+                        "day-strip should come after the stats block")
+        self.assertLess(i_strip, i_cust,
+                        "day-strip should come before the customer list")
+
+    def test_day_strip_appears_only_once_on_page(self):
+        # The strip used to render at the bottom in the old layout.
+        # After the move it lives only at the top; no duplicate.
+        Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        for path in (
+                "/orders/?week=2026-05-18",
+                f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}",
+        ):
+            body = self.client.get(path).content.decode()
+            self.assertEqual(
+                body.count('class="day-strip"'), 1,
+                f"{path} should render exactly one day-strip — found "
+                f"{body.count('class=\"day-strip\"')}")
+
+    def test_day_strip_sits_above_the_customer_grid(self):
+        # When a customer is selected, the order is:
+        # stats → day-strip → grid (no customer list, which is
+        # mutually exclusive with the grid).
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        body = self.client.get(
+            f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
+        ).content.decode()
+        i_stats = body.find('class="stats"')
+        i_strip = body.find('class="day-strip"')
+        i_grid = body.find('class="order-grid-wrap"')
+        self.assertGreater(i_stats, -1)
+        self.assertGreater(i_strip, -1)
+        self.assertGreater(i_grid, -1)
+        self.assertLess(i_stats, i_strip)
+        self.assertLess(i_strip, i_grid)
+
     # ---- compact per-day totals strip ----
 
     def test_day_strip_shows_per_day_count_and_value(self):
