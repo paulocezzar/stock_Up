@@ -5985,6 +5985,49 @@ class SaleProductsViewsTests(TestCase):
         self.assertIn("edit", body.lower())
         self.assertIn("delete", body.lower())
 
+    def test_products_list_drops_linked_recipe_column(self):
+        # The list no longer carries a "Linked recipe" / "Link" column
+        # — the linked recipe lives on the product detail page now.
+        SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)", price=Decimal("2.20"),
+            department=self.dept, recipe=self.apple,
+            link_source=SaleProduct.NAME, link_confirmed=True)
+        body = self.client.get("/sale-products/").content.decode()
+        import re
+        m = re.search(r"<table id=\"sp-tbl\">(.*?)</table>", body, re.DOTALL)
+        self.assertIsNotNone(m, "products table missing")
+        table = m.group(1)
+        # No "Link" / "Linked recipe" column header.
+        self.assertNotIn(">Link<", table)
+        self.assertNotIn(">Linked recipe<", table)
+        # The recipe code no longer leaks into table cells. (The recipe
+        # name happens to match the product name in this fixture, so
+        # that's not a reliable signal — check the code instead.)
+        self.assertNotIn(self.apple.code, table)
+        # Old per-row link tags are gone with the column.
+        self.assertNotIn("link-tag", table)
+
+    def test_products_list_keeps_linked_unlinked_header_stats(self):
+        # Two linked + one unlinked → stats render Linked=2, Unlinked=1.
+        SaleProduct.objects.create(
+            name="A", department=self.dept, recipe=self.apple,
+            link_source=SaleProduct.NAME, link_confirmed=True)
+        SaleProduct.objects.create(
+            name="B", department=self.dept, recipe=self.mince,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        SaleProduct.objects.create(name="Unlinked", department=self.dept)
+        body = self.client.get("/sale-products/").content.decode()
+        # Find the .stats block and inspect the linked / unlinked tiles.
+        import re
+        stats_match = re.search(r'class="stats">(.*?)</div>\s*<div class="filter"',
+                                body, re.DOTALL)
+        self.assertIsNotNone(stats_match, "stats block missing")
+        stats = stats_match.group(1)
+        self.assertIn("Linked to recipe", stats)
+        self.assertIn(">2<", stats)
+        self.assertIn("Unlinked", stats)
+        self.assertIn(">1<", stats)
+
     def test_detail_shows_linked_recipe_and_unlinked_suggestions(self):
         linked = SaleProduct.objects.create(
             name="Apple Waste Sourdough (Loose)", price=Decimal("2.20"),
