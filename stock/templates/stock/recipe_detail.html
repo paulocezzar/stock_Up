@@ -106,12 +106,11 @@ field couldn't express.
 <p class="muted" style="margin:-10px 0 14px;font-size:12px">Used in: {% for p in parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
 {% endif %}
 
+{% if recipe.cook_loss_pct is not None %}
 <div class="stats">
-  {% if recipe.deposit_weight_g is not None %}<div class="stat"><div class="k">Deposit weight</div><div class="v">{{ recipe.deposit_weight_g|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">g</span></div></div>{% endif %}
-  {% if recipe.finished_weight_g is not None %}<div class="stat"><div class="k">Finished weight</div><div class="v">{{ recipe.finished_weight_g|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">g</span></div></div>{% endif %}
-  {% if recipe.cook_loss_pct is not None %}<div class="stat"><div class="k">Cook loss</div><div class="v">{{ recipe.cook_loss_pct|floatformat:2 }}%</div></div>{% endif %}
-  <div class="stat"><div class="k">Lines</div><div class="v">{{ recipe.lines.count }}</div></div>
+  <div class="stat"><div class="k">Cook loss</div><div class="v">{{ recipe.cook_loss_pct|floatformat:2 }}%</div></div>
 </div>
+{% endif %}
 
 <div class="view-toggle" role="tablist">
   <a href="{% url 'recipe_detail' recipe.pk %}" class="{% if view_mode == 'structure' %}on{% endif %}">Structure</a>

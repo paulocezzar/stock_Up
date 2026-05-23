@@ -15,3 +15,9 @@ fi
 # import_ingredients is idempotent (keyed on NPD-I code) - safe to run on
 # every deploy to keep the ingredient master + pack weights in sync.
 python manage.py import_ingredients data/ingredients.xlsx
+
+# import_packaging is the same shape (idempotent on NPD-P code). Packaging
+# items land as Products in the "packaging" category and reuse the existing
+# stocktake / delivery / reorder machinery; a RESET_STOCK wipe clears them
+# alongside everything else because they're rows in the Product table.
+python manage.py import_packaging data/packaging.xlsx

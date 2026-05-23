@@ -44,6 +44,7 @@ class Product(models.Model):
         ("dairy_eggs", "Dairy & Eggs"),
         ("frozen_goods", "Frozen Goods"),
         ("fruit_veg", "Fruit & Veg"),
+        ("packaging", "Packaging"),
         ("unassigned", "Unassigned"),
     ]
     department = models.ForeignKey("Department", related_name="products",

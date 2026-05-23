@@ -3398,3 +3398,195 @@ class RecipesByProductTreeTests(TestCase):
         # The page itself renders without timing out
         r = self.client.get("/recipes/")
         self.assertEqual(r.status_code, 200)
+
+
+# ----------------------------------------------------------------------
+# Packaging import + view
+# ----------------------------------------------------------------------
+
+PACKAGING_XLSX = "data/packaging.xlsx"
+
+
+class PackagingImportTests(TestCase):
+    """The real data/packaging.xlsx imports as 86 Products in the new
+    Packaging category, with pack sizes + supplier prices resolved."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+        cls.dept = Department.objects.create(name="Bakery")
+        call_command("import_packaging", PACKAGING_XLSX, "--department", "Bakery")
+
+    def test_imports_eighty_six_packaging_items(self):
+        # Spec: the sample workbook has 86 NPD-P rows.
+        items = Product.objects.filter(category="packaging")
+        self.assertEqual(items.count(), 86)
+        # All have an NPD-P code
+        for code in items.values_list("code", flat=True):
+            self.assertTrue(code.startswith("NPD-P"), code)
+
+    def test_npd_p25_pack_size_and_price(self):
+        # NPD-P25: 1000 Each per Box at £110.12 → pack_weight=1000, pack_price=110.12.
+        p = Product.objects.get(code="NPD-P25")
+        self.assertEqual(p.category, "packaging")
+        self.assertEqual(p.unit, "ea")
+        self.assertEqual(p.name, "Vacuum Pouch 400x500mm")
+        sp = p.prices.get()
+        self.assertEqual(sp.pack_weight, Decimal("1000.00"))
+        self.assertEqual(sp.pack_price, Decimal("110.12"))
+
+    def test_primary_supplier_resolves_via_reference_tab(self):
+        # NPD-P25's primary is S43, which the Reference tab maps to "Alliance".
+        p = Product.objects.get(code="NPD-P25")
+        self.assertEqual(p.prices.get().supplier.name, "Alliance")
+        # The supplier row exists once (no duplicates from supplier resolution)
+        self.assertEqual(Supplier.objects.filter(name="Alliance").count(), 1)
+
+    def test_idempotent_reimport(self):
+        from django.core.management import call_command
+        before_items = Product.objects.filter(category="packaging").count()
+        before_prices = SupplierPrice.objects.filter(
+            product__category="packaging").count()
+        call_command("import_packaging", PACKAGING_XLSX)
+        self.assertEqual(Product.objects.filter(category="packaging").count(),
+                         before_items)
+        # Re-running doesn't pile up history rows (it updates the existing
+        # SupplierPrice row in place per the import_ingredients pattern).
+        self.assertEqual(SupplierPrice.objects.filter(
+            product__category="packaging").count(), before_prices)
+        # NPD-P25 still has its single price at £110.12
+        p = Product.objects.get(code="NPD-P25")
+        self.assertEqual(p.prices.count(), 1)
+        self.assertEqual(p.prices.get().pack_price, Decimal("110.12"))
+
+    def test_cheapest_price_per_1000_works_for_packaging(self):
+        # The existing £/1000 maths must keep working for packaging units.
+        # NPD-P25: £110.12 / 1000 ea * 1000 = £110.12 per 1000 each.
+        p = Product.objects.get(code="NPD-P25")
+        cheapest = p.cheapest_price
+        self.assertIsNotNone(cheapest)
+        self.assertEqual(cheapest.per_1000, Decimal("110.1200"))
+
+    def test_packaging_value_flows_through_stocktake_logic(self):
+        # Existing StockLine.value (= count * pack_price) must still apply
+        # because packaging items are just Products in a category.
+        p = Product.objects.get(code="NPD-P25")
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date.today())
+        line = StockLine.objects.create(stocktake=st, product=p,
+                                        current=Decimal("3"))
+        # 3 boxes × £110.12 = £330.36
+        self.assertEqual(line.value, Decimal("330.36"))
+
+    def test_flagged_items_still_import_as_products_just_without_price(self):
+        # The 3 items the importer flags (no supplier) still exist as
+        # Product rows so they appear in the packaging list — just with no
+        # SupplierPrice attached.
+        p = Product.objects.get(code="NPD-P67")  # 125C Lid Wooden Spoon
+        self.assertEqual(p.category, "packaging")
+        self.assertFalse(p.prices.exists())
+
+
+class PackagingViewTests(TestCase):
+    """The Packaging list page + sub-nav + ingredient-list filter."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # One of each category
+        self.flour = Product.objects.create(
+            code="NPD-I999", name="Flour", department=self.dept,
+            category="dry_goods", unit="g", minimum=0)
+        self.box = Product.objects.create(
+            code="NPD-P999", name="Box", department=self.dept,
+            category="packaging", unit="ea", minimum=0)
+
+    def test_packaging_page_lists_only_packaging_category(self):
+        r = self.client.get("/packaging/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("NPD-P999", body)
+        self.assertIn("Box", body)
+        # Flour (an ingredient) does NOT appear
+        self.assertNotIn("NPD-I999", body)
+
+    def test_ingredients_page_excludes_packaging(self):
+        r = self.client.get("/products/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Flour appears, Box does NOT
+        self.assertIn("NPD-I999", body)
+        self.assertNotIn("NPD-P999", body)
+
+    def test_stock_navbar_has_packaging_link(self):
+        r = self.client.get("/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertIn(">Packaging<", nav)
+        self.assertIn('href="/packaging/"', nav)
+
+    def test_packaging_page_requires_login(self):
+        c = Client()
+        r = c.get("/packaging/")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/login/", r.headers["Location"])
+
+    def test_packaging_page_is_department_scoped(self):
+        # An item in another department shouldn't show up here.
+        other = Department.objects.create(name="Butchery")
+        Product.objects.create(
+            code="NPD-P888", name="Butcher Bag", department=other,
+            category="packaging", unit="ea", minimum=0)
+        r = self.client.get("/packaging/")
+        self.assertNotIn("NPD-P888", r.content.decode())
+
+
+class RecipeDetailStatsTrimTests(TestCase):
+    """Recipe detail page now shows ONLY the Cook loss stat card —
+    Deposit weight / Finished weight / Lines were removed per spec."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.r = Recipe.objects.create(
+            code="NPD-R900", name="Loaf", department=self.dept,
+            deposit_weight_g=Decimal("660"),
+            finished_weight_g=Decimal("600"),
+            cook_loss_pct=Decimal("9.09"))
+
+    def test_detail_shows_cook_loss_stat(self):
+        r = self.client.get(f"/recipes/{self.r.pk}/")
+        body = r.content.decode()
+        self.assertIn(">Cook loss<", body)
+        self.assertIn("9.09%", body)
+
+    def test_detail_no_longer_shows_deposit_finished_lines_stats(self):
+        r = self.client.get(f"/recipes/{self.r.pk}/")
+        body = r.content.decode()
+        # The stat-card labels are gone (we only check inside the .stats
+        # block so the deposit/finished values can still show elsewhere if
+        # we add them later — but the cards specifically are removed).
+        self.assertNotIn(">Deposit weight<", body)
+        self.assertNotIn(">Finished weight<", body)
+        # ">Lines<" was the stat-card label; it must not appear anymore.
+        # ">Lines</div>" was the exact original markup.
+        self.assertNotIn(">Lines</div>", body)
+
+    def test_detail_omits_stats_block_entirely_when_no_cook_loss(self):
+        # A recipe with no cook loss shouldn't render an empty .stats block.
+        r2 = Recipe.objects.create(
+            code="NPD-R901", name="Plain", department=self.dept,
+            finished_weight_g=Decimal("100"))
+        resp = self.client.get(f"/recipes/{r2.pk}/")
+        body = resp.content.decode()
+        self.assertNotIn(">Cook loss<", body)

@@ -645,9 +645,26 @@ def products(request):
         else:
             messages.success(request, f"Saved '{name}'.")
         return redirect("products")
+    # Ingredients list excludes packaging — packaging has its own page so
+    # the bakery view isn't drowned in NPD-P box/case rows.
     return render(request, "stock/products.html", {
-        "products": dept.products.prefetch_related("prices__supplier"),
+        "products": (dept.products.exclude(category="packaging")
+                     .prefetch_related("prices__supplier")),
         "suppliers": Supplier.objects.all(),
+    })
+
+
+@login_required
+def packaging(request):
+    """Packaging list — the Packaging-category slice of the same Products."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    items = (dept.products.filter(category="packaging")
+             .prefetch_related("prices__supplier"))
+    return render(request, "stock/packaging.html", {
+        "products": items,
+        "n_items": items.count(),
     })
 
 
