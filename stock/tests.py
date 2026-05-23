@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
 from django.utils import timezone
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe, SaleProduct
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -5722,3 +5722,420 @@ class RecipeDeleteEditTests(TestCase):
         r900 = Recipe.objects.get(code="NPD-R900")
         self.assertEqual(r900.lines.count(), 1)
         self.assertEqual(r900.lines.get().ingredient.code, "NPD-I9001")
+
+
+def _build_sale_products_workbook(path):
+    """Write a tiny order-sheet with a Products tab for the import tests.
+
+    Matches the real workbook's column layout exactly: row 0 is the
+    header `Product, Price, Sage No., (blank), Stock Managed, Pack Size`
+    and the data rows fill in those columns. A few products are
+    deliberately constructed to exercise every branch of the auto-
+    linker (Sage hit, exact-name fallback, unlinked, Internal/Retail
+    pair sharing one Sage code).
+    """
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="Products")
+    ws.append(["Product", "Price", "Sage No.", None, "Stock Managed", "Pack Size"])
+    rows = [
+        # Sage-linked pair: Internal + Retail share one Sage code,
+        # both linking to the same recipe.
+        ("Crumble Topped Mince Pies Internal (Pack/6)", 2.25,
+         "660130103", None, None, "1"),
+        ("Crumble Topped Mince Pies Retail (Pack/6)", 7.00,
+         "660130103", None, None, "1"),
+        # Exact-name fallback: no Sage but the name matches a recipe.
+        ("Apple Waste Sourdough (Loose)", 2.20,
+         None, None, None, "1"),
+        # Sage code present but no recipe with that code.
+        ("Sourdough Surprise", 3.50,
+         "999999999", None, None, "1"),
+        # Nothing to link to — should NOT be fuzzy-auto-linked.
+        ("Mystery Loaf (Pack/2)", 4.00,
+         None, None, None, "2"),
+    ]
+    for r in rows:
+        ws.append(list(r))
+    wb.save(path)
+
+
+class SaleProductsImportTests(TestCase):
+    """import_sale_products end-to-end through the management command."""
+
+    def setUp(self):
+        import os
+        import tempfile
+        self.dept = Department.objects.create(name="Bakery")
+        # Recipes the auto-linker should target.
+        self.mince_recipe = Recipe.objects.create(
+            code="NPD-R655", name="Crumble Topped Mince Pie",
+            department=self.dept)
+        # The mince pie products carry Sage code 660130103 — register
+        # that as the recipe's code for the Sage match.
+        Recipe.objects.create(
+            code="660130103", name="Mince Pie SKU shadow",
+            department=self.dept)
+        # Exact-name match target (matches "Apple Waste Sourdough (Loose)").
+        self.apple_recipe = Recipe.objects.create(
+            code="NPD-R800", name="Apple Waste Sourdough (Loose)",
+            department=self.dept)
+        fd, self.path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        _build_sale_products_workbook(self.path)
+
+    def tearDown(self):
+        import os
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+    def test_import_creates_sale_products_with_prices(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        # Every workbook row landed.
+        self.assertEqual(SaleProduct.objects.count(), 5)
+        p = SaleProduct.objects.get(
+            name="Crumble Topped Mince Pies Retail (Pack/6)")
+        self.assertEqual(p.price, Decimal("7.00"))
+        self.assertEqual(p.pack_size, "1")
+        self.assertEqual(p.sage_number, "660130103")
+
+    def test_sage_match_auto_links_and_confirms(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        internal = SaleProduct.objects.get(
+            name="Crumble Topped Mince Pies Internal (Pack/6)")
+        retail = SaleProduct.objects.get(
+            name="Crumble Topped Mince Pies Retail (Pack/6)")
+        for sp in (internal, retail):
+            self.assertEqual(sp.link_source, SaleProduct.SAGE)
+            self.assertTrue(sp.link_confirmed)
+            self.assertEqual(sp.recipe.code, "660130103")
+
+    def test_internal_and_retail_link_to_the_same_recipe(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        internal = SaleProduct.objects.get(
+            name="Crumble Topped Mince Pies Internal (Pack/6)")
+        retail = SaleProduct.objects.get(
+            name="Crumble Topped Mince Pies Retail (Pack/6)")
+        self.assertEqual(internal.recipe_id, retail.recipe_id)
+
+    def test_exact_name_match_used_when_no_sage(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        apple = SaleProduct.objects.get(name="Apple Waste Sourdough (Loose)")
+        self.assertEqual(apple.recipe, self.apple_recipe)
+        self.assertEqual(apple.link_source, SaleProduct.NAME)
+        self.assertTrue(apple.link_confirmed)
+
+    def test_product_with_no_sage_or_name_match_stays_unlinked(self):
+        # The "Mystery Loaf" doesn't have a Sage match or an exact name
+        # match. It must NOT be fuzzy-auto-linked (the link-review
+        # screen is the only place for the operator to confirm a
+        # fuzzy suggestion).
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        mystery = SaleProduct.objects.get(name="Mystery Loaf (Pack/2)")
+        self.assertIsNone(mystery.recipe)
+        self.assertEqual(mystery.link_source, SaleProduct.NONE)
+        self.assertFalse(mystery.link_confirmed)
+
+    def test_unknown_sage_code_stays_unlinked(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        # "Sourdough Surprise" carries Sage 999999999 (no recipe with
+        # that code) and its name doesn't exactly match a recipe → unlinked.
+        sp = SaleProduct.objects.get(name="Sourdough Surprise")
+        self.assertIsNone(sp.recipe)
+        self.assertEqual(sp.link_source, SaleProduct.NONE)
+
+    def test_import_is_idempotent_and_does_not_overwrite_name(self):
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        n1 = SaleProduct.objects.count()
+        # Re-run — same workbook → same rows, no duplicates.
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        self.assertEqual(SaleProduct.objects.count(), n1)
+        # Apple sale product's NAME stays the operator's source-of-truth
+        # value (not overwritten by the linked recipe's name even though
+        # they happen to match here).
+        apple = SaleProduct.objects.get(name="Apple Waste Sourdough (Loose)")
+        self.assertEqual(apple.name, "Apple Waste Sourdough (Loose)")
+
+    def test_stock_managed_column_is_ignored(self):
+        # The "Stock Managed" column at index 4 carries unrelated
+        # values; the importer must ignore it entirely (no field on
+        # SaleProduct carries that data).
+        from django.core.management import call_command
+        # Rewrite the workbook with a non-empty Stock Managed column.
+        from openpyxl import Workbook
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet(title="Products")
+        ws.append(["Product", "Price", "Sage No.", None,
+                   "Stock Managed", "Pack Size"])
+        ws.append(["Test SKU", 1.5, None, None, "Scone", "1"])
+        wb.save(self.path)
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        sp = SaleProduct.objects.get(name="Test SKU")
+        # No field stores "Scone" anywhere.
+        self.assertNotIn("Scone", (
+            sp.sage_number, sp.pack_size, sp.name))
+
+    def test_manual_link_survives_reimport(self):
+        # Pretend the operator went into the UI and manually linked
+        # "Sourdough Surprise" to Apple recipe. The next import must
+        # NOT clear it (Sourdough Surprise's Sage code 999999999 still
+        # doesn't match any recipe, so the auto-linker would otherwise
+        # set link_source=none, recipe=None).
+        from django.core.management import call_command
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        sp = SaleProduct.objects.get(name="Sourdough Surprise")
+        sp.recipe = self.apple_recipe
+        sp.link_source = SaleProduct.MANUAL
+        sp.link_confirmed = True
+        sp.save()
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        sp.refresh_from_db()
+        self.assertEqual(sp.recipe, self.apple_recipe)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+        self.assertTrue(sp.link_confirmed)
+
+    def test_manual_entry_row_skipped_by_importer(self):
+        # A hand-created SaleProduct whose name happens to be in the
+        # workbook is left entirely alone (is_manual_entry=True).
+        from django.core.management import call_command
+        SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)",
+            price=Decimal("99.99"), department=self.dept,
+            is_manual_entry=True)
+        call_command("import_sale_products", self.path,
+                     "--department", "Bakery")
+        sp = SaleProduct.objects.get(name="Apple Waste Sourdough (Loose)")
+        # Price untouched (would have been 2.20 from the workbook).
+        self.assertEqual(sp.price, Decimal("99.99"))
+        self.assertTrue(sp.is_manual_entry)
+
+
+class SaleProductsViewsTests(TestCase):
+    """Products section: nav, list, detail, CRUD, link review."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.other_dept = Department.objects.create(name="Butchery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Two recipes for fuzzy + manual linking tests.
+        self.apple = Recipe.objects.create(
+            code="NPD-R800", name="Apple Waste Sourdough (Loose)",
+            department=self.dept)
+        self.mince = Recipe.objects.create(
+            code="NPD-R655", name="Crumble Topped Mince Pie",
+            department=self.dept)
+
+    def test_home_page_top_nav_lists_products(self):
+        # The Products link sits between Customers and Production in
+        # the top-level nav rendered on the Home page.
+        r = self.client.get("/home/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        cust_pos = nav.find(">Customers<")
+        prod_pos = nav.find(">Products<")
+        prodn_pos = nav.find(">Production<")
+        self.assertGreater(prod_pos, -1, "Products link missing from nav")
+        self.assertGreater(cust_pos, -1)
+        self.assertGreater(prodn_pos, -1)
+        self.assertLess(cust_pos, prod_pos)
+        self.assertLess(prod_pos, prodn_pos)
+
+    def test_products_list_renders_with_filter_and_actions(self):
+        SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)", price=Decimal("2.20"),
+            department=self.dept, recipe=self.apple,
+            link_source=SaleProduct.NAME, link_confirmed=True)
+        SaleProduct.objects.create(
+            name="Mystery Loaf", department=self.dept)
+        r = self.client.get("/sale-products/")
+        body = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Apple Waste Sourdough (Loose)", body)
+        self.assertIn("Mystery Loaf", body)
+        self.assertIn("Link review", body)
+        # Per-row edit + delete actions present.
+        self.assertIn("sale-products/", body)
+        self.assertIn("edit", body.lower())
+        self.assertIn("delete", body.lower())
+
+    def test_detail_shows_linked_recipe_and_unlinked_suggestions(self):
+        linked = SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)", price=Decimal("2.20"),
+            department=self.dept, recipe=self.apple,
+            link_source=SaleProduct.SAGE, link_confirmed=True)
+        unlinked = SaleProduct.objects.create(
+            name="Crumble Topped Mince Pies Retail (Pack/6)",
+            department=self.dept)
+        # Linked: shows recipe link, no suggestions list.
+        body = self.client.get(f"/sale-products/{linked.pk}/").content.decode()
+        self.assertIn(f'href="/recipes/{self.apple.pk}/"', body)
+        self.assertIn("matched by Sage No.", body)
+        # Unlinked: suggestions surface the mince recipe (the fuzzy
+        # ratio between the names is comfortably above the threshold).
+        body = self.client.get(f"/sale-products/{unlinked.pk}/").content.decode()
+        self.assertIn("Suggested by name similarity", body)
+        self.assertIn("NPD-R655", body)
+
+    def test_create_rejects_duplicate_name(self):
+        SaleProduct.objects.create(name="Existing", department=self.dept)
+        resp = self.client.post("/sale-products/new/", {
+            "name": "EXISTING", "price": "1.0",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"already exists", resp.content)
+        self.assertEqual(SaleProduct.objects.filter(
+            name__iexact="EXISTING").count(), 1)
+
+    def test_create_sets_manual_link_when_recipe_picked(self):
+        resp = self.client.post("/sale-products/new/", {
+            "name": "Brand New SKU", "price": "3.50",
+            "recipe_id": str(self.apple.pk),
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp = SaleProduct.objects.get(name="Brand New SKU")
+        self.assertEqual(sp.recipe, self.apple)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+        self.assertTrue(sp.link_confirmed)
+        self.assertTrue(sp.is_manual_entry)
+
+    def test_edit_changing_recipe_flips_link_source_to_manual(self):
+        sp = SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)", department=self.dept,
+            recipe=self.apple, link_source=SaleProduct.NAME,
+            link_confirmed=True)
+        resp = self.client.post(f"/sale-products/{sp.pk}/edit/", {
+            "name": sp.name, "price": "",
+            "sage_number": "", "pack_size": "",
+            "recipe_id": str(self.mince.pk),
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp.refresh_from_db()
+        self.assertEqual(sp.recipe, self.mince)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+
+    def test_delete_removes_the_row(self):
+        sp = SaleProduct.objects.create(name="To Delete", department=self.dept)
+        resp = self.client.post(f"/sale-products/{sp.pk}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(SaleProduct.objects.filter(name="To Delete").exists())
+
+    def test_link_review_shows_fuzzy_suggestions(self):
+        # An unlinked product with a fuzzy match against an active
+        # recipe surfaces on the link-review page with a "confirm"
+        # button.
+        sp = SaleProduct.objects.create(
+            name="Crumble Topped Mince Pies Retail (Pack/6)",
+            department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn(sp.name, body)
+        self.assertIn("NPD-R655", body)
+        # Confirm form posts to the link-set endpoint with this recipe.
+        self.assertIn(f'action="/sale-products/{sp.pk}/link/"', body)
+        self.assertIn(f'value="{self.mince.pk}"', body)
+
+    def test_link_set_confirms_a_suggestion_as_manual(self):
+        sp = SaleProduct.objects.create(name="Mystery", department=self.dept)
+        resp = self.client.post(f"/sale-products/{sp.pk}/link/", {
+            "recipe_id": str(self.mince.pk),
+        })
+        self.assertEqual(resp.status_code, 302)
+        sp.refresh_from_db()
+        self.assertEqual(sp.recipe, self.mince)
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+        self.assertTrue(sp.link_confirmed)
+
+    def test_link_set_unlink_clears_recipe_and_flags_manual(self):
+        sp = SaleProduct.objects.create(
+            name="Already linked", department=self.dept,
+            recipe=self.mince, link_source=SaleProduct.SAGE,
+            link_confirmed=True)
+        resp = self.client.post(f"/sale-products/{sp.pk}/link/",
+                                {"recipe_id": ""})
+        self.assertEqual(resp.status_code, 302)
+        sp.refresh_from_db()
+        self.assertIsNone(sp.recipe)
+        # The deliberate "no link" decision is a manual override too —
+        # the next deploy's auto-linker won't re-attach.
+        self.assertEqual(sp.link_source, SaleProduct.MANUAL)
+
+    def test_bulk_confirm_sage_matches_promotes_to_manual(self):
+        a = SaleProduct.objects.create(
+            name="Sage A", department=self.dept,
+            recipe=self.apple, link_source=SaleProduct.SAGE,
+            link_confirmed=True)
+        b = SaleProduct.objects.create(
+            name="Sage B", department=self.dept,
+            recipe=self.mince, link_source=SaleProduct.SAGE,
+            link_confirmed=True)
+        # Untouched: a name-matched row.
+        c = SaleProduct.objects.create(
+            name="Name C", department=self.dept,
+            recipe=self.mince, link_source=SaleProduct.NAME,
+            link_confirmed=True)
+        resp = self.client.post("/sale-products/confirm-sage/")
+        self.assertEqual(resp.status_code, 302)
+        a.refresh_from_db(); b.refresh_from_db(); c.refresh_from_db()
+        self.assertEqual(a.link_source, SaleProduct.MANUAL)
+        self.assertEqual(b.link_source, SaleProduct.MANUAL)
+        # Name-matched row was NOT touched.
+        self.assertEqual(c.link_source, SaleProduct.NAME)
+
+    def test_cross_department_actions_return_403(self):
+        sp = SaleProduct.objects.create(
+            name="Theirs", department=self.other_dept)
+        for url in (f"/sale-products/{sp.pk}/",
+                    f"/sale-products/{sp.pk}/edit/"):
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 403)
+        r = self.client.post(f"/sale-products/{sp.pk}/delete/")
+        self.assertEqual(r.status_code, 403)
+        r = self.client.post(f"/sale-products/{sp.pk}/link/",
+                             {"recipe_id": str(self.mince.pk)})
+        self.assertEqual(r.status_code, 403)
+        sp.refresh_from_db()
+        self.assertEqual(sp.name, "Theirs")
+        self.assertIsNone(sp.recipe)
+
+    def test_anonymous_access_requires_login(self):
+        anon = Client()
+        for path in ("/sale-products/", "/sale-products/new/",
+                     "/sale-products/link-review/"):
+            r = anon.get(path)
+            self.assertEqual(r.status_code, 302)
+            self.assertIn("/login/", r.headers["Location"])
+
+    def test_existing_ingredients_route_untouched(self):
+        # The legacy /products/ route is the INGREDIENT catalogue —
+        # adding the Products SECTION must not break it.
+        r = self.client.get("/products/")
+        self.assertEqual(r.status_code, 200)
+        # And it shouldn't accidentally include sale-product UI bits.
+        body = r.content.decode()
+        self.assertNotIn("/sale-products/", body)

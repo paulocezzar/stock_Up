@@ -433,6 +433,72 @@ class Customer(models.Model):
         return self.name
 
 
+class SaleProduct(models.Model):
+    """A sellable SKU on the bakery order sheet — DISTINCT from `Product`.
+
+    The legacy ``Product`` model is the ingredient master (NPD-I codes,
+    packs, supplier prices). ``SaleProduct`` is what the bakery actually
+    sells: line items in the order sheet ("Apple Waste Sourdough
+    (Loose)", "Croissant (Pack/4)", "Mince Pies Internal (Pack/6)"). A
+    sale product is linked to a single ``Recipe`` (the bill of
+    materials), but a single recipe can back many sale products —
+    Internal vs Retail, Loose vs Pack/N, different sizes.
+
+    Identity is the verbatim imported name (case-insensitive on lookup,
+    case-preserved on display). The name is NEVER overwritten by the
+    recipe name — the order sheet is authoritative.
+
+    ``link_source`` records how the recipe link was established:
+      * ``sage`` — product.sage_number matched a Recipe.code exactly.
+                   Auto-confirmed (Sage codes are reliable).
+      * ``name`` — product.name matched a recipe.name exactly
+                   (case-insensitive). Auto-confirmed.
+      * ``manual`` — the operator picked the recipe in the UI. NEVER
+                     overwritten by import.
+      * ``none`` — unlinked. The link-review page surfaces fuzzy
+                   suggestions for the operator to confirm.
+
+    ``link_confirmed`` is the green-tick state in the review UI; it's
+    True for both Sage and exact-name matches plus any manual pick.
+    ``is_manual_entry`` is the same pattern as Customer: a hand-created
+    SaleProduct that the importer should never touch.
+    """
+    SAGE = "sage"
+    NAME = "name"
+    MANUAL = "manual"
+    NONE = "none"
+    LINK_SOURCE_CHOICES = [
+        (SAGE, "Sage No. match"),
+        (NAME, "Exact name match"),
+        (MANUAL, "Manually linked"),
+        (NONE, "Not linked"),
+    ]
+
+    name = models.CharField(max_length=200, unique=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    sage_number = models.CharField(max_length=40, blank=True)
+    pack_size = models.CharField(max_length=40, blank=True)
+    recipe = models.ForeignKey(
+        "Recipe", related_name="sale_products",
+        on_delete=models.SET_NULL, null=True, blank=True)
+    link_source = models.CharField(
+        max_length=10, choices=LINK_SOURCE_CHOICES, default=NONE)
+    link_confirmed = models.BooleanField(default=False)
+    department = models.ForeignKey(
+        "Department", related_name="sale_products",
+        on_delete=models.CASCADE, null=True, blank=True)
+    active = models.BooleanField(default=True)
+    is_manual_entry = models.BooleanField(default=False)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class RecipeCycleError(Exception):
     """A recipe would (transitively) contain itself."""
 

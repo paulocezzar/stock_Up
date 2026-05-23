@@ -1,0 +1,84 @@
+{% extends "stock/_section_products.html" %}
+{% block body %}
+<style>
+  .kv{display:grid;grid-template-columns:max-content 1fr;column-gap:14px;row-gap:6px;margin:0}
+  .kv dt{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .kv dd{margin:0}
+  .link-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;display:inline-block;margin-left:8px;vertical-align:middle}
+  .link-tag.sage{color:var(--green);border-color:var(--green)}
+  .link-tag.name{color:var(--amber);border-color:var(--amber)}
+  .link-tag.manual{color:var(--amber);border-color:var(--amber);border-style:dashed}
+  .link-tag.none{color:var(--red);border-color:var(--red)}
+</style>
+
+<h2>{{ product.name }}
+  {% if product.is_manual_entry %}<span class="link-tag manual" title="Hand-created — importer leaves it alone">hand-created</span>{% endif %}
+</h2>
+
+<p style="margin:-8px 0 14px">
+  <a href="{% url 'sale_product_edit' product.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  &nbsp;
+  <form method="post" action="{% url 'sale_product_delete' product.pk %}" style="display:inline"
+        onsubmit="return confirm('Delete {{ product.name|escapejs }}? This can\'t be undone.')">{% csrf_token %}
+    <button class="btn ghost" style="padding:4px 12px">delete</button>
+  </form>
+</p>
+
+<div class="card"><h3>Details</h3>
+<dl class="kv">
+  <dt>Name</dt><dd>{{ product.name }} <span class="muted" style="font-size:11px">(verbatim from order sheet — never overwritten)</span></dd>
+  <dt>Price</dt><dd>{% if product.price is not None %}£{{ product.price }}{% else %}—{% endif %}</dd>
+  <dt>Sage No.</dt><dd>{{ product.sage_number|default:"—" }}</dd>
+  <dt>Pack size</dt><dd>{{ product.pack_size|default:"—" }}</dd>
+  <dt>Department</dt><dd>{{ product.department.name|default:"—" }}</dd>
+</dl>
+</div>
+
+<div class="card"><h3>Linked recipe</h3>
+{% if product.recipe %}
+  <p>
+    <a href="{% url 'recipe_detail' product.recipe.pk %}"><code>{{ product.recipe.code }}</code> — {{ product.recipe.name }}</a>
+    <span class="link-tag {{ product.link_source }}">
+      {% if product.link_source == 'sage' %}matched by Sage No.{% elif product.link_source == 'name' %}matched by exact name{% elif product.link_source == 'manual' %}linked manually{% endif %}
+    </span>
+  </p>
+  <form method="post" action="{% url 'sale_product_link_set' product.pk %}" style="margin:10px 0 0">{% csrf_token %}
+    <input type="hidden" name="recipe_id" value="">
+    <input type="hidden" name="next" value="{% url 'sale_product_detail' product.pk %}">
+    <button class="btn ghost" type="submit" style="padding:4px 12px">unlink recipe</button>
+  </form>
+{% else %}
+  <p>This product isn't linked to a recipe yet. <span class="link-tag none">unlinked</span></p>
+  {% if suggestions %}
+    <p class="muted" style="margin:14px 0 6px">Suggested by name similarity — click to link:</p>
+    <table>
+      <thead><tr><th>Recipe</th><th>Similarity</th><th></th></tr></thead>
+      <tbody>
+      {% for s in suggestions %}
+        <tr>
+          <td><a href="{% url 'recipe_detail' s.recipe.pk %}"><code>{{ s.recipe.code }}</code> — {{ s.recipe.name }}</a></td>
+          <td>{{ s.percent }}%</td>
+          <td>
+            <form method="post" action="{% url 'sale_product_link_set' product.pk %}" style="display:inline">{% csrf_token %}
+              <input type="hidden" name="recipe_id" value="{{ s.recipe.pk }}">
+              <input type="hidden" name="next" value="{% url 'sale_product_detail' product.pk %}">
+              <button class="btn" type="submit" style="padding:4px 12px">confirm link</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No close-enough name matches. Use <a href="{% url 'sale_product_edit' product.pk %}">edit</a> to pick a recipe from the full list.</p>
+  {% endif %}
+{% endif %}
+</div>
+
+<p>
+  <a href="{% url 'sale_products' %}">← all products</a>
+  &nbsp;·&nbsp;
+  <a href="{% url 'sale_product_link_review' %}">link review →</a>
+</p>
+{% endblock %}

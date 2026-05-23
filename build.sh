@@ -40,3 +40,13 @@ python manage.py import_customers data/order_sheet.xlsm
 # uploads still go through /recipes/upload/.
 python manage.py import_recipes_bulk data/recipes_bulk_93.xlsx \
     || echo "import_recipes_bulk had errors; continuing deploy."
+
+# import_sale_products reads the "Products" tab of the order-sheet
+# workbook and creates / refreshes SaleProduct rows (the sellable SKUs —
+# distinct from the ingredient Product model). Runs AFTER the recipe
+# import so the auto-linker has recipes to match against on a first-
+# ever deploy. Idempotent on name. Preserves manual recipe links and
+# hand-created rows the same way import_customers does. Auto-links
+# first by Sage No., then by exact name; ambiguous matches surface in
+# the Products → Link review screen for the operator to confirm.
+python manage.py import_sale_products data/order_sheet.xlsm

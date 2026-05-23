@@ -1,0 +1,68 @@
+{% extends "stock/_section_products.html" %}
+{% block n_sp_list %}on{% endblock %}
+{% block body %}
+<style>
+  .link-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;display:inline-block;margin-left:6px}
+  .link-tag.sage{color:var(--green);border-color:var(--green)}
+  .link-tag.name{color:var(--amber);border-color:var(--amber)}
+  .link-tag.manual{color:var(--amber);border-color:var(--amber);border-style:dashed}
+  .link-tag.none{color:var(--red);border-color:var(--red)}
+</style>
+
+<h2>Products <span class="muted" style="font-size:14px">{{ products|length }} in this department</span></h2>
+
+<p style="margin:-8px 0 14px">
+  <a href="{% url 'sale_product_new' %}" class="btn">+ Add product</a>
+  &nbsp;<a href="{% url 'sale_product_link_review' %}" class="btn ghost" style="padding:6px 14px">Link review{% if n_unlinked %} ({{ n_unlinked }} unlinked){% endif %}</a>
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="k">Total</div><div class="v">{{ products|length }}</div></div>
+  <div class="stat"><div class="k">Linked to recipe</div><div class="v">{{ n_linked }}</div></div>
+  {% if n_unlinked %}<div class="stat warn"><div class="k">Unlinked</div><div class="v">{{ n_unlinked }}</div></div>{% endif %}
+  {% if n_unconfirmed %}<div class="stat warn"><div class="k">Needs confirming</div><div class="v">{{ n_unconfirmed }}</div></div>{% endif %}
+</div>
+
+<div class="filter">
+  <input type="search" placeholder="filter by name, Sage no., or recipe…" data-filter="sp-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+
+<table id="sp-tbl">
+  <thead><tr>
+    <th>Name</th><th class="num">Price</th><th>Pack</th><th>Sage No.</th>
+    <th>Linked recipe</th><th></th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr data-search="{{ p.name|lower }} {{ p.sage_number|lower }} {% if p.recipe %}{{ p.recipe.code|lower }} {{ p.recipe.name|lower }}{% endif %}">
+      <td>
+        <a href="{% url 'sale_product_detail' p.pk %}">{{ p.name }}</a>
+        {% if p.is_manual_entry %}<span class="muted" title="Hand-created — importer leaves it alone">·M</span>{% endif %}
+      </td>
+      <td class="num">{% if p.price is not None %}£{{ p.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ p.pack_size|default:"—" }}</td>
+      <td>{{ p.sage_number|default:"—" }}</td>
+      <td>
+        {% if p.recipe %}
+          <a href="{% url 'recipe_detail' p.recipe.pk %}">{{ p.recipe.code }} — {{ p.recipe.name }}</a>
+          <span class="link-tag {{ p.link_source }}">{% if p.link_source == 'sage' %}sage{% elif p.link_source == 'name' %}name{% elif p.link_source == 'manual' %}manual{% endif %}</span>
+        {% else %}
+          <span class="muted">— not linked —</span>
+          <span class="link-tag none">unlinked</span>
+        {% endif %}
+      </td>
+      <td><a href="{% url 'sale_product_edit' p.pk %}">edit →</a></td>
+      <td><form method="post" action="{% url 'sale_product_delete' p.pk %}" style="display:inline" onsubmit="return confirm('Delete {{ p.name|escapejs }}?')">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">delete</button></form></td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="7" class="muted">No sale products yet — run <code>import_sale_products</code> or click "+ Add product".</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<p class="muted" style="font-size:12px;margin:14px 0 0">
+  Products are the SKUs the bakery sells. Each links to a single Recipe (the bill of materials) — many products may share one recipe (Internal vs Retail, Loose vs Pack/N). The product name is taken verbatim from the order sheet and never overwritten by the recipe name.
+</p>
+{% endblock %}

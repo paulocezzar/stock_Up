@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe, SaleProduct
 from .ai_extract import extract_lines, auto_match, ExtractError
 from .recipe_import import (
     parse_recipe_workbook, parse_recipe_workbook_bulk,
@@ -1806,3 +1806,327 @@ def customer_delete(request, pk):
     customer.delete()
     messages.success(request, f"Deleted customer '{name}'.")
     return redirect(list_url)
+
+
+# ---- sale products (sellable SKUs, distinct from ingredient Products) ----
+def _sale_product_qs(dept):
+    return (SaleProduct.objects.filter(department=dept)
+            .select_related("recipe")
+            .order_by("name"))
+
+
+def _recipe_suggestions(name, all_recipes, *, n=5, threshold=0.5):
+    """Top-N fuzzy recipe matches for a sale product name.
+
+    Uses difflib.SequenceMatcher ratios against each recipe's name
+    (case-insensitive, trimmed). Returns a list of
+    ``{recipe, ratio, percent}`` dicts, highest ratio first, capped at
+    ``n``. ``threshold`` is the minimum ratio to surface — too low
+    floods the review page with noise; default 0.5 is "vaguely
+    related".
+    """
+    from difflib import SequenceMatcher
+    target = (name or "").strip().lower()
+    if not target:
+        return []
+    scored = []
+    for r in all_recipes:
+        rn = (r.name or "").strip().lower()
+        if not rn:
+            continue
+        ratio = SequenceMatcher(None, target, rn).ratio()
+        if ratio < threshold:
+            continue
+        scored.append({"recipe": r, "ratio": ratio,
+                       "percent": int(round(ratio * 100))})
+    scored.sort(key=lambda x: x["ratio"], reverse=True)
+    return scored[:n]
+
+
+@login_required
+def sale_products(request):
+    """Sale products list — the default landing for the Products section."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    products = list(_sale_product_qs(dept))
+    n_linked = sum(1 for p in products if p.recipe_id)
+    n_unlinked = sum(1 for p in products if not p.recipe_id)
+    n_unconfirmed = sum(1 for p in products
+                        if p.recipe_id and not p.link_confirmed)
+    return render(request, "stock/sale_products.html", {
+        "products": products,
+        "n_linked": n_linked,
+        "n_unlinked": n_unlinked,
+        "n_unconfirmed": n_unconfirmed,
+    })
+
+
+@login_required
+def sale_product_detail(request, pk):
+    product = get_object_or_404(SaleProduct, pk=pk)
+    if product.department and not product.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    suggestions = []
+    if not product.recipe_id:
+        all_recipes = list(Recipe.objects.filter(archived=False))
+        suggestions = _recipe_suggestions(product.name, all_recipes)
+    return render(request, "stock/sale_product_detail.html", {
+        "product": product,
+        "suggestions": suggestions,
+    })
+
+
+def _sale_product_form_context(form, mode, product=None, error=None,
+                                recipes=None):
+    return {
+        "form": form,
+        "mode": mode,
+        "product": product,
+        "error": error,
+        "recipes": recipes if recipes is not None else [],
+    }
+
+
+def _parse_price(s):
+    s = (s or "").strip()
+    if s == "":
+        return None
+    try:
+        return Decimal(s)
+    except InvalidOperation:
+        return None
+
+
+@login_required
+def sale_product_new(request):
+    """Create a sale product by hand.
+
+    Hand-created rows are flagged ``is_manual_entry=True`` so the
+    deploy-time importer never overwrites them — same protection
+    pattern as ``Customer.is_manual_entry``.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
+
+    if request.method == "POST":
+        form = {
+            "name": (request.POST.get("name") or "").strip(),
+            "price": (request.POST.get("price") or "").strip(),
+            "sage_number": (request.POST.get("sage_number") or "").strip(),
+            "pack_size": (request.POST.get("pack_size") or "").strip(),
+            "recipe_id": request.POST.get("recipe_id") or "",
+        }
+        error = None
+        if not form["name"]:
+            error = "Name is required."
+        elif SaleProduct.objects.filter(name__iexact=form["name"]).exists():
+            error = (f"A sale product named '{form['name']}' already "
+                     "exists. Pick a different name.")
+        if error:
+            return render(request, "stock/sale_product_form.html",
+                          _sale_product_form_context(
+                              form, mode="new", error=error, recipes=recipes))
+        recipe = None
+        if form["recipe_id"]:
+            recipe = Recipe.objects.filter(pk=form["recipe_id"]).first()
+        sp = SaleProduct.objects.create(
+            name=form["name"],
+            price=_parse_price(form["price"]),
+            sage_number=form["sage_number"],
+            pack_size=form["pack_size"],
+            recipe=recipe,
+            link_source=SaleProduct.MANUAL if recipe else SaleProduct.NONE,
+            link_confirmed=bool(recipe),
+            department=dept,
+            is_manual_entry=True,
+        )
+        messages.success(request, f"Created sale product '{sp.name}'.")
+        return redirect("sale_product_detail", pk=sp.pk)
+
+    form = {"name": "", "price": "", "sage_number": "",
+            "pack_size": "", "recipe_id": ""}
+    return render(request, "stock/sale_product_form.html",
+                  _sale_product_form_context(form, mode="new", recipes=recipes))
+
+
+@login_required
+def sale_product_edit(request, pk):
+    """Edit a sale product. Setting a recipe flips link_source=manual
+    so the next import won't re-derive (or clear) the link."""
+    product = get_object_or_404(SaleProduct, pk=pk)
+    if product.department and not product.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
+
+    if request.method == "POST":
+        form = {
+            "name": (request.POST.get("name") or "").strip(),
+            "price": (request.POST.get("price") or "").strip(),
+            "sage_number": (request.POST.get("sage_number") or "").strip(),
+            "pack_size": (request.POST.get("pack_size") or "").strip(),
+            "recipe_id": request.POST.get("recipe_id") or "",
+        }
+        error = None
+        if not form["name"]:
+            error = "Name is required."
+        elif (SaleProduct.objects.filter(name__iexact=form["name"])
+              .exclude(pk=product.pk).exists()):
+            error = (f"A sale product named '{form['name']}' already "
+                     "exists. Pick a different name.")
+        if error:
+            return render(request, "stock/sale_product_form.html",
+                          _sale_product_form_context(
+                              form, mode="edit", product=product,
+                              error=error, recipes=recipes))
+        new_recipe = None
+        if form["recipe_id"]:
+            new_recipe = Recipe.objects.filter(pk=form["recipe_id"]).first()
+        link_changed = (
+            (product.recipe_id or None) != (new_recipe.pk if new_recipe else None))
+        product.name = form["name"]
+        product.price = _parse_price(form["price"])
+        product.sage_number = form["sage_number"]
+        product.pack_size = form["pack_size"]
+        if link_changed:
+            product.recipe = new_recipe
+            product.link_source = SaleProduct.MANUAL if new_recipe else SaleProduct.NONE
+            product.link_confirmed = bool(new_recipe)
+        product.save()
+        messages.success(request, f"Saved changes to '{product.name}'.")
+        return redirect("sale_product_detail", pk=product.pk)
+
+    form = {
+        "name": product.name,
+        "price": (str(product.price) if product.price is not None else ""),
+        "sage_number": product.sage_number,
+        "pack_size": product.pack_size,
+        "recipe_id": str(product.recipe_id or ""),
+    }
+    return render(request, "stock/sale_product_form.html",
+                  _sale_product_form_context(
+                      form, mode="edit", product=product, recipes=recipes))
+
+
+@require_POST
+@login_required
+def sale_product_delete(request, pk):
+    product = get_object_or_404(SaleProduct, pk=pk)
+    if product.department and not product.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    name = product.name
+    product.delete()
+    messages.success(request, f"Deleted sale product '{name}'.")
+    return redirect("sale_products")
+
+
+@login_required
+def sale_product_link_review(request):
+    """Review the auto-linker's work: unlinked products + fuzzy suggestions.
+
+    The page lists every SaleProduct that needs the operator's
+    attention — currently anything with no recipe. For each, computes
+    the top-N fuzzy recipe suggestions so the operator can confirm one
+    with a single click; confirming sets ``link_source=manual`` and
+    ``link_confirmed=True`` so the next deploy won't undo the pick.
+
+    Also shows confirmed-via-Sage and confirmed-via-name rows in a
+    summary block so the operator can sanity-check the auto-linker's
+    output at a glance.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    products = list(_sale_product_qs(dept))
+    all_recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
+    unlinked = []
+    sage_matched = []
+    name_matched = []
+    manual = []
+    for p in products:
+        if p.recipe_id is None:
+            row = {"product": p,
+                   "suggestions": _recipe_suggestions(p.name, all_recipes)}
+            unlinked.append(row)
+        elif p.link_source == SaleProduct.SAGE:
+            sage_matched.append(p)
+        elif p.link_source == SaleProduct.NAME:
+            name_matched.append(p)
+        elif p.link_source == SaleProduct.MANUAL:
+            manual.append(p)
+    return render(request, "stock/sale_product_link_review.html", {
+        "unlinked": unlinked,
+        "sage_matched": sage_matched,
+        "name_matched": name_matched,
+        "manual": manual,
+        "all_recipes": all_recipes,
+    })
+
+
+@require_POST
+@login_required
+def sale_product_link_set(request, pk):
+    """Set or clear the recipe link via the review/detail page.
+
+    POST ``recipe_id`` (empty / "0" / "none" → unlink; otherwise a
+    Recipe pk to link to). Flips ``link_source=manual`` and
+    ``link_confirmed=True`` so the import never overrides the pick.
+    A future un-link sets ``link_source=manual`` too (the operator's
+    deliberate "no, none of these apply" decision survives re-import).
+    """
+    product = get_object_or_404(SaleProduct, pk=pk)
+    if product.department and not product.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    raw = (request.POST.get("recipe_id") or "").strip()
+    if raw in ("", "0", "none"):
+        product.recipe = None
+        product.link_source = SaleProduct.MANUAL
+        product.link_confirmed = True
+        msg = f"Cleared the recipe link on '{product.name}'."
+    else:
+        try:
+            new_pk = int(raw)
+        except ValueError:
+            messages.error(request, "Pick a valid recipe.")
+            return redirect("sale_product_link_review")
+        recipe = Recipe.objects.filter(pk=new_pk).first()
+        if recipe is None:
+            messages.error(request, "That recipe no longer exists.")
+            return redirect("sale_product_link_review")
+        product.recipe = recipe
+        product.link_source = SaleProduct.MANUAL
+        product.link_confirmed = True
+        msg = f"Linked '{product.name}' to {recipe.code} — {recipe.name}."
+    product.save(update_fields=[
+        "recipe", "link_source", "link_confirmed"])
+    messages.success(request, msg)
+    next_url = (request.POST.get("next") or "").strip()
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect("sale_product_link_review")
+
+
+@require_POST
+@login_required
+def sale_product_confirm_sage_matches(request):
+    """Bulk-confirm every Sage-source link in one click.
+
+    For every SaleProduct currently auto-linked via Sage No., flip
+    ``link_source=manual`` so the import permanently respects the
+    operator's "yes, that's right" verdict. (link_confirmed is already
+    True for Sage matches; the flip is purely about future-proofing
+    against a Sage code being later removed from a Recipe.)
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    qs = (SaleProduct.objects.filter(department=dept,
+                                     link_source=SaleProduct.SAGE))
+    n = qs.update(link_source=SaleProduct.MANUAL, link_confirmed=True)
+    messages.success(
+        request,
+        f"Confirmed {n} Sage-matched link(s). Future re-imports will "
+        "leave them alone.")
+    return redirect("sale_product_link_review")
