@@ -51,13 +51,23 @@
 {% else %}
   <p>This product isn't linked to a recipe yet. <span class="link-tag none">unlinked</span></p>
   {% if suggestions %}
-    <p class="muted" style="margin:14px 0 6px">Suggested by name similarity — click to link:</p>
+    <style>
+      .role-tag{font-family:var(--disp);font-size:9px;letter-spacing:.5px;text-transform:uppercase;
+        padding:1px 6px;border:1px solid;display:inline-block;margin-left:4px;vertical-align:middle}
+      .role-tag.sold{color:var(--amber);border-color:var(--amber)}
+      .role-tag.component{color:var(--muted);border-color:var(--muted)}
+    </style>
+    <p class="muted" style="margin:14px 0 6px">Suggested by name similarity — click to link. <span class="role-tag sold">sold</span> = sellable recipe; <span class="role-tag component">component</span> = used as a sub-recipe.</p>
     <table>
       <thead><tr><th>Recipe</th><th>Similarity</th><th></th></tr></thead>
       <tbody>
       {% for s in suggestions %}
         <tr>
-          <td><a href="{% url 'recipe_detail' s.recipe.pk %}"><code>{{ s.recipe.code }}</code> — {{ s.recipe.name }}</a></td>
+          <td>
+            <a href="{% url 'recipe_detail' s.recipe.pk %}"><code>{{ s.recipe.code }}</code> — {{ s.recipe.name }}</a>
+            {% if s.is_sold %}<span class="role-tag sold">sold</span>{% endif %}
+            {% if s.is_component %}<span class="role-tag component">component</span>{% endif %}
+          </td>
           <td>{{ s.percent }}%</td>
           <td>
             <form method="post" action="{% url 'sale_product_link_set' product.pk %}" style="display:inline">{% csrf_token %}

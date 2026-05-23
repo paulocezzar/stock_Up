@@ -1815,15 +1815,43 @@ def _sale_product_qs(dept):
             .order_by("name"))
 
 
+def _annotate_recipe_roles(recipes):
+    """Stamp ``cached_is_component`` on each recipe in one extra query.
+
+    ``Recipe.is_used_as_component`` is a property that hits the DB per
+    recipe — fine for one detail page, useless for a list of suggestions.
+    Here we collect every sub_recipe_id referenced anywhere in one
+    query and tag each recipe in the input list. The attribute name
+    avoids a leading underscore so Django templates can read it
+    (templates refuse `recipe._foo` attribute access). Returns the
+    same list (mutated) for chaining.
+    """
+    referenced = set(
+        RecipeLine.objects.filter(sub_recipe__isnull=False)
+        .values_list("sub_recipe_id", flat=True))
+    for r in recipes:
+        r.cached_is_component = r.pk in referenced
+    return recipes
+
+
 def _recipe_suggestions(name, all_recipes, *, n=5, threshold=0.5):
     """Top-N fuzzy recipe matches for a sale product name.
 
     Uses difflib.SequenceMatcher ratios against each recipe's name
     (case-insensitive, trimmed). Returns a list of
-    ``{recipe, ratio, percent}`` dicts, highest ratio first, capped at
-    ``n``. ``threshold`` is the minimum ratio to surface — too low
+    ``{recipe, ratio, percent, is_sold, is_component}`` dicts, highest
+    ratio first, capped at ``n``. The ``is_sold`` / ``is_component``
+    flags drive the link-review UI's "sold" / "component" labels so
+    the operator can tell a sellable recipe from an internal helper at
+    a glance. ``threshold`` is the minimum ratio to surface — too low
     floods the review page with noise; default 0.5 is "vaguely
     related".
+
+    Callers should pass ``all_recipes`` already annotated by
+    ``_annotate_recipe_roles`` so the role flags are accurate; without
+    that we fall back to ``sold_as_product`` only and treat
+    ``is_component`` as False (the live property would do one extra
+    query per recipe, which we deliberately avoid here).
     """
     from difflib import SequenceMatcher
     target = (name or "").strip().lower()
@@ -1837,8 +1865,12 @@ def _recipe_suggestions(name, all_recipes, *, n=5, threshold=0.5):
         ratio = SequenceMatcher(None, target, rn).ratio()
         if ratio < threshold:
             continue
-        scored.append({"recipe": r, "ratio": ratio,
-                       "percent": int(round(ratio * 100))})
+        scored.append({
+            "recipe": r, "ratio": ratio,
+            "percent": int(round(ratio * 100)),
+            "is_sold": bool(r.sold_as_product),
+            "is_component": bool(getattr(r, "cached_is_component", False)),
+        })
     scored.sort(key=lambda x: x["ratio"], reverse=True)
     return scored[:n]
 
@@ -1869,7 +1901,8 @@ def sale_product_detail(request, pk):
         return HttpResponseForbidden("Not your department.")
     suggestions = []
     if not product.recipe_id:
-        all_recipes = list(Recipe.objects.filter(archived=False))
+        all_recipes = _annotate_recipe_roles(
+            list(Recipe.objects.filter(archived=False)))
         suggestions = _recipe_suggestions(product.name, all_recipes)
     return render(request, "stock/sale_product_detail.html", {
         "product": product,
@@ -2024,43 +2057,49 @@ def sale_product_delete(request, pk):
 
 @login_required
 def sale_product_link_review(request):
-    """Review the auto-linker's work: unlinked products + fuzzy suggestions.
+    """Review queue: only UNRESOLVED sale products.
 
-    The page lists every SaleProduct that needs the operator's
-    attention — currently anything with no recipe. For each, computes
-    the top-N fuzzy recipe suggestions so the operator can confirm one
-    with a single click; confirming sets ``link_source=manual`` and
-    ``link_confirmed=True`` so the next deploy won't undo the pick.
+    A product is unresolved iff it has no recipe yet OR its current
+    link hasn't been confirmed (``link_confirmed=False``). The moment
+    the operator confirms a link (Sage / name / manual pick), the
+    product drops off this queue and lives on in the normal
+    ``/sale-products/`` list — where it can still be edited or
+    re-linked if needed.
 
-    Also shows confirmed-via-Sage and confirmed-via-name rows in a
-    summary block so the operator can sanity-check the auto-linker's
-    output at a glance.
+    For each unresolved row we compute top-N fuzzy recipe suggestions
+    (difflib SequenceMatcher) so the operator can confirm one with a
+    single click. Every suggestion AND every recipe in the "pick any
+    recipe" dropdown is labelled with whether it's a sold product
+    (``sold_as_product=True``) or a component (used as a sub_recipe
+    elsewhere) so the operator can tell a sellable recipe from an
+    internal helper at a glance. The bulk "Confirm all Sage matches"
+    action still lives here — it promotes auto-Sage matches to
+    ``manual`` (and ``link_confirmed=True``), removing them from the
+    queue on the next page load.
     """
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
     products = list(_sale_product_qs(dept))
-    all_recipes = list(Recipe.objects.filter(archived=False).order_by("code"))
-    unlinked = []
-    sage_matched = []
-    name_matched = []
-    manual = []
+    all_recipes = _annotate_recipe_roles(
+        list(Recipe.objects.filter(archived=False).order_by("code")))
+
+    unresolved = []
+    n_sage_unconfirmed = 0
     for p in products:
-        if p.recipe_id is None:
-            row = {"product": p,
-                   "suggestions": _recipe_suggestions(p.name, all_recipes)}
-            unlinked.append(row)
-        elif p.link_source == SaleProduct.SAGE:
-            sage_matched.append(p)
-        elif p.link_source == SaleProduct.NAME:
-            name_matched.append(p)
-        elif p.link_source == SaleProduct.MANUAL:
-            manual.append(p)
+        if p.link_confirmed:
+            continue
+        unresolved.append({
+            "product": p,
+            "suggestions": _recipe_suggestions(p.name, all_recipes),
+        })
+        if p.link_source == SaleProduct.SAGE:
+            n_sage_unconfirmed += 1
+
     return render(request, "stock/sale_product_link_review.html", {
-        "unlinked": unlinked,
-        "sage_matched": sage_matched,
-        "name_matched": name_matched,
-        "manual": manual,
+        "unresolved": unresolved,
+        "n_unresolved": len(unresolved),
+        "n_sage_unconfirmed": n_sage_unconfirmed,
         "all_recipes": all_recipes,
     })
 

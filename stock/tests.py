@@ -6139,3 +6139,149 @@ class SaleProductsViewsTests(TestCase):
         # And it shouldn't accidentally include sale-product UI bits.
         body = r.content.decode()
         self.assertNotIn("/sale-products/", body)
+
+    # ---- link-review queue: confirmed items drop off ----
+
+    def test_link_review_count_excludes_confirmed_items(self):
+        # Three products: one unlinked (unconfirmed), one auto-Sage
+        # (already link_confirmed=True), one manually picked
+        # (link_confirmed=True). Only the unlinked one should remain
+        # in the queue, and the "N products still to review" header
+        # should report 1.
+        SaleProduct.objects.create(
+            name="Unlinked SKU", department=self.dept)
+        SaleProduct.objects.create(
+            name="Sage SKU", department=self.dept,
+            recipe=self.apple, link_source=SaleProduct.SAGE,
+            link_confirmed=True)
+        SaleProduct.objects.create(
+            name="Manual SKU", department=self.dept,
+            recipe=self.mince, link_source=SaleProduct.MANUAL,
+            link_confirmed=True)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        # Count badge / header — current copy is "N product(s) still to review".
+        self.assertIn("1 product still to review", body)
+        # Only the unconfirmed product is rendered as an unresolved row.
+        self.assertIn("Unlinked SKU", body)
+        self.assertNotIn("Sage SKU", body)
+        self.assertNotIn("Manual SKU", body)
+
+    def test_link_review_confirms_drops_item_from_queue(self):
+        # Before: one unresolved. After confirming a suggestion: zero.
+        sp = SaleProduct.objects.create(name="Mystery", department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("1 product still to review", body)
+        self.assertIn("Mystery", body)
+        # Confirm a link.
+        self.client.post(f"/sale-products/{sp.pk}/link/",
+                         {"recipe_id": str(self.mince.pk)})
+        # The success flash message names the product; consume it via
+        # an intermediate GET so the next assertion measures only the
+        # page itself.
+        self.client.get("/sale-products/")
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("0 products still to review", body)
+        self.assertNotIn("Mystery", body)
+
+    def test_link_review_includes_link_confirmed_false_recipe_match(self):
+        # A product that has a recipe but link_confirmed=False is still
+        # UNRESOLVED — surfaces in the queue with the existing link
+        # presented as the top suggestion, ready to confirm.
+        sp = SaleProduct.objects.create(
+            name="Auto-suggested SKU", department=self.dept,
+            recipe=self.apple, link_source=SaleProduct.NAME,
+            link_confirmed=False)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("Auto-suggested SKU", body)
+        # Auto-match hint surfaced with the recipe code.
+        self.assertIn("Auto-matched to", body)
+        self.assertIn(self.apple.code, body)
+
+    def test_link_review_count_decreases_as_items_are_confirmed(self):
+        a = SaleProduct.objects.create(name="A", department=self.dept)
+        b = SaleProduct.objects.create(name="B", department=self.dept)
+        c = SaleProduct.objects.create(name="C", department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("3 products still to review", body)
+        self.client.post(f"/sale-products/{a.pk}/link/",
+                         {"recipe_id": str(self.mince.pk)})
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("2 products still to review", body)
+        self.client.post(f"/sale-products/{b.pk}/link/",
+                         {"recipe_id": str(self.apple.pk)})
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn("1 product still to review", body)
+
+    # ---- suggestion + dropdown labels ----
+
+    def test_link_review_labels_each_recipe_sold_or_component(self):
+        # Apple recipe is sold and not used as a component → "sold" only.
+        # Mince recipe is sold but also used as a component → both tags.
+        # Make Mince a component of another recipe so it earns the
+        # "component" tag.
+        wrapper = Recipe.objects.create(
+            code="NPD-R999", name="Mince Pie Bundle",
+            department=self.dept, sold_as_product=True)
+        RecipeLine.objects.create(
+            recipe=wrapper, sub_recipe=self.mince,
+            weight_g=Decimal("10"), ordering=0)
+        # An unlinked product whose name fuzz-matches both recipes
+        # (so both appear in the suggestions).
+        SaleProduct.objects.create(
+            name="Crumble Topped Mince Pie", department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        # Both labels visible (different recipes; both tags rendered).
+        self.assertIn(">sold<", body)
+        self.assertIn(">component<", body)
+
+    def test_link_review_pick_any_dropdown_carries_role_labels(self):
+        # Make Mince a component so the dropdown option carries the
+        # "(component)" suffix.
+        wrapper = Recipe.objects.create(
+            code="NPD-R999", name="Mince Pie Bundle",
+            department=self.dept, sold_as_product=True)
+        RecipeLine.objects.create(
+            recipe=wrapper, sub_recipe=self.mince,
+            weight_g=Decimal("10"), ordering=0)
+        # Mark Mince not-sold so it labels as component only (sanity).
+        self.mince.sold_as_product = False
+        self.mince.is_sold_manual = True
+        self.mince.save(update_fields=["sold_as_product", "is_sold_manual"])
+        SaleProduct.objects.create(name="To Link", department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        # The dropdown is a native <select>; option labels carry text
+        # suffixes since native options can't render tags.
+        self.assertIn(f"{self.apple.code} — {self.apple.name} (sold)", body)
+        self.assertIn(f"{self.mince.code} — {self.mince.name} (component)", body)
+
+    def test_link_review_dropdown_shows_all_recipes_including_components(self):
+        # Non-sold, non-component recipes still appear (no label suffix).
+        plain = Recipe.objects.create(
+            code="NPD-R500", name="Plain Recipe",
+            department=self.dept, sold_as_product=False)
+        # Plain recipe isn't referenced as a sub_recipe anywhere → no
+        # "(component)" suffix, no "(sold)" suffix.
+        SaleProduct.objects.create(name="To Link", department=self.dept)
+        body = self.client.get("/sale-products/link-review/").content.decode()
+        self.assertIn(f"{plain.code} — {plain.name}", body)
+        # Make sure no role suffix is glued onto this option.
+        # Construct the option line robustly: the suffix would be
+        # "{name} (sold)" or "{name} (component)".
+        self.assertNotIn(f"{plain.name} (sold)", body)
+        self.assertNotIn(f"{plain.name} (component)", body)
+
+    def test_detail_page_suggestions_labelled(self):
+        # The detail page's "Suggested by name similarity" block uses
+        # the same labels so the operator sees consistent info wherever
+        # they confirm a link.
+        wrapper = Recipe.objects.create(
+            code="NPD-R999", name="Mince Pie Bundle",
+            department=self.dept, sold_as_product=True)
+        RecipeLine.objects.create(
+            recipe=wrapper, sub_recipe=self.mince,
+            weight_g=Decimal("10"), ordering=0)
+        sp = SaleProduct.objects.create(
+            name="Crumble Topped Mince Pie", department=self.dept)
+        body = self.client.get(f"/sale-products/{sp.pk}/").content.decode()
+        self.assertIn(">sold<", body)
+        self.assertIn(">component<", body)
