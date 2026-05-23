@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
+from django.utils import timezone
 from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
@@ -2470,8 +2471,12 @@ class RecipesSectionViewTests(TestCase):
             self.assertIn("/login/", r.headers["Location"])
 
     def test_recipe_delete_removes_recipe(self):
+        # Hard-delete now requires the acknowledgement checkbox + the
+        # recipe code typed back to confirm permanence (archive is the
+        # default reversible action).
         r = Recipe.objects.create(code="NPD-R999", name="Gone", department=self.dept)
-        resp = self.client.post(f"/recipes/{r.pk}/delete/")
+        resp = self.client.post(f"/recipes/{r.pk}/delete/",
+                                {"acknowledge": "on", "confirm_code": "NPD-R999"})
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(code="NPD-R999").exists())
 
@@ -4703,11 +4708,43 @@ class RecipeDeleteEditTests(TestCase):
     def test_delete_removes_recipe_and_writes_suppression(self):
         r = Recipe.objects.create(code="NPD-R999", name="Gone",
                                   department=self.dept)
-        resp = self.client.post(f"/recipes/{r.pk}/delete/")
+        resp = self.client.post(f"/recipes/{r.pk}/delete/",
+                                {"acknowledge": "on", "confirm_code": "NPD-R999"})
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Recipe.objects.filter(code="NPD-R999").exists())
         # Suppression row written so the next re-import won't bring it back.
         self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R999").exists())
+
+    def test_hard_delete_requires_acknowledgement(self):
+        # Without the ack box (or with a missing/wrong typed code) the
+        # form re-renders with an error and the recipe survives.
+        r = Recipe.objects.create(code="NPD-R999", name="Gone",
+                                  department=self.dept)
+        # No acknowledge → re-renders form
+        resp = self.client.post(f"/recipes/{r.pk}/delete/",
+                                {"confirm_code": "NPD-R999"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"acknowledgement", resp.content)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R999").exists())
+        # Wrong code → re-renders form
+        resp = self.client.post(f"/recipes/{r.pk}/delete/",
+                                {"acknowledge": "on", "confirm_code": "WRONG"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Type the recipe code exactly", resp.content)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R999").exists())
+
+    def test_hard_delete_confirm_page_emphasises_archive_alternative(self):
+        # The confirmation page should make clear that archive is the
+        # non-destructive default and offer it as a one-click alternative.
+        r = Recipe.objects.create(code="NPD-R999", name="Gone",
+                                  department=self.dept)
+        resp = self.client.get(f"/recipes/{r.pk}/delete/")
+        body = resp.content.decode()
+        self.assertIn("archive instead", body.lower())
+        self.assertIn(f'action="/recipes/{r.pk}/archive/"', body)
+        # And the form must demand the acknowledgement + typed code.
+        self.assertIn('name="acknowledge"', body)
+        self.assertIn('name="confirm_code"', body)
 
     def test_delete_clears_dangling_sub_recipe_lines_in_parents(self):
         # RecipeLine.sub_recipe is on_delete=PROTECT, so deleting a sub
@@ -4725,7 +4762,8 @@ class RecipeDeleteEditTests(TestCase):
         RecipeLine.objects.create(recipe=parent, sub_recipe=sub,
                                   weight_g=Decimal("50"), ordering=1)
 
-        resp = self.client.post(f"/recipes/{sub.pk}/delete/")
+        resp = self.client.post(f"/recipes/{sub.pk}/delete/",
+                                {"acknowledge": "on", "confirm_code": "NPD-R900"})
         self.assertEqual(resp.status_code, 302)
         # Parent survives.
         self.assertTrue(Recipe.objects.filter(code="NPD-R901").exists())
@@ -4911,14 +4949,21 @@ class RecipeDeleteEditTests(TestCase):
 
     # ---- bulk-select + delete from the All-recipes list ----
 
-    def test_flat_list_shows_checkboxes_and_bulk_delete_button(self):
+    def test_flat_list_shows_checkboxes_and_bulk_archive_button(self):
+        # Archive is now the primary bulk action on the All-recipes tab.
         Recipe.objects.create(code="NPD-R100", name="Alpha", department=self.dept)
         Recipe.objects.create(code="NPD-R101", name="Beta", department=self.dept)
         r = self.client.get("/recipes/?view=flat")
         body = r.content.decode()
         self.assertIn('id="bulk-form"', body)
         self.assertIn('name="recipe_ids"', body)
-        self.assertIn("Delete selected", body)
+        self.assertIn("Archive selected", body)
+        # Bulk form posts to the archive endpoint, not delete.
+        self.assertIn('action="/recipes/bulk-archive/"', body)
+        self.assertNotIn('action="/recipes/bulk-delete/"', body)
+        # Per-row archive button is present (so individual recipes can
+        # be archived without using bulk select).
+        self.assertIn("/recipes/1/archive/", body)
 
     def test_bulk_delete_confirmation_lists_selected(self):
         a = Recipe.objects.create(code="NPD-R100", name="Alpha",
@@ -5097,6 +5142,304 @@ class RecipeDeleteEditTests(TestCase):
         self.assertEqual(
             SuppressedRecipe.objects.filter(
                 code__in=("NPD-R2031", "NPD-R2082")).count(), 2)
+
+    # ---- archive / restore (the new primary delete-like action) ----
+
+    def test_archive_hides_recipe_from_main_views_but_keeps_row(self):
+        r = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept,
+                                  finished_weight_g=Decimal("400"))
+        flour = Product.objects.create(
+            code="NPD-I9001", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        RecipeLine.objects.create(recipe=r, ingredient=flour,
+                                  weight_g=Decimal("100"), ordering=0)
+        resp = self.client.post(f"/recipes/{r.pk}/archive/",
+                                {"next": "/recipes/"})
+        self.assertEqual(resp.status_code, 302)
+        # Row still in the DB.
+        r.refresh_from_db()
+        self.assertTrue(r.archived)
+        self.assertIsNotNone(r.archived_at)
+        # Its lines are preserved (archive is reversible).
+        self.assertEqual(r.lines.count(), 1)
+        # Consume the post-archive flash message so it doesn't leak the
+        # code into our "is it hidden?" assertions below.
+        self.client.get("/recipes/?view=archived")
+        # Hidden from the main flat view (look for the row anchor, not
+        # the raw code, since the page chrome may still mention it).
+        body = self.client.get("/recipes/?view=flat").content.decode()
+        self.assertNotIn(f'href="/recipes/{r.pk}/"', body)
+        # And from the by-product tree.
+        body = self.client.get("/recipes/").content.decode()
+        self.assertNotIn(f'href="/recipes/{r.pk}/"', body)
+        # But shown in the archived view.
+        body = self.client.get("/recipes/?view=archived").content.decode()
+        self.assertIn(f'href="/recipes/{r.pk}/"', body)
+        self.assertIn("NPD-R100", body)
+
+    def test_archive_view_lists_archive_count_in_tab(self):
+        Recipe.objects.create(code="NPD-R100", name="A",
+                              department=self.dept, archived=True,
+                              archived_at=timezone.now())
+        Recipe.objects.create(code="NPD-R101", name="B",
+                              department=self.dept, archived=True,
+                              archived_at=timezone.now())
+        Recipe.objects.create(code="NPD-R102", name="C",
+                              department=self.dept)
+        body = self.client.get("/recipes/?view=flat").content.decode()
+        # The Archived tab carries the count badge "(2)"
+        self.assertIn("Archived", body)
+        self.assertIn("(2)", body)
+
+    def test_restore_brings_recipe_back_to_active(self):
+        r = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept,
+                                  archived=True,
+                                  archived_at=timezone.now())
+        resp = self.client.post(f"/recipes/{r.pk}/restore/",
+                                {"next": "/recipes/"})
+        self.assertEqual(resp.status_code, 302)
+        r.refresh_from_db()
+        self.assertFalse(r.archived)
+        self.assertIsNone(r.archived_at)
+        body = self.client.get("/recipes/?view=flat").content.decode()
+        self.assertIn("NPD-R100", body)
+
+    def test_archive_preserved_through_reimport(self):
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        # Archive a deep sub-recipe (NPD-R307) so it stops appearing
+        # in the main views.
+        target = Recipe.objects.get(code="NPD-R307")
+        self.client.post(f"/recipes/{target.pk}/archive/")
+        target.refresh_from_db()
+        self.assertTrue(target.archived)
+        archived_at = target.archived_at
+        # Re-import refreshes its basics — but must NOT un-archive.
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        target.refresh_from_db()
+        self.assertTrue(target.archived,
+                        "Re-import should not flip archived back to False")
+        # archived_at preserved (re-import doesn't touch it).
+        self.assertEqual(target.archived_at, archived_at)
+        # Its lines were still rebuilt from the workbook (the
+        # bill of materials stays in sync even while hidden).
+        self.assertEqual(target.lines.count(), 3)
+
+    def test_archiving_referenced_component_does_not_break_parents(self):
+        # Parent → sub_recipe. Archive the sub: parent stays intact,
+        # its line still references the (archived) sub.
+        sub = Recipe.objects.create(code="NPD-R900", name="Filling",
+                                    department=self.dept)
+        parent = Recipe.objects.create(code="NPD-R901", name="Pie",
+                                       department=self.dept)
+        flour = Product.objects.create(
+            code="NPD-I9001", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        line = RecipeLine.objects.create(recipe=parent, sub_recipe=sub,
+                                         weight_g=Decimal("50"), ordering=0)
+        self.client.post(f"/recipes/{sub.pk}/archive/")
+        # Sub archived, but parent and its line still exist and still
+        # reference it (the FK is intact).
+        sub.refresh_from_db()
+        self.assertTrue(sub.archived)
+        parent.refresh_from_db()
+        self.assertEqual(parent.lines.count(), 1)
+        line.refresh_from_db()
+        self.assertEqual(line.sub_recipe, sub)
+        # Active parent of an archived sub is surfaced in the archived view.
+        body = self.client.get("/recipes/?view=archived").content.decode()
+        self.assertIn("NPD-R901", body)
+
+    def test_bulk_archive_confirmation_lists_selected(self):
+        a = Recipe.objects.create(code="NPD-R100", name="Alpha",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R101", name="Beta",
+                                  department=self.dept)
+        Recipe.objects.create(code="NPD-R102", name="Gamma",
+                              department=self.dept)
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+        })
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("Archive 2 recipe", body)
+        self.assertIn("NPD-R100", body)
+        self.assertIn("NPD-R101", body)
+        self.assertNotIn("NPD-R102", body)
+        # No commit yet.
+        self.assertFalse(Recipe.objects.filter(
+            code__in=("NPD-R100", "NPD-R101"), archived=True).exists())
+
+    def test_bulk_archive_confirmation_shows_external_reference_note(self):
+        # NPD-R900 still used by active NPD-R800 (not in selection).
+        ext_parent = Recipe.objects.create(code="NPD-R800", name="External",
+                                           department=self.dept)
+        a = Recipe.objects.create(code="NPD-R900", name="Sub A",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R901", name="Sub B",
+                                  department=self.dept)
+        RecipeLine.objects.create(recipe=ext_parent, sub_recipe=a,
+                                  weight_g=Decimal("10"), ordering=0)
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+        })
+        body = resp.content.decode()
+        # Note block mentions the parent and the archived child code.
+        self.assertIn("still referenced", body.lower())
+        self.assertIn("NPD-R800", body)
+        self.assertIn("NPD-R900", body)
+        # NPD-R901 not externally referenced, so doesn't get a row in
+        # the note table. (It's still in the "Will archive" list above.)
+
+    def test_bulk_archive_confirm_flips_all_to_archived(self):
+        a = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept)
+        b = Recipe.objects.create(code="NPD-R101", name="B",
+                                  department=self.dept)
+        c = Recipe.objects.create(code="NPD-R102", name="C",
+                                  department=self.dept)
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(a.pk), str(b.pk), str(c.pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        for code in ("NPD-R100", "NPD-R101", "NPD-R102"):
+            r = Recipe.objects.get(code=code)
+            self.assertTrue(r.archived)
+            self.assertIsNotNone(r.archived_at)
+        # No suppression rows (archive ≠ hard delete).
+        self.assertFalse(SuppressedRecipe.objects.filter(
+            code__in=("NPD-R100", "NPD-R101", "NPD-R102")).exists())
+
+    def test_bulk_archive_is_department_scoped(self):
+        mine = Recipe.objects.create(code="NPD-R100", name="Mine",
+                                     department=self.dept)
+        theirs = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                       department=self.other_dept)
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(mine.pk), str(theirs.pk)],
+            "confirm": "1",
+        })
+        self.assertEqual(resp.status_code, 302)
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertTrue(mine.archived)
+        # Cross-dept recipe untouched.
+        self.assertFalse(theirs.archived)
+
+    def test_bulk_archive_skips_already_archived(self):
+        # Already-archived recipes in the selection are silently
+        # filtered out so they don't appear on the confirmation page.
+        active = Recipe.objects.create(code="NPD-R100", name="Active",
+                                       department=self.dept)
+        already = Recipe.objects.create(code="NPD-R101", name="Already",
+                                        department=self.dept,
+                                        archived=True,
+                                        archived_at=timezone.now())
+        resp = self.client.post("/recipes/bulk-archive/", {
+            "recipe_ids": [str(active.pk), str(already.pk)],
+        })
+        body = resp.content.decode()
+        self.assertIn("Archive 1 recipe", body)
+        self.assertIn("NPD-R100", body)
+        self.assertNotIn("NPD-R101", body)
+
+    def test_bulk_restore_flips_all_back_to_active(self):
+        a = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept,
+                                  archived=True,
+                                  archived_at=timezone.now())
+        b = Recipe.objects.create(code="NPD-R101", name="B",
+                                  department=self.dept,
+                                  archived=True,
+                                  archived_at=timezone.now())
+        resp = self.client.post("/recipes/bulk-restore/", {
+            "recipe_ids": [str(a.pk), str(b.pk)],
+        })
+        self.assertEqual(resp.status_code, 302)
+        for code in ("NPD-R100", "NPD-R101"):
+            r = Recipe.objects.get(code=code)
+            self.assertFalse(r.archived)
+            self.assertIsNone(r.archived_at)
+
+    def test_bulk_restore_skips_already_active(self):
+        active = Recipe.objects.create(code="NPD-R100", name="Active",
+                                       department=self.dept)
+        archived = Recipe.objects.create(code="NPD-R101", name="Archived",
+                                         department=self.dept,
+                                         archived=True,
+                                         archived_at=timezone.now())
+        resp = self.client.post("/recipes/bulk-restore/", {
+            "recipe_ids": [str(active.pk), str(archived.pk)],
+        })
+        self.assertEqual(resp.status_code, 302)
+        active.refresh_from_db()
+        archived.refresh_from_db()
+        # Active untouched (nothing to restore), archived flipped.
+        self.assertFalse(active.archived)
+        self.assertFalse(archived.archived)
+
+    def test_archive_cross_department_returns_403(self):
+        other = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                      department=self.other_dept)
+        resp = self.client.post(f"/recipes/{other.pk}/archive/")
+        self.assertEqual(resp.status_code, 403)
+        other.refresh_from_db()
+        self.assertFalse(other.archived)
+
+    def test_restore_cross_department_returns_403(self):
+        other = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                      department=self.other_dept,
+                                      archived=True,
+                                      archived_at=timezone.now())
+        resp = self.client.post(f"/recipes/{other.pk}/restore/")
+        self.assertEqual(resp.status_code, 403)
+        other.refresh_from_db()
+        self.assertTrue(other.archived)
+
+    def test_archive_and_restore_require_login(self):
+        r = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept)
+        anon = Client()
+        for url in (f"/recipes/{r.pk}/archive/", f"/recipes/{r.pk}/restore/"):
+            resp = anon.post(url)
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn("/login/", resp.headers["Location"])
+
+    def test_detail_page_offers_archive_primary_and_permanent_delete_link(self):
+        # Active recipe → "archive" is the prominent button, with the
+        # ghost-text link to permanent delete below.
+        r = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept)
+        body = self.client.get(f"/recipes/{r.pk}/").content.decode()
+        self.assertIn(f'action="/recipes/{r.pk}/archive/"', body)
+        self.assertIn("Permanently delete", body)
+        self.assertIn(f'href="/recipes/{r.pk}/delete/"', body)
+
+    def test_detail_page_shows_restore_when_recipe_is_archived(self):
+        r = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept,
+                                  archived=True,
+                                  archived_at=timezone.now())
+        body = self.client.get(f"/recipes/{r.pk}/").content.decode()
+        self.assertIn(f'action="/recipes/{r.pk}/restore/"', body)
+        self.assertIn("Archived", body)
+
+    def test_archived_view_renders_per_row_restore(self):
+        r = Recipe.objects.create(code="NPD-R100", name="A",
+                                  department=self.dept,
+                                  archived=True,
+                                  archived_at=timezone.now())
+        body = self.client.get("/recipes/?view=archived").content.decode()
+        self.assertIn("NPD-R100", body)
+        self.assertIn(f'action="/recipes/{r.pk}/restore/"', body)
+        # Bulk restore form posts to the right endpoint.
+        self.assertIn('action="/recipes/bulk-restore/"', body)
+        self.assertIn("Restore selected", body)
 
     def test_bulk_import_skips_suppressed_subrecipe_reference(self):
         # A workbook references NPD-R901 as a sub-recipe of NPD-R900.

@@ -46,7 +46,7 @@
   .tree-details[open] > summary > .tree-chevron::before{content:"\25BE"} /* ▾ */
 </style>
 
-<h2>Recipes <span class="muted" style="font-size:14px">{{ n_recipes }} in this department</span></h2>
+<h2>Recipes <span class="muted" style="font-size:14px">{% if view_mode == 'archived' %}{{ n_recipes }} archived{% else %}{{ n_recipes }} active in this department{% endif %}</span></h2>
 
 {# Importing lives on its own page in the section nav (the Import link). #}
 {# The redundant upload card that used to live here was removed. #}
@@ -54,6 +54,7 @@
 <div class="view-toggle" role="tablist">
   <a href="{% url 'recipes' %}" class="{% if view_mode == 'by_product' %}on{% endif %}">By product</a>
   <a href="{% url 'recipes' %}?view=flat" class="{% if view_mode == 'flat' %}on{% endif %}">All recipes</a>
+  <a href="{% url 'recipes' %}?view=archived" class="{% if view_mode == 'archived' %}on{% endif %}">Archived{% if n_archived %} <span class="muted" style="font-size:10px">({{ n_archived }})</span>{% endif %}</a>
 </div>
 
 {% if view_mode == "by_product" %}
@@ -69,16 +70,102 @@
   {% else %}
     <p class="tree-empty">No recipes imported yet. Use the <b>Import</b> button above to upload a Recipe Breakdown workbook.</p>
   {% endif %}
+{% elif view_mode == "archived" %}
+  {% if rows %}
+  <div class="filter">
+    <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
+    <span class="count-out"></span>
+  </div>
+  {# Bulk-restore form lives OUTSIDE the table; checkboxes attach via form= #}
+  <form method="post" action="{% url 'recipe_bulk_restore' %}" id="bulk-form" style="display:none"
+        onsubmit="return confirm('Restore the selected recipe(s) to active?')">{% csrf_token %}</form>
+  <table id="recipes-tbl">
+    <thead><tr>
+      <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all archived recipes"></th>
+      <th>Code</th><th>Name</th>
+      <th>Archived</th>
+      <th>Was used in</th>
+      <th class="num">Lines</th><th class="num">Finished (g)</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      {% with r=row.r %}
+      <tr data-search="{{ r.code|lower }} {{ r.name|lower }}">
+        <td><input type="checkbox" form="bulk-form" name="recipe_ids" value="{{ r.pk }}"
+                   class="bulk-cb" aria-label="Select {{ r.code }}"></td>
+        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
+        <td>{{ r.name }}</td>
+        <td class="muted" style="font-size:12px">{% if r.archived_at %}{{ r.archived_at|date:"d M Y" }}{% else %}—{% endif %}</td>
+        <td>
+          {% if row.parents %}
+            <span class="parents-list">{% for p in row.parents %}<a href="{% url 'recipe_detail' p.pk %}">{{ p.code }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="num">{{ r.n_lines }}</td>
+        <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>
+          <form method="post" action="{% url 'recipe_restore' r.pk %}" style="display:inline">{% csrf_token %}
+            <input type="hidden" name="next" value="/recipes/?view=archived">
+            <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">restore</button>
+          </form>
+        </td>
+      </tr>
+      {% endwith %}
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin:10px 0 0">
+    <button class="btn" type="submit" form="bulk-form" id="bulk-action-btn"
+            disabled style="padding:4px 12px">Restore selected</button>
+    <span class="muted" style="font-size:12px;margin-left:8px" id="bulk-count">0 selected</span>
+  </p>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">Archived recipes keep all their data; restoring is a one-click flip. The deploy-time re-import refreshes their basics but won't bring them back to active on its own.</p>
+  <script>
+  (function(){
+    var table = document.getElementById('recipes-tbl');
+    if(!table) return;
+    var all = document.getElementById('bulk-all');
+    var btn = document.getElementById('bulk-action-btn');
+    var counter = document.getElementById('bulk-count');
+    function boxes(){ return table.querySelectorAll('.bulk-cb'); }
+    function refresh(){
+      var b = boxes();
+      var checked = 0;
+      b.forEach(function(cb){ if(cb.checked) checked++; });
+      btn.disabled = checked === 0;
+      counter.textContent = checked + ' selected';
+      if(checked === 0){ all.checked = false; all.indeterminate = false; }
+      else if(checked === b.length){ all.checked = true; all.indeterminate = false; }
+      else { all.indeterminate = true; }
+    }
+    if(all){
+      all.addEventListener('change', function(){
+        boxes().forEach(function(cb){ cb.checked = all.checked; });
+        refresh();
+      });
+    }
+    table.addEventListener('change', function(e){
+      if(e.target && e.target.classList.contains('bulk-cb')) refresh();
+    });
+    refresh();
+  })();
+  </script>
+  {% else %}
+  <p class="muted">No archived recipes. Archive from the All recipes tab.</p>
+  {% endif %}
 {% else %}
   {% if rows %}
   <div class="filter">
     <input type="search" placeholder="filter by code or name…" data-filter="recipes-tbl" autocomplete="off">
     <span class="count-out"></span>
   </div>
-  {# Bulk-delete form lives OUTSIDE the table so it doesn't nest with the
-     per-row Sold-toggle forms. Checkboxes and the submit button attach to
-     it via the HTML5 form="bulk-form" attribute. #}
-  <form method="post" action="{% url 'recipe_bulk_delete' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
+  {# Bulk-archive form lives OUTSIDE the table so it doesn't nest with the
+     per-row Sold-toggle / archive forms. Checkboxes and the submit button
+     attach via the HTML5 form="bulk-form" attribute. #}
+  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
       <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all recipes"></th>
@@ -124,24 +211,30 @@
         <td class="num">{{ r.n_lines }}</td>
         <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td><a href="{% url 'recipe_detail' r.pk %}">open →</a></td>
+        <td>
+          <form method="post" action="{% url 'recipe_archive' r.pk %}" style="display:inline"
+                onsubmit="return confirm('Archive {{ r.code|escapejs }}? Hidden from main views; restorable from the Archived tab.')">{% csrf_token %}
+            <input type="hidden" name="next" value="/recipes/?view=flat">
+            <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">archive</button>
+          </form>
+        </td>
       </tr>
       {% endwith %}
     {% endfor %}
     </tbody>
   </table>
   <p style="margin:10px 0 0">
-    <button class="btn ghost" type="submit" form="bulk-form" id="bulk-delete-btn"
-            disabled style="padding:4px 12px">Delete selected</button>
+    <button class="btn" type="submit" form="bulk-form" id="bulk-action-btn"
+            disabled style="padding:4px 12px">Archive selected</button>
     <span class="muted" style="font-size:12px;margin-left:8px" id="bulk-count">0 selected</span>
   </p>
-  <p class="muted" style="margin:10px 0 0;font-size:12px">"Sold" defaults to true for recipes nothing else uses, false for components. Toggle it manually and the choice sticks across re-imports.</p>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">"Sold" defaults to true for recipes nothing else uses, false for components. Archiving hides a recipe from main views; restore from the Archived tab.</p>
   <script>
   (function(){
     var table = document.getElementById('recipes-tbl');
     if(!table) return;
     var all = document.getElementById('bulk-all');
-    var btn = document.getElementById('bulk-delete-btn');
+    var btn = document.getElementById('bulk-action-btn');
     var counter = document.getElementById('bulk-count');
     function boxes(){ return table.querySelectorAll('.bulk-cb'); }
     function refresh(){

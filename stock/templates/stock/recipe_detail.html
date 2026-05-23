@@ -160,6 +160,23 @@ field couldn't express.
   &nbsp;·&nbsp;
   <a href="{% url 'recipe_edit' recipe.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
   &nbsp;
-  <a href="{% url 'recipe_delete' recipe.pk %}" class="btn ghost" style="padding:4px 12px">delete recipe</a>
+  {% if recipe.archived %}
+    <form method="post" action="{% url 'recipe_restore' recipe.pk %}" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="next" value="/recipes/">
+      <button class="btn ghost" type="submit" style="padding:4px 12px">restore</button>
+    </form>
+  {% else %}
+    <form method="post" action="{% url 'recipe_archive' recipe.pk %}" style="display:inline"
+          onsubmit="return confirm('Archive {{ recipe.code }}? It will be hidden from the main views but kept in the database — restore from the Archived tab anytime.')">{% csrf_token %}
+      <input type="hidden" name="next" value="/recipes/">
+      <button class="btn" type="submit" style="padding:4px 12px">archive</button>
+    </form>
+  {% endif %}
+</p>
+{% if recipe.archived %}
+<p class="muted" style="font-size:12px;margin:6px 0 0">Archived{% if recipe.archived_at %} on {{ recipe.archived_at|date:"d M Y, H:i" }}{% endif %} — hidden from main views, restorable any time.</p>
+{% endif %}
+<p style="margin:14px 0 0">
+  <a href="{% url 'recipe_delete' recipe.pk %}" class="muted" style="font-size:12px">Permanently delete this recipe (requires extra confirmation) →</a>
 </p>
 {% endblock %}

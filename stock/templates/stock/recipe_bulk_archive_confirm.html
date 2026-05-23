@@ -1,0 +1,50 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2>Archive {{ selected|length }} recipe{{ selected|length|pluralize }}?</h2>
+
+<div class="card">
+  <h3>Will archive</h3>
+  <p class="muted" style="margin:0 0 10px">Archiving hides these recipes from the By Product and All recipes lists. Their data — lines, packaging, history — is kept and they can be restored from the Archived tab. The next deploy's re-import will <em>not</em> bring them back to active.</p>
+  <table>
+    <thead><tr><th>Code</th><th>Name</th><th class="num">Lines</th></tr></thead>
+    <tbody>
+    {% for r in selected %}
+      <tr>
+        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.code }}</a></td>
+        <td>{{ r.name }}</td>
+        <td class="num">{{ r.lines.count }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if note_rows %}
+<div class="card" style="border-left:3px solid var(--amber)">
+  <h3>Heads-up: still referenced by active recipes</h3>
+  <p class="muted" style="margin:0 0 10px">The following selected recipes are still used as sub-recipes by active recipes outside the selection. Archiving them doesn't break those parents — the sub-recipe link is preserved — but the parent recipe's tree will show an archived component until you restore or replace it.</p>
+  <table>
+    <thead><tr><th>Archiving</th><th>Still used by</th></tr></thead>
+    <tbody>
+    {% for row in note_rows %}
+      <tr>
+        <td><code>{{ row.code }}</code></td>
+        <td>{% for code in row.referenced_by %}<code>{{ code }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Confirm</h3>
+  <form method="post" action="{% url 'recipe_bulk_archive' %}">{% csrf_token %}
+    {% for r in selected %}<input type="hidden" name="recipe_ids" value="{{ r.pk }}">{% endfor %}
+    <input type="hidden" name="confirm" value="1">
+    <button class="btn" type="submit">Archive {{ selected|length }} recipe{{ selected|length|pluralize }}</button>
+    &nbsp;<a href="/recipes/?view=flat" class="muted">cancel</a>
+  </form>
+</div>
+{% endblock %}

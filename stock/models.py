@@ -481,6 +481,14 @@ class Recipe(models.Model):
     # rebuilt from the workbook because that's how a re-import keeps the
     # bill of materials in sync. Mirrors ``Customer.is_type_manual``.
     is_basic_manual = models.BooleanField(default=False)
+    # Archive is the soft-delete / reversible "hide from views" state.
+    # Archived recipes keep their lines and packaging links — restoring is
+    # a one-field flip. The deploy-time re-import refreshes their basics
+    # but never un-archives them (see ``save_recipes``); hard-delete
+    # (the rare escape hatch on the detail page) still removes the row
+    # and writes a ``SuppressedRecipe`` so it can't be resurrected.
+    archived = models.BooleanField(default=False)
+    archived_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 

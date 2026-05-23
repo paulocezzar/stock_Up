@@ -1,6 +1,7 @@
 import datetime
 from decimal import Decimal, InvalidOperation
 from django.shortcuts import render, get_object_or_404, redirect
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -376,32 +377,80 @@ def _by_product_forest(recipes):
 
 @login_required
 def recipes_home(request):
+    """Three sibling views over the same recipe set:
+
+    * ``by_product`` (default) — structural tree of active recipes.
+    * ``flat`` — flat list of active recipes with bulk-archive actions.
+    * ``archived`` — list of archived recipes with restore actions.
+
+    The archive flag is honoured at the query level so a re-import
+    that touches an archived recipe's basics doesn't accidentally
+    expose it in the main views.
+    """
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
-    # Default to the structural "by-product" view; flat list under ?view=flat.
-    view_mode = "flat" if request.GET.get("view") == "flat" else "by_product"
-    qs = (Recipe.objects.filter(department=dept)
-          .annotate(n_lines=Count("lines"))
-          .prefetch_related("lines__sub_recipe", "used_in_lines__recipe")
-          .order_by("code"))
-    recipes = list(qs)
+    raw = request.GET.get("view")
+    if raw == "archived":
+        view_mode = "archived"
+    elif raw == "flat":
+        view_mode = "flat"
+    else:
+        view_mode = "by_product"
+
+    base = (Recipe.objects.filter(department=dept)
+            .annotate(n_lines=Count("lines"))
+            .prefetch_related("lines__sub_recipe", "used_in_lines__recipe")
+            .order_by("code"))
+    if view_mode == "archived":
+        recipes = list(base.filter(archived=True))
+    else:
+        recipes = list(base.filter(archived=False))
+
+    # Count archived recipes regardless of current view so the tab can
+    # surface a count badge.
+    n_archived = Recipe.objects.filter(department=dept, archived=True).count()
 
     context = {
         "n_recipes": len(recipes),
+        "n_archived": n_archived,
         "view_mode": view_mode,
     }
 
     if view_mode == "by_product":
         context["forest"] = _by_product_forest(recipes)
-    else:
+    elif view_mode == "archived":
+        # The archived view uses the same flat-row shape as the
+        # "All recipes" tab so the existing checkbox / select-all UI
+        # can be reused unchanged; the only difference is the action
+        # button (Restore vs Archive) and the empty-state copy.
         rows = []
         for r in recipes:
+            # Parents shown here are ALL parents (active or not) — the
+            # operator may want to see that an archived recipe still
+            # had references when it was hidden.
             seen = set()
             parents = []
             for line in r.used_in_lines.all():
                 p = line.recipe
                 if p.pk in seen:
+                    continue
+                seen.add(p.pk)
+                parents.append(p)
+            parents.sort(key=lambda p: p.code)
+            rows.append({"r": r, "parents": parents})
+        context["rows"] = rows
+    else:  # flat
+        rows = []
+        for r in recipes:
+            # Only active parents are surfaced on the flat view — an
+            # archived parent isn't structurally meaningful to a
+            # currently-shown recipe.
+            seen = set()
+            parents = []
+            for line in r.used_in_lines.all():
+                p = line.recipe
+                if p.pk in seen or p.archived:
                     continue
                 seen.add(p.pk)
                 parents.append(p)
@@ -561,53 +610,203 @@ def recipe_detail(request, pk):
 
 @login_required
 def recipe_delete(request, pk):
-    """Confirm + delete a recipe.
+    """Permanent (hard) delete escape hatch.
 
-    GET renders a confirmation page that lists any parent recipes
-    referencing this one as a sub_recipe (so the operator sees the
-    knock-on effect before they pull the trigger). POST performs the
-    deletion:
+    Archive is the prominent default everywhere; hard-delete is the
+    deliberate, friction-ful exception accessible only from the recipe
+    detail page. The form on the confirmation template hides its
+    submit button behind a "I understand this is permanent" checkbox
+    so a stray click can't trigger it, and the view requires both the
+    checkbox AND the typed-back recipe code before committing.
+
+    On commit:
       * the recipe's own RecipeLines disappear via CASCADE;
       * RecipeLines in OTHER recipes that referenced this one as a
-        sub_recipe are removed first (RecipeLine.sub_recipe is PROTECT,
-        so leaving them would raise an IntegrityError);
-      * a SuppressedRecipe row records the code so the bulk re-import
-        on the next deploy doesn't silently bring it back.
-    Department-scoped, login-gated. Un-suppression is a one-row delete
-    in the Django admin.
+        sub_recipe are removed first (RecipeLine.sub_recipe is PROTECT);
+      * a ``SuppressedRecipe`` row records the code so the bulk
+        re-import on the next deploy doesn't silently resurrect it.
+
+    Department-scoped, login-gated. Un-suppression is a one-row
+    delete in the Django admin.
     """
     recipe = get_object_or_404(Recipe, pk=pk)
     if recipe.department and not recipe.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
     parents = list(recipe.parents())
+    error = None
     if request.method == "POST":
-        code = recipe.code
-        name = recipe.name
-        # Drop dangling sub_recipe references from parent recipes first —
-        # RecipeLine.sub_recipe is on_delete=PROTECT, so without this the
-        # final recipe.delete() raises IntegrityError. Parent recipes
-        # survive; only the lines pointing at the deleted sub disappear.
-        RecipeLine.objects.filter(sub_recipe=recipe).delete()
-        recipe.delete()
-        SuppressedRecipe.objects.update_or_create(
-            code=code,
-            defaults={"reason": f"Deleted via UI: {name}"[:200]},
-        )
-        # Former parents may now have no remaining children referencing
-        # this recipe; re-derive their sold flag so the badge reflects
-        # reality. Manual overrides are still respected.
-        Recipe.recompute_all_sold_defaults()
-        msg = f"Deleted recipe {code}."
-        if parents:
-            msg += (f" {len(parents)} parent recipe(s) lost a sub-recipe "
-                    f"reference: {', '.join(p.code for p in parents)}.")
-        msg += " The next re-import will skip this code."
-        messages.success(request, msg)
-        return redirect("recipes")
+        acknowledge = request.POST.get("acknowledge") == "on"
+        typed = (request.POST.get("confirm_code") or "").strip().upper()
+        if not acknowledge:
+            error = "Tick the acknowledgement box to confirm permanent deletion."
+        elif typed != recipe.code.upper():
+            error = (f"Type the recipe code exactly ({recipe.code}) "
+                     "to confirm permanent deletion.")
+        else:
+            code = recipe.code
+            name = recipe.name
+            # Drop dangling sub_recipe references from parent recipes first —
+            # RecipeLine.sub_recipe is on_delete=PROTECT.
+            RecipeLine.objects.filter(sub_recipe=recipe).delete()
+            recipe.delete()
+            SuppressedRecipe.objects.update_or_create(
+                code=code,
+                defaults={"reason": f"Hard-deleted via UI: {name}"[:200]},
+            )
+            Recipe.recompute_all_sold_defaults()
+            msg = f"Permanently deleted recipe {code}."
+            if parents:
+                msg += (f" {len(parents)} parent recipe(s) lost a sub-recipe "
+                        f"reference: {', '.join(p.code for p in parents)}.")
+            msg += " The next re-import will skip this code."
+            messages.success(request, msg)
+            return redirect("recipes")
     return render(request, "stock/recipe_delete_confirm.html", {
         "recipe": recipe,
         "parents": parents,
+        "error": error,
     })
+
+
+@require_POST
+@login_required
+def recipe_archive(request, pk):
+    """Hide a recipe by setting ``archived=True`` (reversible).
+
+    The row stays in the database; its lines and packaging links are
+    kept; only the main views filter it out. Restoring is a one-field
+    flip via ``recipe_restore``. The deploy-time re-import refreshes
+    an archived recipe's basics but never un-archives it.
+    """
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    if not recipe.archived:
+        recipe.archived = True
+        recipe.archived_at = timezone.now()
+        recipe.save(update_fields=["archived", "archived_at"])
+    msg = f"Archived recipe {recipe.code}."
+    active_parents = [p for p in recipe.parents() if not p.archived]
+    if active_parents:
+        msg += (f" Still referenced by {len(active_parents)} active recipe(s): "
+                f"{', '.join(p.code for p in active_parents)}.")
+    msg += " Restore from the Archived tab."
+    messages.success(request, msg)
+    next_url = request.POST.get("next") or "recipes"
+    return redirect(next_url if next_url.startswith("/") else "recipes")
+
+
+@require_POST
+@login_required
+def recipe_restore(request, pk):
+    """Un-archive a recipe (active again, visible in main views)."""
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    if recipe.archived:
+        recipe.archived = False
+        recipe.archived_at = None
+        recipe.save(update_fields=["archived", "archived_at"])
+    messages.success(request, f"Restored recipe {recipe.code}.")
+    next_url = request.POST.get("next") or "recipes"
+    return redirect(next_url if next_url.startswith("/") else "recipes")
+
+
+def _bulk_recipe_selection(request, dept):
+    """Shared parse + dept-filter for the bulk archive/restore/delete forms."""
+    raw_ids = request.POST.getlist("recipe_ids")
+    try:
+        ids = {int(x) for x in raw_ids if x}
+    except ValueError:
+        ids = set()
+    return list(Recipe.objects.filter(pk__in=ids, department=dept)
+                .order_by("code"))
+
+
+@require_POST
+@login_required
+def recipe_bulk_archive(request):
+    """Bulk-archive recipes selected on the flat list page.
+
+    Two-step POST mirrors the bulk-delete flow but without any of the
+    hard-delete consequences: no row is removed, no FKs to chase, no
+    SuppressedRecipe rows written. The confirmation page lists the
+    selected recipes and, when any selected recipe is still
+    referenced by an ACTIVE recipe outside the selection, surfaces a
+    soft informational note (not a red warning — archiving is
+    reversible and doesn't break anything).
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    selected = [r for r in _bulk_recipe_selection(request, dept)
+                if not r.archived]
+    if not selected:
+        messages.error(request, "Pick at least one active recipe to archive.")
+        return redirect("/recipes/?view=flat")
+    selected_pks = {r.pk for r in selected}
+
+    if request.POST.get("confirm") == "1":
+        now = timezone.now()
+        Recipe.objects.filter(pk__in=selected_pks).update(
+            archived=True, archived_at=now)
+        messages.success(
+            request,
+            f"Archived {len(selected)} recipe(s): "
+            f"{', '.join(r.code for r in selected)}. "
+            "Restore from the Archived tab.")
+        return redirect("/recipes/?view=flat")
+
+    # Informational note: which selected recipes are STILL referenced
+    # by ACTIVE recipes outside the selection? Archiving doesn't break
+    # them (the FK is preserved) but the operator may want to know.
+    note_rows = []
+    referencing = (Recipe.objects
+                   .filter(lines__sub_recipe_id__in=selected_pks,
+                           archived=False)
+                   .exclude(pk__in=selected_pks)
+                   .distinct())
+    by_archived = {}
+    for parent in referencing:
+        for line in parent.lines.all():
+            if line.sub_recipe_id in selected_pks:
+                by_archived.setdefault(line.sub_recipe.code, set()).add(
+                    parent.code)
+    for code in sorted(by_archived):
+        note_rows.append({"code": code,
+                          "referenced_by": sorted(by_archived[code])})
+
+    return render(request, "stock/recipe_bulk_archive_confirm.html", {
+        "selected": selected,
+        "note_rows": note_rows,
+    })
+
+
+@require_POST
+@login_required
+def recipe_bulk_restore(request):
+    """Bulk-restore recipes from the archived list (single-step POST).
+
+    Restore is harmless — the recipe just becomes visible again — so
+    there's no separate confirmation page. A JS ``confirm()`` on the
+    submit button is plenty.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    selected = [r for r in _bulk_recipe_selection(request, dept)
+                if r.archived]
+    if not selected:
+        messages.error(request, "Pick at least one archived recipe to restore.")
+        return redirect("/recipes/?view=archived")
+    selected_pks = {r.pk for r in selected}
+    Recipe.objects.filter(pk__in=selected_pks).update(
+        archived=False, archived_at=None)
+    messages.success(
+        request,
+        f"Restored {len(selected)} recipe(s): "
+        f"{', '.join(r.code for r in selected)}.")
+    return redirect("/recipes/?view=flat")
 
 
 @require_POST
