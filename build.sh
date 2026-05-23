@@ -21,3 +21,10 @@ python manage.py import_ingredients data/ingredients.xlsx
 # stocktake / delivery / reorder machinery; a RESET_STOCK wipe clears them
 # alongside everything else because they're rows in the Product table.
 python manage.py import_packaging data/packaging.xlsx
+
+# import_customers reads the order-sheet workbook (Customers + WHOLESALE
+# tabs) and is idempotent on name (case-insensitive). Render free tier
+# has no shell, so running this on every deploy is how the live DB picks
+# up new customers; manual type overrides are preserved via
+# is_type_manual exactly like Recipe.is_sold_manual.
+python manage.py import_customers data/order_sheet.xlsm
