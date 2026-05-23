@@ -7123,3 +7123,163 @@ class OrdersTests(TestCase):
             resp = anon.get(path)
             self.assertEqual(resp.status_code, 302)
             self.assertIn("/login/", resp.headers["Location"])
+
+    # ---- week grouping + filter ----
+    #
+    # Orders are stored per-date; the week-commencing Monday is always
+    # DERIVED from the date. The view's ``?week=YYYY-MM-DD`` query
+    # snaps any day within a week to that week's Monday and shows
+    # only that week's orders, grouped by day Mon–Sun.
+
+    def _seed_two_weeks(self):
+        # Week A: Mon 2026-05-04 — Sun 2026-05-10
+        # Week B: Mon 2026-05-11 — Sun 2026-05-17
+        a_mon = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 4))      # Mon week A
+        OrderLine.objects.create(
+            order=a_mon, sale_product=self.loose, qty_ordered=Decimal("3"))
+        a_wed = Order.objects.create(
+            customer=self.bob_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 6))      # Wed week A
+        OrderLine.objects.create(
+            order=a_wed, sale_product=self.slab, qty_ordered=Decimal("1"))
+        b_tue = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 12))     # Tue week B
+        OrderLine.objects.create(
+            order=b_tue, sale_product=self.pack, qty_ordered=Decimal("2"))
+        b_fri = Order.objects.create(
+            customer=self.bob_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 15))     # Fri week B
+        OrderLine.objects.create(
+            order=b_fri, sale_product=self.loose, qty_ordered=Decimal("5"))
+        return {"a_mon": a_mon, "a_wed": a_wed,
+                "b_tue": b_tue, "b_fri": b_fri}
+
+    def test_week_filter_snaps_any_day_to_monday(self):
+        # Any day inside Week A snaps to Mon 4 May. Orders in Week B
+        # must not appear and orders in Week A must.
+        orders = self._seed_two_weeks()
+        for snap_day in ("2026-05-04", "2026-05-06", "2026-05-10"):
+            body = self.client.get(f"/orders/?week={snap_day}").content.decode()
+            self.assertIn("week commencing 04 May 2026", body)
+            self.assertIn(f'/orders/{orders["a_mon"].pk}/', body)
+            self.assertIn(f'/orders/{orders["a_wed"].pk}/', body)
+            self.assertNotIn(f'/orders/{orders["b_tue"].pk}/', body)
+            self.assertNotIn(f'/orders/{orders["b_fri"].pk}/', body)
+
+    def test_week_groups_orders_by_weekday(self):
+        # Each weekday strip carries its own orders. We assert the
+        # rendered .day-block sections appear in Mon–Sun order and the
+        # right orders end up under each.
+        orders = self._seed_two_weeks()
+        body = self.client.get("/orders/?week=2026-05-04").content.decode()
+        # Mon 04 strip — Garden Cafe order under it.
+        import re
+        # Use a coarse substring split: each day-block starts with
+        # `class="day-block` and includes a date heading.
+        # Mon strip must contain a_mon, Wed strip must contain a_wed.
+        # Confirm by ordering of substrings in the body.
+        i_mon_head = body.find("04 May 2026")
+        i_wed_head = body.find("06 May 2026")
+        i_a_mon_link = body.find(f'/orders/{orders["a_mon"].pk}/')
+        i_a_wed_link = body.find(f'/orders/{orders["a_wed"].pk}/')
+        self.assertGreater(i_mon_head, -1)
+        self.assertGreater(i_wed_head, -1)
+        # a_mon link sits between Mon heading and Wed heading.
+        self.assertLess(i_mon_head, i_a_mon_link)
+        self.assertLess(i_a_mon_link, i_wed_head)
+        # a_wed sits after Wed heading.
+        self.assertLess(i_wed_head, i_a_wed_link)
+
+    def test_week_summary_totals_match_line_values(self):
+        # Week A: a_mon = 3 × 2.20 = 6.60; a_wed = 1 × 18.00 = 18.00
+        # → 2 orders, £24.60. Per-day totals: Mon £6.60, Wed £18.00.
+        self._seed_two_weeks()
+        body = self.client.get("/orders/?week=2026-05-04").content.decode()
+        # Week totals in the .stats block.
+        self.assertIn("Orders this week", body)
+        self.assertIn(">2<", body)             # 2 orders this week
+        self.assertIn("£24.60", body)
+        # Per-day strip totals.
+        self.assertIn("£6.60", body)
+        self.assertIn("£18.00", body)
+
+    def test_week_filter_combines_with_customer_filter(self):
+        # Alice in Week A → a_mon only (not a_wed which is Bob's, not
+        # b_tue / b_fri which are in Week B).
+        orders = self._seed_two_weeks()
+        body = self.client.get(
+            f"/orders/?week=2026-05-04&customer={self.alice_cust.pk}"
+        ).content.decode()
+        self.assertIn(f'/orders/{orders["a_mon"].pk}/', body)
+        self.assertNotIn(f'/orders/{orders["a_wed"].pk}/', body)
+        self.assertNotIn(f'/orders/{orders["b_tue"].pk}/', body)
+        self.assertNotIn(f'/orders/{orders["b_fri"].pk}/', body)
+
+    def test_week_filter_combines_with_date_filter_within_week(self):
+        # Specific day inside the selected week. ?week=2026-05-04 +
+        # ?date=2026-05-06 → only the Wed order.
+        orders = self._seed_two_weeks()
+        body = self.client.get(
+            "/orders/?week=2026-05-04&date=2026-05-06"
+        ).content.decode()
+        self.assertIn(f'/orders/{orders["a_wed"].pk}/', body)
+        self.assertNotIn(f'/orders/{orders["a_mon"].pk}/', body)
+
+    def test_week_navigator_links_to_previous_and_next_weeks(self):
+        # The week navigator carries ?week= links to the surrounding
+        # Mondays so the operator can step a week at a time.
+        self._seed_two_weeks()
+        body = self.client.get("/orders/?week=2026-05-04").content.decode()
+        # Previous week Mon = 2026-04-27, next = 2026-05-11.
+        self.assertIn("?week=2026-04-27", body)
+        self.assertIn("?week=2026-05-11", body)
+
+    def test_default_week_is_most_recent_when_today_has_no_orders(self):
+        # Today is well after May 2026 (or before). The default lands
+        # on the most-recent-order's week.
+        orders = self._seed_two_weeks()
+        body = self.client.get("/orders/").content.decode()
+        # Most recent order = b_fri (15 May 2026), Monday = 11 May.
+        self.assertIn("week commencing 11 May 2026", body)
+        self.assertIn(f'/orders/{orders["b_fri"].pk}/', body)
+        self.assertIn(f'/orders/{orders["b_tue"].pk}/', body)
+        self.assertNotIn(f'/orders/{orders["a_mon"].pk}/', body)
+
+    def test_default_week_falls_back_to_today_when_no_orders(self):
+        # No orders at all → default week = current week. The empty
+        # strip still renders with seven day blocks.
+        body = self.client.get("/orders/").content.decode()
+        today_monday = (datetime.date.today() -
+                        datetime.timedelta(days=datetime.date.today().weekday()))
+        self.assertIn(f"week commencing {today_monday:%d %b %Y}", body)
+        # Seven day-block sections (one per weekday).
+        self.assertEqual(body.count('class="day-block'), 7)
+
+    def test_manual_create_still_works_per_date_through_week_view(self):
+        # Creating an order through the existing endpoint isn't
+        # affected by the week-grouping layer.
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-05-13",   # Wed in Week B
+            "product_id": [str(self.loose.pk)],
+            "qty_ordered": ["2"],
+        })
+        self.assertEqual(resp.status_code, 302)
+        new_order = Order.objects.get(order_date=datetime.date(2026, 5, 13))
+        # And it appears under the Wed strip of Week B.
+        body = self.client.get("/orders/?week=2026-05-11").content.decode()
+        self.assertIn("13 May 2026", body)
+        self.assertIn(f'/orders/{new_order.pk}/', body)
+
+    def test_invalid_week_query_falls_back_to_default(self):
+        # A garbage ?week=… string doesn't crash the view; it just
+        # uses the default-week logic instead.
+        self._seed_two_weeks()
+        resp = self.client.get("/orders/?week=not-a-date")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # Default week (most recent) is 11 May.
+        self.assertIn("week commencing 11 May 2026", body)

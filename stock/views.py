@@ -2451,28 +2451,114 @@ def _order_filter_qs(qs, customer_pk, date_str):
     return qs
 
 
+def _monday_of(d):
+    """Return the Monday that begins the calendar week containing ``d``.
+
+    Python's ``date.weekday()`` is 0 for Monday … 6 for Sunday, so
+    subtracting ``weekday()`` days always lands on Monday — the
+    week-commencing date the orders system uses everywhere it groups
+    by week. Pure derivation; nothing is stored.
+    """
+    return d - datetime.timedelta(days=d.weekday())
+
+
+def _default_week_start(dept):
+    """Pick a sensible default week for the orders page.
+
+    Today's week if any orders fall in it (so a fresh visit lands on
+    the action-rich one); otherwise the week of the most recent order
+    so the operator sees their most recent activity; falling back to
+    today's week when the dept has no orders at all.
+    """
+    today = datetime.date.today()
+    this_start = _monday_of(today)
+    this_end = this_start + datetime.timedelta(days=6)
+    if Order.objects.filter(
+            department=dept,
+            order_date__range=(this_start, this_end)).exists():
+        return this_start
+    latest = (Order.objects.filter(department=dept)
+              .order_by("-order_date").only("order_date").first())
+    if latest is not None:
+        return _monday_of(latest.order_date)
+    return this_start
+
+
 @login_required
 def orders_home(request):
-    """Orders list, filterable by customer + date.
+    """Orders list grouped by week, then by day (Mon–Sun).
 
-    Shows one row per order with customer, date, line count and total
-    value. The filter form is GET-driven so URLs are shareable
-    (``/orders/?customer=3&date=2026-05-23``).
+    Orders are stored per-date — the "week commencing" Monday is always
+    DERIVED from each order's date, never stored as a separate field.
+    The view normalises any ``?week=YYYY-MM-DD`` query (the operator
+    can paste any day within the week and we snap to its Monday); when
+    no week is given we pick a sensible default via
+    ``_default_week_start``.
+
+    Customer + date filters layer ON TOP of the week — combining them
+    narrows further inside the selected week, so a URL like
+    ``/orders/?week=2026-05-18&customer=3&date=2026-05-20`` is the
+    "Garden Cafe orders for Wednesday this week" view.
+
+    The week summary (total orders / total value / per-day totals) is
+    enough to see the week's shape at a glance; full production
+    aggregation is a later chunk.
     """
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
     customer_pk = (request.GET.get("customer") or "").strip()
     date_str = (request.GET.get("date") or "").strip()
-    qs = _order_filter_qs(_orders_qs(dept), customer_pk, date_str)
+    raw_week = (request.GET.get("week") or "").strip()
+    if raw_week:
+        try:
+            week_start = _monday_of(datetime.date.fromisoformat(raw_week))
+        except ValueError:
+            week_start = _default_week_start(dept)
+    else:
+        week_start = _default_week_start(dept)
+    week_end = week_start + datetime.timedelta(days=6)
+
+    qs = _orders_qs(dept).filter(order_date__range=(week_start, week_end))
+    qs = _order_filter_qs(qs, customer_pk, date_str)
     orders = list(qs)
-    customers = (Customer.objects.filter(department=dept)
-                 .order_by("name"))
+
+    # Per-day buckets (Mon–Sun) — the rendered week always shows the
+    # full strip even when a day is empty, so the operator sees the
+    # week's shape rather than a sparse list.
+    days = []
+    for i in range(7):
+        day = week_start + datetime.timedelta(days=i)
+        day_orders = [o for o in orders if o.order_date == day]
+        day_total = sum((o.total_value() for o in day_orders), Decimal("0"))
+        days.append({
+            "date": day,
+            "label": day.strftime("%A"),
+            "is_today": day == datetime.date.today(),
+            "orders": day_orders,
+            "count": len(day_orders),
+            "total": day_total,
+        })
+
+    week_total_orders = len(orders)
+    week_total_value = sum((d["total"] for d in days), Decimal("0"))
+
+    customers = list(Customer.objects.filter(department=dept).order_by("name"))
+    today_week = _monday_of(datetime.date.today())
     return render(request, "stock/orders.html", {
         "orders": orders,
         "customers": customers,
         "filter_customer": customer_pk,
         "filter_date": date_str,
+        "week_start": week_start,
+        "week_end": week_end,
+        "prev_week": week_start - datetime.timedelta(days=7),
+        "next_week": week_start + datetime.timedelta(days=7),
+        "today_week": today_week,
+        "on_today_week": week_start == today_week,
+        "days": days,
+        "week_total_orders": week_total_orders,
+        "week_total_value": week_total_value,
     })
 
 
