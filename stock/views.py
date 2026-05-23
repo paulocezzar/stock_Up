@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe, SaleProduct
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe, SaleProduct, Order, OrderLine
 from .ai_extract import extract_lines, auto_match, ExtractError
 from .recipe_import import (
     parse_recipe_workbook, parse_recipe_workbook_bulk,
@@ -2370,3 +2370,341 @@ def sale_product_confirm_sage_matches(request):
         f"Confirmed {n} Sage-matched link(s). Future re-imports will "
         "leave them alone.")
     return redirect("sale_product_link_review")
+
+
+# ---- orders (chunk 1: model + manual CRUD, no import yet) ----
+def _orders_qs(dept):
+    return (Order.objects.filter(department=dept)
+            .select_related("customer")
+            .prefetch_related("lines__sale_product")
+            .order_by("-order_date", "-id"))
+
+
+def _parse_order_date(raw):
+    """Parse a YYYY-MM-DD string from the form, defaulting to today.
+
+    Bad / empty input falls back to today's date — the form's
+    ``<input type="date">`` should always supply a valid value but be
+    defensive in case a hand-crafted POST lands.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return datetime.date.today()
+    try:
+        return datetime.date.fromisoformat(raw)
+    except ValueError:
+        return datetime.date.today()
+
+
+def _collect_order_lines(post, dept):
+    """Pull parallel ``product_id[]`` / ``qty_ordered[]`` arrays from POST.
+
+    Returns ``(lines, error)`` where ``lines`` is a list of
+    ``{sale_product, qty}`` dicts (skipping empty rows) and ``error``
+    is the first user-facing problem found — invalid quantity, unknown
+    product, cross-department selection, or a duplicate product
+    appearing twice on the same order. The view shows the error and
+    re-renders the form with the operator's input intact.
+    """
+    pids = post.getlist("product_id")
+    qtys = post.getlist("qty_ordered")
+    pairs = list(zip(pids, qtys))
+    out = []
+    seen = set()
+    for raw_pid, raw_qty in pairs:
+        raw_pid = (raw_pid or "").strip()
+        raw_qty = (raw_qty or "").strip()
+        if not raw_pid and not raw_qty:
+            # Wholly empty row — skip silently (template renders spare
+            # blank slots so the operator can grow the line list).
+            continue
+        if not raw_pid:
+            return [], "Pick a product for every line with a quantity."
+        if not raw_qty:
+            return [], "Enter a quantity for every line with a product."
+        try:
+            sp = SaleProduct.objects.get(pk=raw_pid, department=dept)
+        except (SaleProduct.DoesNotExist, ValueError):
+            return [], "One of the lines points at a product that isn't in this department."
+        if sp.pk in seen:
+            return [], (f"'{sp.name}' appears more than once on this order — "
+                        "combine the quantities into one line.")
+        seen.add(sp.pk)
+        try:
+            qty = Decimal(raw_qty)
+        except InvalidOperation:
+            return [], f"Quantity '{raw_qty}' isn't a number."
+        if qty <= 0:
+            return [], f"Quantity for {sp.name} must be greater than zero."
+        out.append({"sale_product": sp, "qty": qty})
+    return out, None
+
+
+def _order_filter_qs(qs, customer_pk, date_str):
+    if customer_pk:
+        qs = qs.filter(customer_id=customer_pk)
+    if date_str:
+        try:
+            qs = qs.filter(order_date=datetime.date.fromisoformat(date_str))
+        except ValueError:
+            pass
+    return qs
+
+
+@login_required
+def orders_home(request):
+    """Orders list, filterable by customer + date.
+
+    Shows one row per order with customer, date, line count and total
+    value. The filter form is GET-driven so URLs are shareable
+    (``/orders/?customer=3&date=2026-05-23``).
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    customer_pk = (request.GET.get("customer") or "").strip()
+    date_str = (request.GET.get("date") or "").strip()
+    qs = _order_filter_qs(_orders_qs(dept), customer_pk, date_str)
+    orders = list(qs)
+    customers = (Customer.objects.filter(department=dept)
+                 .order_by("name"))
+    return render(request, "stock/orders.html", {
+        "orders": orders,
+        "customers": customers,
+        "filter_customer": customer_pk,
+        "filter_date": date_str,
+    })
+
+
+@login_required
+def order_detail(request, pk):
+    order = get_object_or_404(Order, pk=pk)
+    if order.department and not order.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    lines = list(order.lines.select_related(
+        "sale_product__link_recipe", "sale_product__link_product"))
+    return render(request, "stock/order_detail.html", {
+        "order": order,
+        "lines": lines,
+        "total_value": order.total_value(),
+        "resolved": order.resolved_consumption(),
+    })
+
+
+def _order_form_context(form, mode, dept, *, order=None, error=None):
+    """Build the create / edit form context with the customer list +
+    SaleProduct picker payload for the per-line autocomplete."""
+    customers = list(Customer.objects.filter(department=dept).order_by("name"))
+    products_qs = SaleProduct.objects.filter(department=dept).order_by("name")
+    return {
+        "form": form,
+        "mode": mode,
+        "order": order,
+        "error": error,
+        "customers": customers,
+        "product_picker_payload": _product_picker_payload(products_qs),
+    }
+
+
+def _render_order_form(request, form, mode, dept, *, order=None, error=None):
+    return render(request, "stock/order_form.html",
+                  _order_form_context(form, mode, dept,
+                                      order=order, error=error))
+
+
+def _line_rows_for_form(lines):
+    """Pre-fill rows for the line editor.
+
+    ``lines`` is a list of either OrderLine instances (edit mode) or
+    plain dicts from a re-render after a validation failure. Returns
+    a list of dicts with ``product_id`` / ``product_label`` / ``qty``.
+    """
+    out = []
+    for ln in lines:
+        if isinstance(ln, OrderLine):
+            sp = ln.sale_product
+            out.append({
+                "product_id": str(sp.pk),
+                "product_label": sp.name,
+                "qty": str(ln.qty_ordered),
+            })
+        else:
+            sp = ln.get("sale_product")
+            out.append({
+                "product_id": str(sp.pk) if sp else "",
+                "product_label": sp.name if sp else "",
+                "qty": str(ln.get("qty") or ""),
+            })
+    # Pad with a few spare blanks so the operator can keep adding.
+    while len(out) < 3:
+        out.append({"product_id": "", "product_label": "", "qty": ""})
+    return out
+
+
+@login_required
+def order_new(request):
+    """Create a new order with one or more lines.
+
+    Customer + date + parallel ``product_id`` / ``qty_ordered`` arrays
+    from the line repeater. Department-scoped: customers + products
+    are filtered to the current department; an out-of-dept pick is
+    rejected via the validator.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+
+    if request.method == "POST":
+        form = {
+            "customer_id": (request.POST.get("customer_id") or "").strip(),
+            "order_date": (request.POST.get("order_date") or "").strip(),
+            "note": (request.POST.get("note") or "").strip(),
+            "lines": [],
+        }
+        error = None
+        customer = None
+        if not form["customer_id"]:
+            error = "Pick a customer."
+        else:
+            customer = (Customer.objects.filter(
+                pk=form["customer_id"], department=dept).first())
+            if customer is None:
+                error = "That customer isn't in this department."
+        lines = []
+        if error is None:
+            lines, line_error = _collect_order_lines(request.POST, dept)
+            if line_error:
+                error = line_error
+            elif not lines:
+                error = "Add at least one product line."
+        if error:
+            form["lines"] = _line_rows_for_form([
+                {"sale_product": ln.get("sale_product"),
+                 "qty": ln.get("qty")} for ln in lines
+            ] if lines else _zip_form_lines(request.POST))
+            return _render_order_form(request, form, "new", dept, error=error)
+
+        with transaction.atomic():
+            order = Order.objects.create(
+                customer=customer,
+                order_date=_parse_order_date(form["order_date"]),
+                department=dept,
+                note=form["note"],
+            )
+            for ln in lines:
+                OrderLine.objects.create(
+                    order=order,
+                    sale_product=ln["sale_product"],
+                    qty_ordered=ln["qty"],
+                )
+        messages.success(request, f"Created order for {customer.name}.")
+        return redirect("order_detail", pk=order.pk)
+
+    form = {
+        "customer_id": "",
+        "order_date": datetime.date.today().isoformat(),
+        "note": "",
+        "lines": _line_rows_for_form([]),
+    }
+    return _render_order_form(request, form, "new", dept)
+
+
+def _zip_form_lines(post):
+    """Turn parallel product_id[] / qty_ordered[] arrays from a failed
+    POST back into the dict shape ``_line_rows_for_form`` expects.
+
+    Used to redisplay the user's input verbatim on validation failure.
+    Empty product rows still render so the operator can fix them.
+    """
+    pids = post.getlist("product_id")
+    qtys = post.getlist("qty_ordered")
+    out = []
+    for raw_pid, raw_qty in zip(pids, qtys):
+        sp = None
+        if raw_pid:
+            sp = SaleProduct.objects.filter(pk=raw_pid).first()
+        out.append({"sale_product": sp, "qty": raw_qty})
+    return out
+
+
+@login_required
+def order_edit(request, pk):
+    """Edit an order's customer/date/note and its lines.
+
+    Lines are rebuilt from the form on save: every existing OrderLine
+    is wiped and the POST's product_id/qty_ordered pairs are recreated.
+    This is the simplest correct behaviour while only ``qty_ordered``
+    is tracked. When ``qty_sent`` lands in a later chunk the rebuild
+    will need to preserve per-line state — leave a TODO there then.
+    """
+    order = get_object_or_404(Order, pk=pk)
+    if order.department and not order.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    dept = order.department or current_department(request)
+
+    if request.method == "POST":
+        form = {
+            "customer_id": (request.POST.get("customer_id") or "").strip(),
+            "order_date": (request.POST.get("order_date") or "").strip(),
+            "note": (request.POST.get("note") or "").strip(),
+            "lines": [],
+        }
+        error = None
+        customer = None
+        if not form["customer_id"]:
+            error = "Pick a customer."
+        else:
+            customer = (Customer.objects.filter(
+                pk=form["customer_id"], department=dept).first())
+            if customer is None:
+                error = "That customer isn't in this department."
+        lines = []
+        if error is None:
+            lines, line_error = _collect_order_lines(request.POST, dept)
+            if line_error:
+                error = line_error
+            elif not lines:
+                error = "Add at least one product line."
+        if error:
+            form["lines"] = _line_rows_for_form([
+                {"sale_product": ln.get("sale_product"),
+                 "qty": ln.get("qty")} for ln in lines
+            ] if lines else _zip_form_lines(request.POST))
+            return _render_order_form(request, form, "edit", dept,
+                                      order=order, error=error)
+
+        with transaction.atomic():
+            order.customer = customer
+            order.order_date = _parse_order_date(form["order_date"])
+            order.note = form["note"]
+            order.save()
+            order.lines.all().delete()
+            for ln in lines:
+                OrderLine.objects.create(
+                    order=order,
+                    sale_product=ln["sale_product"],
+                    qty_ordered=ln["qty"],
+                )
+        messages.success(request, f"Saved changes to order #{order.pk}.")
+        return redirect("order_detail", pk=order.pk)
+
+    existing = list(order.lines.select_related("sale_product"))
+    form = {
+        "customer_id": str(order.customer_id),
+        "order_date": order.order_date.isoformat(),
+        "note": order.note,
+        "lines": _line_rows_for_form(existing),
+    }
+    return _render_order_form(request, form, "edit", dept, order=order)
+
+
+@require_POST
+@login_required
+def order_delete(request, pk):
+    order = get_object_or_404(Order, pk=pk)
+    if order.department and not order.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+    label = str(order)
+    order.delete()
+    messages.success(request, f"Deleted order {label}.")
+    return redirect("orders")

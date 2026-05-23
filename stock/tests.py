@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
 from django.utils import timezone
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe, SaleProduct
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe, SaleProduct, Order, OrderLine
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -6782,3 +6782,344 @@ class SaleProductPolymorphicLinkTests(TestCase):
         # Resolves-to banner names the recipe + the multiplier 6.
         self.assertIn("Resolves to", body)
         self.assertIn("NPD-R800", body)
+
+
+class OrdersTests(TestCase):
+    """Orders system chunk 1: model + manual CRUD. No import yet."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.other_dept = Department.objects.create(name="Butchery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Two customers, two recipes, three products covering the
+        # interesting link shapes for resolved_consumption.
+        self.alice_cust = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.bob_cust = Customer.objects.create(
+            name="Farmshop", department=self.dept)
+        self.cross_dept_cust = Customer.objects.create(
+            name="Butchery Counter", department=self.other_dept)
+        self.apple = Recipe.objects.create(
+            code="NPD-R800", name="Apple Waste Sourdough (Loose)",
+            department=self.dept)
+        self.focaccia = Recipe.objects.create(
+            code="NPD-R700", name="Focaccia",
+            department=self.dept, finished_weight_g=Decimal("1000"))
+        self.loose = SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Loose)", price=Decimal("2.20"),
+            department=self.dept,
+            link_recipe=self.apple, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        self.pack = SaleProduct.objects.create(
+            name="Apple Waste Sourdough (Pack/6)", price=Decimal("12.00"),
+            department=self.dept,
+            link_product=self.loose, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        self.slab = SaleProduct.objects.create(
+            name="Focaccia 3.75kg", price=Decimal("18.00"),
+            department=self.dept,
+            link_recipe=self.focaccia, link_quantity=Decimal("3.75"),
+            link_unit=SaleProduct.WEIGHT_KG,
+            link_source=SaleProduct.MANUAL, link_confirmed=True)
+        self.foreign = SaleProduct.objects.create(
+            name="Butchery Pie", price=Decimal("5.00"),
+            department=self.other_dept)
+
+    # ---- nav ----
+
+    def test_top_nav_lists_orders_between_products_and_production(self):
+        body = self.client.get("/home/").content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        prod_pos = nav.find(">Products<")
+        ord_pos = nav.find(">Orders<")
+        prodn_pos = nav.find(">Production<")
+        self.assertGreater(ord_pos, -1, "Orders link missing from nav")
+        self.assertLess(prod_pos, ord_pos)
+        self.assertLess(ord_pos, prodn_pos)
+
+    # ---- model helpers ----
+
+    def test_total_value_sums_qty_times_price(self):
+        order = Order.objects.create(
+            customer=self.alice_cust, order_date=datetime.date(2026, 5, 1),
+            department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        OrderLine.objects.create(
+            order=order, sale_product=self.pack, qty_ordered=Decimal("2"))
+        # 3 × 2.20 = 6.60; 2 × 12.00 = 24.00 → 30.60
+        self.assertEqual(order.total_value(), Decimal("30.60"))
+
+    def test_total_value_skips_lines_with_no_price(self):
+        priceless = SaleProduct.objects.create(
+            name="Unpriced", department=self.dept)
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("4"))
+        OrderLine.objects.create(
+            order=order, sale_product=priceless, qty_ordered=Decimal("5"))
+        # 4 × 2.20 = 8.80, the priceless line is skipped.
+        self.assertEqual(order.total_value(), Decimal("8.80"))
+
+    def test_resolved_consumption_walks_chain_and_multiplies(self):
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=self.pack, qty_ordered=Decimal("2"))
+        OrderLine.objects.create(
+            order=order, sale_product=self.slab, qty_ordered=Decimal("4"))
+        rows = order.resolved_consumption()
+        self.assertEqual(len(rows), 2)
+        # Pack/6: 2 (ordered) × 6 (chain) = 12 count of the recipe.
+        pack_row = next(r for r in rows if r["sale_product"] == self.pack)
+        self.assertEqual(pack_row["recipe"], self.apple)
+        self.assertEqual(pack_row["total_quantity"], Decimal("12"))
+        self.assertEqual(pack_row["unit"], SaleProduct.COUNT)
+        # Slab: 4 × 3.75 kg = 15 kg of the focaccia recipe.
+        slab_row = next(r for r in rows if r["sale_product"] == self.slab)
+        self.assertEqual(slab_row["recipe"], self.focaccia)
+        self.assertEqual(slab_row["total_quantity"], Decimal("15.00"))
+        self.assertEqual(slab_row["unit"], SaleProduct.WEIGHT_KG)
+
+    def test_resolved_consumption_handles_unlinked_lines(self):
+        unlinked = SaleProduct.objects.create(
+            name="Floating", department=self.dept)
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=unlinked, qty_ordered=Decimal("1"))
+        rows = order.resolved_consumption()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["recipe"])
+        self.assertIsNone(rows[0]["total_quantity"])
+
+    def test_duplicate_product_on_same_order_blocked_by_db(self):
+        from django.db import IntegrityError, transaction
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                OrderLine.objects.create(
+                    order=order, sale_product=self.loose, qty_ordered=Decimal("2"))
+
+    # ---- list + filter ----
+
+    def test_orders_list_filters_by_customer_and_date(self):
+        a = Order.objects.create(
+            customer=self.alice_cust, order_date=datetime.date(2026, 5, 1),
+            department=self.dept)
+        b = Order.objects.create(
+            customer=self.bob_cust, order_date=datetime.date(2026, 5, 1),
+            department=self.dept)
+        c = Order.objects.create(
+            customer=self.alice_cust, order_date=datetime.date(2026, 5, 2),
+            department=self.dept)
+        # No filter: all three shown.
+        body = self.client.get("/orders/").content.decode()
+        for o in (a, b, c):
+            self.assertIn(f'/orders/{o.pk}/', body)
+        # Customer filter: only Alice's orders (a and c).
+        body = self.client.get(
+            f"/orders/?customer={self.alice_cust.pk}").content.decode()
+        self.assertIn(f'/orders/{a.pk}/', body)
+        self.assertIn(f'/orders/{c.pk}/', body)
+        self.assertNotIn(f'/orders/{b.pk}/', body)
+        # Date filter: only May 1 (a and b).
+        body = self.client.get("/orders/?date=2026-05-01").content.decode()
+        self.assertIn(f'/orders/{a.pk}/', body)
+        self.assertIn(f'/orders/{b.pk}/', body)
+        self.assertNotIn(f'/orders/{c.pk}/', body)
+        # Combined: Alice + May 1 → only a.
+        body = self.client.get(
+            f"/orders/?customer={self.alice_cust.pk}&date=2026-05-01"
+        ).content.decode()
+        self.assertIn(f'/orders/{a.pk}/', body)
+        self.assertNotIn(f'/orders/{b.pk}/', body)
+        self.assertNotIn(f'/orders/{c.pk}/', body)
+
+    def test_orders_list_excludes_cross_department(self):
+        # An order in the other department isn't visible from Bakery.
+        foreign = Order.objects.create(
+            customer=self.cross_dept_cust, department=self.other_dept)
+        body = self.client.get("/orders/").content.decode()
+        self.assertNotIn(f'/orders/{foreign.pk}/', body)
+
+    # ---- detail ----
+
+    def test_order_detail_shows_lines_and_total(self):
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        OrderLine.objects.create(
+            order=order, sale_product=self.slab, qty_ordered=Decimal("2"))
+        body = self.client.get(f"/orders/{order.pk}/").content.decode()
+        self.assertIn(self.alice_cust.name, body)
+        self.assertIn("01 May 2026", body)
+        self.assertIn(self.loose.name, body)
+        self.assertIn(self.slab.name, body)
+        # 3 × 2.20 + 2 × 18.00 = 42.60
+        self.assertIn("£42.60", body)
+        # Resolved-consumption preview card renders recipe codes.
+        self.assertIn("Resolved consumption", body)
+        self.assertIn("NPD-R800", body)
+        self.assertIn("NPD-R700", body)
+
+    def test_detail_cross_department_returns_403(self):
+        foreign = Order.objects.create(
+            customer=self.cross_dept_cust, department=self.other_dept)
+        resp = self.client.get(f"/orders/{foreign.pk}/")
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- create ----
+
+    def test_create_order_with_lines_via_form(self):
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-05-23",
+            "note": "Friday delivery",
+            "product_id": [str(self.loose.pk), str(self.pack.pk)],
+            "qty_ordered": ["3", "2"],
+        })
+        self.assertEqual(resp.status_code, 302)
+        order = Order.objects.get()
+        self.assertEqual(order.customer, self.alice_cust)
+        self.assertEqual(order.order_date, datetime.date(2026, 5, 23))
+        self.assertEqual(order.note, "Friday delivery")
+        self.assertEqual(order.lines.count(), 2)
+        qtys_by_product = {ln.sale_product_id: ln.qty_ordered
+                           for ln in order.lines.all()}
+        self.assertEqual(qtys_by_product[self.loose.pk], Decimal("3"))
+        self.assertEqual(qtys_by_product[self.pack.pk], Decimal("2"))
+        self.assertEqual(order.total_value(), Decimal("30.60"))
+
+    def test_create_rejects_duplicate_product_in_same_post(self):
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-05-23",
+            "product_id": [str(self.loose.pk), str(self.loose.pk)],
+            "qty_ordered": ["3", "2"],
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"appears more than once", resp.content)
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_create_requires_customer_and_at_least_one_line(self):
+        # No customer.
+        resp = self.client.post("/orders/new/", {
+            "customer_id": "",
+            "order_date": "2026-05-23",
+            "product_id": [str(self.loose.pk)],
+            "qty_ordered": ["3"],
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Pick a customer", resp.content)
+        # No lines.
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-05-23",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"at least one product line", resp.content)
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_create_rejects_cross_department_product(self):
+        # A product from another department can't be ordered through
+        # this department's order form.
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-05-23",
+            "product_id": [str(self.foreign.pk)],
+            "qty_ordered": ["1"],
+        })
+        self.assertEqual(resp.status_code, 200)
+        # The apostrophe is HTML-escaped — assert the unambiguous tail.
+        self.assertIn(b"in this department", resp.content)
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_create_rejects_cross_department_customer(self):
+        resp = self.client.post("/orders/new/", {
+            "customer_id": str(self.cross_dept_cust.pk),
+            "order_date": "2026-05-23",
+            "product_id": [str(self.loose.pk)],
+            "qty_ordered": ["1"],
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"in this department", resp.content)
+
+    # ---- edit ----
+
+    def test_edit_order_changes_customer_date_and_lines(self):
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept,
+            order_date=datetime.date(2026, 5, 1))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        resp = self.client.post(f"/orders/{order.pk}/edit/", {
+            "customer_id": str(self.bob_cust.pk),
+            "order_date": "2026-05-10",
+            "note": "moved",
+            "product_id": [str(self.pack.pk), str(self.slab.pk)],
+            "qty_ordered": ["1", "2"],
+        })
+        self.assertEqual(resp.status_code, 302)
+        order.refresh_from_db()
+        self.assertEqual(order.customer, self.bob_cust)
+        self.assertEqual(order.order_date, datetime.date(2026, 5, 10))
+        self.assertEqual(order.note, "moved")
+        codes = {ln.sale_product_id: ln.qty_ordered
+                 for ln in order.lines.all()}
+        self.assertEqual(codes, {
+            self.pack.pk: Decimal("1"),
+            self.slab.pk: Decimal("2"),
+        })
+
+    def test_edit_cross_department_returns_403(self):
+        foreign = Order.objects.create(
+            customer=self.cross_dept_cust, department=self.other_dept)
+        resp = self.client.get(f"/orders/{foreign.pk}/edit/")
+        self.assertEqual(resp.status_code, 403)
+        resp = self.client.post(f"/orders/{foreign.pk}/edit/", {
+            "customer_id": str(self.alice_cust.pk),
+            "order_date": "2026-01-01",
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- delete ----
+
+    def test_delete_removes_order_and_lines(self):
+        order = Order.objects.create(
+            customer=self.alice_cust, department=self.dept)
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose, qty_ordered=Decimal("3"))
+        resp = self.client.post(f"/orders/{order.pk}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Order.objects.filter(pk=order.pk).exists())
+        self.assertFalse(OrderLine.objects.filter(order_id=order.pk).exists())
+
+    def test_delete_cross_department_returns_403(self):
+        foreign = Order.objects.create(
+            customer=self.cross_dept_cust, department=self.other_dept)
+        resp = self.client.post(f"/orders/{foreign.pk}/delete/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(Order.objects.filter(pk=foreign.pk).exists())
+
+    # ---- login ----
+
+    def test_orders_routes_require_login(self):
+        anon = Client()
+        for path in ("/orders/", "/orders/new/"):
+            resp = anon.get(path)
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn("/login/", resp.headers["Location"])

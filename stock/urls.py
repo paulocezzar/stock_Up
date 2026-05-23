@@ -65,4 +65,10 @@ urlpatterns = [
          name="sale_product_delete"),
     path("sale-products/<int:pk>/link/", views.sale_product_link_set,
          name="sale_product_link_set"),
+    # Orders — chunk 1: model + manual CRUD. No import yet.
+    path("orders/", views.orders_home, name="orders"),
+    path("orders/new/", views.order_new, name="order_new"),
+    path("orders/<int:pk>/", views.order_detail, name="order_detail"),
+    path("orders/<int:pk>/edit/", views.order_edit, name="order_edit"),
+    path("orders/<int:pk>/delete/", views.order_delete, name="order_delete"),
 ]

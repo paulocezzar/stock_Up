@@ -1,0 +1,143 @@
+{% extends "stock/_section_orders.html" %}
+{% block n_order_new %}{% if mode == "new" %}on{% endif %}{% endblock %}
+{% block body %}
+<style>
+  .order-lines{display:flex;flex-direction:column;gap:8px;margin:10px 0 6px}
+  .order-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .order-line .qty{width:90px}
+  .order-line .picker-wrap{flex:1;min-width:240px;max-width:480px}
+  .order-line .remove-line{background:none;border:0;color:var(--muted);font-size:18px;
+    cursor:pointer;line-height:1;padding:2px 8px}
+  .order-line .remove-line:hover{color:var(--red)}
+</style>
+
+<h2>{% if mode == "edit" %}Edit order{% else %}New order{% endif %}
+  {% if mode == "edit" %}<span class="muted" style="font-size:14px">#{{ order.pk }} · {{ order.customer.name }}</span>{% endif %}
+</h2>
+
+{% if error %}<div class="msg error" style="margin-bottom:14px">{{ error }}</div>{% endif %}
+
+<form method="post">{% csrf_token %}
+<div class="card"><h3>Customer + date</h3>
+  <div class="row">
+    <div class="field" style="flex:1"><label>Customer *</label>
+      <select name="customer_id" required style="min-width:260px">
+        <option value="">— pick a customer —</option>
+        {% for c in customers %}
+          <option value="{{ c.pk }}" {% if form.customer_id == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>Order date *</label>
+      <input type="date" name="order_date" value="{{ form.order_date }}" required></div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="field" style="flex:1"><label>Note</label>
+      <input type="text" name="note" value="{{ form.note }}" maxlength="200"
+             placeholder="optional — e.g. delivery slot, special instruction"
+             style="width:100%;max-width:480px"></div>
+  </div>
+</div>
+
+<div class="card"><h3>Lines</h3>
+  <p class="muted" style="margin:0 0 6px;font-size:12px">One line per product. Pick a product and a quantity (decimals OK — useful for kg-based products). Adding a product twice on the same order isn't allowed; combine the quantities into one line instead.</p>
+  <div class="order-lines" id="order-lines">
+    {% for ln in form.lines %}
+      <div class="order-line">
+        <input type="text" name="qty_ordered" class="qty" inputmode="decimal"
+               value="{{ ln.qty }}" placeholder="qty" aria-label="Quantity">
+        <div class="picker-wrap">
+          <div class="recipe-picker" data-source="product-picker-data"
+               {% if ln.product_id %}data-selected-id="{{ ln.product_id }}"{% endif %}>
+            <input type="text" class="rcp-search" autocomplete="off"
+                   placeholder="search products by name or Sage no.…"
+                   aria-label="Product search">
+            <input type="hidden" class="rcp-id" name="product_id" value="{{ ln.product_id }}">
+            <div class="rcp-list" hidden role="listbox"></div>
+          </div>
+        </div>
+        <button type="button" class="remove-line" aria-label="Remove line"
+                title="Remove this line">×</button>
+      </div>
+    {% endfor %}
+  </div>
+  <p style="margin:4px 0 0">
+    <button type="button" id="add-line-btn" class="btn ghost"
+            style="padding:4px 12px;font-size:11px">+ add another line</button>
+  </p>
+</div>
+
+<p>
+  <button class="btn" type="submit">{% if mode == "edit" %}Save changes{% else %}Create order{% endif %}</button>
+  &nbsp;<a href="{% if order %}{% url 'order_detail' order.pk %}{% else %}{% url 'orders' %}{% endif %}" class="muted">cancel</a>
+</p>
+</form>
+
+<template id="order-line-template">
+  <div class="order-line">
+    <input type="text" name="qty_ordered" class="qty" inputmode="decimal"
+           placeholder="qty" aria-label="Quantity">
+    <div class="picker-wrap">
+      <div class="recipe-picker" data-source="product-picker-data">
+        <input type="text" class="rcp-search" autocomplete="off"
+               placeholder="search products by name or Sage no.…"
+               aria-label="Product search">
+        <input type="hidden" class="rcp-id" name="product_id" value="">
+        <div class="rcp-list" hidden role="listbox"></div>
+      </div>
+    </div>
+    <button type="button" class="remove-line" aria-label="Remove line"
+            title="Remove this line">×</button>
+  </div>
+</template>
+
+{{ product_picker_payload|json_script:"product-picker-data" }}
+{% include "stock/_recipe_picker_assets.html" %}
+<script>
+(function(){
+  // Add / remove line rows. The product picker JS auto-attaches on
+  // load; we re-run its init on freshly-cloned rows so the new search
+  // input wires up too. The simplest way: dispatch a tiny attach via
+  // re-running the discovery query — but the picker script binds once.
+  // Instead, re-run a focused attach inline here (mirrors the picker's
+  // own init for a single new node).
+  var container = document.getElementById('order-lines');
+  var addBtn = document.getElementById('add-line-btn');
+  var tmpl = document.getElementById('order-line-template');
+  if(!container || !addBtn || !tmpl) return;
+
+  function attachRemove(row){
+    var btn = row.querySelector('.remove-line');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      // Don't let the last row disappear — the form needs at least one
+      // slot for the operator to fill in. Just clear it instead.
+      if(container.querySelectorAll('.order-line').length === 1){
+        row.querySelectorAll('input').forEach(function(i){ i.value = ''; });
+        return;
+      }
+      row.remove();
+    });
+  }
+  container.querySelectorAll('.order-line').forEach(attachRemove);
+
+  addBtn.addEventListener('click', function(){
+    var frag = tmpl.content.cloneNode(true);
+    container.appendChild(frag);
+    var row = container.lastElementChild;
+    attachRemove(row);
+    // The picker init script ran once on DOMContentLoaded and bound to
+    // existing .recipe-picker nodes; trigger its init again so the new
+    // one is wired up. We do this by dispatching a fresh DOMContentLoaded-
+    // like event the script also listens for — but the script only
+    // listens to the real DOMContentLoaded. As a simple workaround,
+    // we re-attach the picker behaviour ourselves for the new row.
+    if(window.__attachRecipePicker){
+      window.__attachRecipePicker(row.querySelector('.recipe-picker'));
+    }
+    var search = row.querySelector('.rcp-search');
+    if(search) search.focus();
+  });
+})();
+</script>
+{% endblock %}

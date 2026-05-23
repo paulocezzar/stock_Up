@@ -885,6 +885,123 @@ class SuppressedRecipe(models.Model):
         return self.code
 
 
+class Order(models.Model):
+    """One customer's order for one date — the entry point of the
+    Order → Product → Recipe → Ingredients chain.
+
+    An order has a customer, an ``order_date`` and a department; its
+    ``lines`` are individual SaleProducts with an ordered quantity.
+    This is chunk 1 of the orders system: only ``qty_ordered`` is
+    tracked (no ``qty_sent`` yet — that lands when the picking flow
+    arrives). Manual CRUD only; spreadsheet import is a later chunk.
+
+    ``resolved_consumption()`` walks each line's SaleProduct through
+    ``resolved_recipe_consumption`` and multiplies by ``qty_ordered`` —
+    the hook the later production / consumption maths plugs into.
+    """
+    customer = models.ForeignKey(
+        Customer, related_name="orders", on_delete=models.PROTECT)
+    order_date = models.DateField(default=datetime.date.today)
+    department = models.ForeignKey(
+        Department, related_name="orders", on_delete=models.CASCADE,
+        null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-order_date", "-id"]
+
+    def __str__(self):
+        return f"{self.customer.name} - {self.order_date:%d %b %Y}"
+
+    def total_value(self):
+        """Sum of qty_ordered × sale_product.price across every line.
+
+        Lines whose SaleProduct has no price are skipped silently; the
+        total is just the priced part. Two-decimal precision.
+        """
+        total = Decimal("0")
+        for line in self.lines.select_related("sale_product").all():
+            price = line.sale_product.price
+            if price is None or line.qty_ordered is None:
+                continue
+            total += price * line.qty_ordered
+        return total.quantize(Decimal("0.01"))
+
+    def resolved_consumption(self):
+        """Per-line resolved (recipe, total_quantity, unit) × qty_ordered.
+
+        For each OrderLine, walks its SaleProduct's link chain to a
+        Recipe and multiplies by ``qty_ordered`` so the caller sees the
+        eventual recipe load this order implies. Returns a list of
+        dicts in line ordering:
+            [{line, sale_product, recipe, total_quantity, unit, error?}]
+        Lines whose product doesn't resolve (no chain to a Recipe, or
+        a cycle) still appear with ``recipe=None`` so the caller can
+        surface them. This is a data-only hook for the later
+        consumption flow — no ingredient maths is done here.
+        """
+        from .models import SaleProductCycleError
+        out = []
+        for line in self.lines.select_related(
+                "sale_product__link_recipe",
+                "sale_product__link_product").order_by("id"):
+            sp = line.sale_product
+            entry = {"line": line, "sale_product": sp,
+                     "recipe": None, "total_quantity": None, "unit": None}
+            try:
+                recipe, base, unit = sp.resolved_recipe_consumption()
+            except SaleProductCycleError as e:
+                entry["error"] = str(e)
+                out.append(entry)
+                continue
+            if recipe is None:
+                out.append(entry)
+                continue
+            qty = line.qty_ordered or Decimal("0")
+            entry["recipe"] = recipe
+            entry["total_quantity"] = (qty * base)
+            entry["unit"] = unit
+            out.append(entry)
+        return out
+
+
+class OrderLine(models.Model):
+    """One product on an order with its ordered quantity.
+
+    Identity is ``(order, sale_product)`` — the same product can't
+    appear twice on one order (enforced via ``unique_together``).
+    ``qty_ordered`` is decimal so kg-based products (e.g. focaccia
+    3.75 kg) can be ordered fractionally. ``qty_sent`` is deliberately
+    NOT in this model yet — the spec leaves room for it in a later
+    chunk and the existing layout makes that addition non-destructive.
+    """
+    order = models.ForeignKey(
+        Order, related_name="lines", on_delete=models.CASCADE)
+    sale_product = models.ForeignKey(
+        SaleProduct, related_name="order_lines", on_delete=models.PROTECT)
+    qty_ordered = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        unique_together = ("order", "sale_product")
+
+    def __str__(self):
+        return f"{self.order_id}: {self.sale_product.name} ({self.qty_ordered})"
+
+    @property
+    def line_value(self):
+        """qty_ordered × sale_product.price, or None when the product
+        has no price set."""
+        price = self.sale_product.price
+        if price is None or self.qty_ordered is None:
+            return None
+        return (price * self.qty_ordered).quantize(Decimal("0.01"))
+
+
 class RecipePackaging(models.Model):
     """A packaging item used by a recipe.
 

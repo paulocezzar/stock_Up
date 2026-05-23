@@ -146,7 +146,14 @@ the input opens with that recipe's "code — name" label.
       return prefix + (r.name || '') + role;
     }
 
-    document.querySelectorAll('.recipe-picker').forEach(function(picker){
+    function attach(picker){
+      // Wire one .recipe-picker element. Exposed as
+      // window.__attachRecipePicker for callers (e.g. the order line
+      // repeater) that clone new picker DOM after this init has run.
+      // Idempotent: if a picker has already been attached we don't
+      // double-bind its event listeners.
+      if(picker.__attached) return;
+      picker.__attached = true;
       var input = picker.querySelector('.rcp-search');
       var hidden = picker.querySelector('.rcp-id');
       var list = picker.querySelector('.rcp-list');
@@ -287,7 +294,11 @@ the input opens with that recipe's "code — name" label.
           render(search(catalogue, '', 12));
         });
       }
-    });
+    }
+    document.querySelectorAll('.recipe-picker').forEach(attach);
+    // Expose for late attach — e.g. the order-line repeater clones
+    // a new .recipe-picker DOM after init has already run.
+    window.__attachRecipePicker = attach;
   }
   if(document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', init);
