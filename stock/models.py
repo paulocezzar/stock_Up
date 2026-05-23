@@ -474,6 +474,13 @@ class Recipe(models.Model):
     # so subsequent recompute_all_sold_defaults() leaves them alone.
     sold_as_product = models.BooleanField(default=True)
     is_sold_manual = models.BooleanField(default=False)
+    # ``is_basic_manual`` is the "operator hand-edited this recipe's basic
+    # fields" flag — name, finished/deposit/cook_loss, the sold checkbox.
+    # When set, the bulk re-import leaves those values alone (the same way
+    # ``is_sold_manual`` protects the sold flag); RecipeLines are still
+    # rebuilt from the workbook because that's how a re-import keeps the
+    # bill of materials in sync. Mirrors ``Customer.is_type_manual``.
+    is_basic_manual = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
@@ -671,6 +678,32 @@ class RecipeLine(models.Model):
     @property
     def component(self):
         return self.ingredient or self.sub_recipe
+
+
+class SuppressedRecipe(models.Model):
+    """Records a recipe code that the operator deleted by hand.
+
+    The bulk re-import (``import_recipes_bulk``) runs every deploy. Without
+    a record of deletions, deleting NPD-R800 in the UI would silently
+    bring it back next time the workbook is re-imported, because the
+    sheet for that recipe is still in the file.
+
+    Holding the code (not the FK — the Recipe row is gone) means the
+    suppression survives the delete and the next import. Both
+    ``save_recipes`` and the auto-stubbing path skip codes present here,
+    so neither the main recipe nor a leftover sub-recipe reference will
+    re-create the row. Un-suppress by deleting the row in the admin —
+    the next deploy will then re-import the recipe as normal.
+    """
+    code = models.CharField(max_length=20, unique=True)
+    reason = models.CharField(max_length=200, blank=True)
+    suppressed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.code
 
 
 class RecipePackaging(models.Model):

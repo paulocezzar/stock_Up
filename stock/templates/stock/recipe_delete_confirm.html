@@ -1,0 +1,30 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2>Delete recipe <span class="muted" style="font-size:14px">{{ recipe.code }} · {{ recipe.name }}</span></h2>
+
+{% if parents %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>This recipe is used as a sub-recipe in {{ parents|length }} other{{ parents|length|pluralize:" recipe, recipes" }}</h3>
+  <p class="muted" style="margin:0 0 10px">Deleting it will also remove the sub-recipe line from each parent below. The parents themselves are kept; you'll likely want to edit them afterwards.</p>
+  <ul style="margin:0;padding-left:20px">
+    {% for p in parents %}<li><a href="{% url 'recipe_detail' p.pk %}">{{ p.code }} — {{ p.name }}</a></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Confirm</h3>
+  <p>Deleting <strong>{{ recipe.code }}</strong> ({{ recipe.name }}) will:</p>
+  <ul style="margin:0 0 14px;padding-left:20px">
+    <li>Remove the recipe and its {{ recipe.lines.count }} ingredient line{{ recipe.lines.count|pluralize }} (raw ingredient Products are kept).</li>
+    {% if parents %}<li>Drop the sub-recipe line from {{ parents|length }} parent recipe{{ parents|length|pluralize }}.</li>{% endif %}
+    <li>Record the code <code>{{ recipe.code }}</code> as suppressed so the next deploy's bulk re-import won't bring it back. Un-suppress via the Django admin if you change your mind.</li>
+  </ul>
+  <form method="post"
+        onsubmit="return confirm('Really delete {{ recipe.code|escapejs }}? This can't be undone from the UI.')">{% csrf_token %}
+    <button class="btn" type="submit" style="background:var(--red);border-color:var(--red);color:#fff">Delete {{ recipe.code }}</button>
+    &nbsp;<a href="{% url 'recipe_detail' recipe.pk %}" class="muted">cancel</a>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2>Edit recipe <span class="muted" style="font-size:14px">{{ recipe.code }} · {{ recipe.name }}</span></h2>
+
+<form method="post">{% csrf_token %}
+<div class="card"><h3>Basic fields</h3>
+  <div class="row">
+    <div class="field" style="flex:1"><label>Name *</label>
+      <input type="text" name="name" value="{{ form.name }}" required
+             autofocus style="width:100%;max-width:480px">
+      {% if errors.name %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.name }}</p>{% endif %}
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="field"><label>Finished weight (g)</label>
+      <input type="text" name="finished_weight_g" value="{{ form.finished_weight_g }}"
+             inputmode="decimal" style="width:160px">
+      {% if errors.finished_weight_g %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.finished_weight_g }}</p>{% endif %}
+    </div>
+    <div class="field"><label>Deposit weight (g)</label>
+      <input type="text" name="deposit_weight_g" value="{{ form.deposit_weight_g }}"
+             inputmode="decimal" style="width:160px">
+      {% if errors.deposit_weight_g %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.deposit_weight_g }}</p>{% endif %}
+    </div>
+    <div class="field"><label>Cook loss %</label>
+      <input type="text" name="cook_loss_pct" value="{{ form.cook_loss_pct }}"
+             inputmode="decimal" style="width:120px">
+      {% if errors.cook_loss_pct %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.cook_loss_pct }}</p>{% endif %}
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="field">
+      <label style="display:inline-flex;align-items:center;gap:8px">
+        <input type="checkbox" name="sold_as_product" {% if form.sold_as_product %}checked{% endif %}>
+        Sold as a standalone product
+      </label>
+    </div>
+  </div>
+</div>
+<p>
+  <button class="btn" type="submit">Save changes</button>
+  &nbsp;<a href="{% url 'recipe_detail' recipe.pk %}" class="muted">cancel</a>
+</p>
+</form>
+
+<p class="muted" style="font-size:12px;margin:14px 0 0">
+  Saving locks these fields against the next bulk re-import — your edits will not be overwritten when the workbook is re-imported on deploy. Recipe lines (ingredients and sub-recipes) still rebuild from the workbook on each import. Editing those will land in a later stage.
+</p>
+{% endblock %}

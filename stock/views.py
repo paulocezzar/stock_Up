@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponseForbidden
-from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer
+from .models import Supplier, Product, SupplierPrice, Stocktake, StockLine, Department, Delivery, Batch, Adjustment, Recipe, RecipeLine, RecipeCycleError, Customer, SuppressedRecipe
 from .ai_extract import extract_lines, auto_match, ExtractError
 from .recipe_import import (
     parse_recipe_workbook, parse_recipe_workbook_bulk,
@@ -558,16 +558,125 @@ def recipe_detail(request, pk):
     return render(request, "stock/recipe_detail.html", context)
 
 
-@require_POST
 @login_required
 def recipe_delete(request, pk):
+    """Confirm + delete a recipe.
+
+    GET renders a confirmation page that lists any parent recipes
+    referencing this one as a sub_recipe (so the operator sees the
+    knock-on effect before they pull the trigger). POST performs the
+    deletion:
+      * the recipe's own RecipeLines disappear via CASCADE;
+      * RecipeLines in OTHER recipes that referenced this one as a
+        sub_recipe are removed first (RecipeLine.sub_recipe is PROTECT,
+        so leaving them would raise an IntegrityError);
+      * a SuppressedRecipe row records the code so the bulk re-import
+        on the next deploy doesn't silently bring it back.
+    Department-scoped, login-gated. Un-suppression is a one-row delete
+    in the Django admin.
+    """
     recipe = get_object_or_404(Recipe, pk=pk)
     if recipe.department and not recipe.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    code = recipe.code
-    recipe.delete()
-    messages.success(request, f"Deleted recipe {code}.")
-    return redirect("recipes")
+    parents = list(recipe.parents())
+    if request.method == "POST":
+        code = recipe.code
+        name = recipe.name
+        # Drop dangling sub_recipe references from parent recipes first —
+        # RecipeLine.sub_recipe is on_delete=PROTECT, so without this the
+        # final recipe.delete() raises IntegrityError. Parent recipes
+        # survive; only the lines pointing at the deleted sub disappear.
+        RecipeLine.objects.filter(sub_recipe=recipe).delete()
+        recipe.delete()
+        SuppressedRecipe.objects.update_or_create(
+            code=code,
+            defaults={"reason": f"Deleted via UI: {name}"[:200]},
+        )
+        # Former parents may now have no remaining children referencing
+        # this recipe; re-derive their sold flag so the badge reflects
+        # reality. Manual overrides are still respected.
+        Recipe.recompute_all_sold_defaults()
+        msg = f"Deleted recipe {code}."
+        if parents:
+            msg += (f" {len(parents)} parent recipe(s) lost a sub-recipe "
+                    f"reference: {', '.join(p.code for p in parents)}.")
+        msg += " The next re-import will skip this code."
+        messages.success(request, msg)
+        return redirect("recipes")
+    return render(request, "stock/recipe_delete_confirm.html", {
+        "recipe": recipe,
+        "parents": parents,
+    })
+
+
+@login_required
+def recipe_edit(request, pk):
+    """Edit a recipe's basic fields by hand.
+
+    Editable: name, finished_weight_g, deposit_weight_g, cook_loss_pct,
+    sold_as_product. Recipe LINES (ingredients / sub-recipes) are not
+    touched in this stage — that's a later milestone.
+
+    Saving sets ``is_basic_manual=True`` and ``is_sold_manual=True`` so
+    the next ``import_recipes_bulk`` leaves every field the operator
+    edited alone; lines still rebuild from the workbook because the
+    bill-of-materials must stay in sync with the export.
+    """
+    recipe = get_object_or_404(Recipe, pk=pk)
+    if recipe.department and not recipe.department.accessible_to(request.user):
+        return HttpResponseForbidden("Not your department.")
+
+    def _ctx(form, errors=None):
+        return {"recipe": recipe, "form": form, "errors": errors or {}}
+
+    if request.method == "POST":
+        form = {
+            "name": (request.POST.get("name") or "").strip(),
+            "finished_weight_g": (request.POST.get("finished_weight_g") or "").strip(),
+            "deposit_weight_g": (request.POST.get("deposit_weight_g") or "").strip(),
+            "cook_loss_pct": (request.POST.get("cook_loss_pct") or "").strip(),
+            "sold_as_product": request.POST.get("sold_as_product") == "on",
+        }
+        errors = {}
+        if not form["name"]:
+            errors["name"] = "Name is required."
+        finished = _dec(form["finished_weight_g"])
+        deposit = _dec(form["deposit_weight_g"])
+        cook_loss = _dec(form["cook_loss_pct"])
+        if form["finished_weight_g"] and finished is None:
+            errors["finished_weight_g"] = "Enter a number."
+        if form["deposit_weight_g"] and deposit is None:
+            errors["deposit_weight_g"] = "Enter a number."
+        if form["cook_loss_pct"] and cook_loss is None:
+            errors["cook_loss_pct"] = "Enter a number."
+        if errors:
+            return render(request, "stock/recipe_edit.html", _ctx(form, errors))
+        recipe.name = form["name"]
+        recipe.finished_weight_g = finished
+        recipe.deposit_weight_g = deposit
+        recipe.cook_loss_pct = cook_loss
+        recipe.sold_as_product = form["sold_as_product"]
+        # Both manual flags flip on: the next import must not overwrite
+        # the basics OR re-derive the sold flag from references.
+        recipe.is_basic_manual = True
+        recipe.is_sold_manual = True
+        recipe.save()
+        messages.success(request,
+                         f"Saved edits to {recipe.code}. "
+                         "Re-imports will preserve these changes.")
+        return redirect("recipe_detail", pk=recipe.pk)
+
+    form = {
+        "name": recipe.name,
+        "finished_weight_g": (str(recipe.finished_weight_g)
+                              if recipe.finished_weight_g is not None else ""),
+        "deposit_weight_g": (str(recipe.deposit_weight_g)
+                             if recipe.deposit_weight_g is not None else ""),
+        "cook_loss_pct": (str(recipe.cook_loss_pct)
+                          if recipe.cook_loss_pct is not None else ""),
+        "sold_as_product": recipe.sold_as_product,
+    }
+    return render(request, "stock/recipe_edit.html", _ctx(form))
 
 
 @login_required

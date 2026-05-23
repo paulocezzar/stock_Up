@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine
+from .models import (
+    Department, Supplier, Product, SupplierPrice, Stocktake, StockLine,
+    SuppressedRecipe,
+)
 
 
 @admin.register(Department)
@@ -46,3 +49,11 @@ class SupplierPriceAdmin(admin.ModelAdmin):
     list_display = ("product", "supplier", "pack_weight", "pack_price", "per_1000")
     search_fields = ("product__name", "supplier__name")
     list_filter = ("supplier",)
+
+
+@admin.register(SuppressedRecipe)
+class SuppressedRecipeAdmin(admin.ModelAdmin):
+    """Recipe codes the UI has deleted. Delete a row here to un-suppress
+    (the next bulk re-import will then re-create the recipe)."""
+    list_display = ("code", "reason", "suppressed_at")
+    search_fields = ("code", "reason")

@@ -20,6 +20,7 @@ from openpyxl import load_workbook
 
 from .models import (
     Product, Recipe, RecipeCycleError, RecipeLine, RecipePackaging,
+    SuppressedRecipe,
 )
 
 
@@ -586,6 +587,15 @@ def save_recipes(parsed, department):
     stub_products = []
     unknown_ingredients = []
 
+    # Codes the operator has deleted via the UI must not come back on
+    # re-import — neither as the main row from their own sheet, nor as
+    # auto-stubbed sub-recipe references from other sheets that still
+    # mention them. Held in SuppressedRecipe; un-suppress by deleting
+    # the admin row (see the model docstring).
+    suppressed_codes = set(
+        SuppressedRecipe.objects.values_list("code", flat=True))
+    suppressed_skipped = []
+
     # Bulk imports (one sheet per recipe) reference the same NPD-R code
     # across several sheets — once as the main of its own sheet, once or
     # more as a sub-recipe section under each parent. The breakdowns are
@@ -595,24 +605,39 @@ def save_recipes(parsed, department):
     deduped = []
     seen_codes = set()
     for spec in parsed:
-        if spec["code"] in seen_codes:
+        code = spec["code"]
+        if code in seen_codes:
             continue
-        seen_codes.add(spec["code"])
+        if code in suppressed_codes:
+            suppressed_skipped.append(code)
+            continue
+        seen_codes.add(code)
         deduped.append(spec)
 
     recipes_by_code = {}
     for spec in deduped:
-        recipe, was_created = Recipe.objects.update_or_create(
-            code=spec["code"],
-            defaults={
-                "name": (spec["name"] or spec["code"]).strip(),
-                "finished_weight_g": spec.get("finished_weight_g"),
-                "deposit_weight_g": spec.get("deposit_weight_g"),
-                "cook_loss_pct": spec.get("cook_loss_pct"),
-                "method_text": spec.get("method_text") or "",
-                "department": department,
-            },
-        )
+        # Existing Recipe with is_basic_manual=True keeps its hand-edited
+        # basic fields (name, weights, cook loss). Lines below still get
+        # rebuilt from the workbook so the bill of materials stays in
+        # sync — only the operator-owned descriptors are protected.
+        existing = Recipe.objects.filter(code=spec["code"]).first()
+        if existing is not None and existing.is_basic_manual:
+            existing.method_text = spec.get("method_text") or ""
+            existing.department = department
+            existing.save(update_fields=["method_text", "department"])
+            recipe, was_created = existing, False
+        else:
+            recipe, was_created = Recipe.objects.update_or_create(
+                code=spec["code"],
+                defaults={
+                    "name": (spec["name"] or spec["code"]).strip(),
+                    "finished_weight_g": spec.get("finished_weight_g"),
+                    "deposit_weight_g": spec.get("deposit_weight_g"),
+                    "cook_loss_pct": spec.get("cook_loss_pct"),
+                    "method_text": spec.get("method_text") or "",
+                    "department": department,
+                },
+            )
         recipes_by_code[spec["code"]] = recipe
         (created if was_created else updated).append(recipe)
 
@@ -641,6 +666,14 @@ def save_recipes(parsed, department):
             code = line["code"]
             weight = line["weight_g"]
             if line["is_subrecipe"]:
+                # A suppressed sub-recipe reference must not auto-stub a
+                # new Recipe row — that would silently undo the deletion.
+                # Drop the line; the parent's bill of materials loses
+                # that sub but the operator's choice is honoured.
+                if code in suppressed_codes:
+                    if code not in suppressed_skipped:
+                        suppressed_skipped.append(code)
+                    continue
                 sub = recipes_by_code.get(code)
                 if sub is None:
                     sub, was_new = Recipe.objects.get_or_create(
@@ -690,6 +723,7 @@ def save_recipes(parsed, department):
         "stub_subrecipes": stub_subrecipes,
         "stub_products": stub_products,
         "unknown_ingredients": unknown_ingredients,
+        "suppressed_skipped": suppressed_skipped,
     }
 
 

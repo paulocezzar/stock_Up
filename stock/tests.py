@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, SimpleTestCase, Client
-from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer
+from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe
 from .ai_extract import parse_lines_json, auto_match
 from .templatetags.pack_format import pack_size
 
@@ -4659,3 +4659,295 @@ class RecipeBulkImportTests(TestCase):
         self.assertEqual(r.status_code, 302)
         main = Recipe.objects.get(code="NPD-R800")
         self.assertEqual(r.headers["Location"], f"/recipes/{main.pk}/")
+
+
+class RecipeDeleteEditTests(TestCase):
+    """Stage A recipe management: delete (with persistence) + basic-field edit."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.other_dept = Department.objects.create(name="Butchery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    # ---- delete ----
+
+    def test_delete_confirmation_page_lists_parents(self):
+        # Component referenced by two parents → confirmation page must
+        # list both with links.
+        sub = Recipe.objects.create(code="NPD-R900", name="Filling",
+                                    department=self.dept)
+        p1 = Recipe.objects.create(code="NPD-R901", name="Pie One",
+                                   department=self.dept)
+        p2 = Recipe.objects.create(code="NPD-R902", name="Pie Two",
+                                   department=self.dept)
+        RecipeLine.objects.create(recipe=p1, sub_recipe=sub,
+                                  weight_g=Decimal("10"), ordering=0)
+        RecipeLine.objects.create(recipe=p2, sub_recipe=sub,
+                                  weight_g=Decimal("20"), ordering=0)
+
+        r = self.client.get(f"/recipes/{sub.pk}/delete/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Warning copy + both parents linked
+        self.assertIn("used as a sub-recipe", body.lower())
+        self.assertIn(f'href="/recipes/{p1.pk}/"', body)
+        self.assertIn(f'href="/recipes/{p2.pk}/"', body)
+        self.assertIn("NPD-R901", body)
+        self.assertIn("NPD-R902", body)
+
+    def test_delete_removes_recipe_and_writes_suppression(self):
+        r = Recipe.objects.create(code="NPD-R999", name="Gone",
+                                  department=self.dept)
+        resp = self.client.post(f"/recipes/{r.pk}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Recipe.objects.filter(code="NPD-R999").exists())
+        # Suppression row written so the next re-import won't bring it back.
+        self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R999").exists())
+
+    def test_delete_clears_dangling_sub_recipe_lines_in_parents(self):
+        # RecipeLine.sub_recipe is on_delete=PROTECT, so deleting a sub
+        # without first dropping the lines that reference it would raise
+        # IntegrityError. The view must clean those up cleanly.
+        sub = Recipe.objects.create(code="NPD-R900", name="Filling",
+                                    department=self.dept)
+        parent = Recipe.objects.create(code="NPD-R901", name="Pie",
+                                       department=self.dept)
+        flour = Product.objects.create(
+            code="NPD-I9001", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        RecipeLine.objects.create(recipe=parent, ingredient=flour,
+                                  weight_g=Decimal("100"), ordering=0)
+        RecipeLine.objects.create(recipe=parent, sub_recipe=sub,
+                                  weight_g=Decimal("50"), ordering=1)
+
+        resp = self.client.post(f"/recipes/{sub.pk}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        # Parent survives.
+        self.assertTrue(Recipe.objects.filter(code="NPD-R901").exists())
+        # The sub-recipe line is gone but the flour line is still there.
+        parent.refresh_from_db()
+        self.assertEqual(parent.lines.count(), 1)
+        kept = parent.lines.get()
+        self.assertEqual(kept.ingredient, flour)
+
+    def test_reimport_does_not_resurrect_suppressed_recipe(self):
+        # Manually mark NPD-R800 (in the committed sourdough sample) as
+        # suppressed, then run the single-file importer. The recipe must
+        # not come back.
+        from django.core.management import call_command
+        SuppressedRecipe.objects.create(code="NPD-R800",
+                                        reason="Deleted by hand")
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        self.assertFalse(Recipe.objects.filter(code="NPD-R800").exists())
+        # The other six recipes from the same workbook still imported.
+        self.assertGreaterEqual(Recipe.objects.count(), 6)
+        # And NPD-R364 (which the workbook had as the sole child of R800)
+        # is no longer used as a component anywhere — because the only
+        # parent that referenced it was the suppressed R800.
+        r364 = Recipe.objects.get(code="NPD-R364")
+        self.assertFalse(r364.is_used_as_component)
+
+    def test_un_suppress_via_admin_reenables_import(self):
+        # Delete the SuppressedRecipe row (the "un-suppress" path) and
+        # the next import re-creates the recipe normally.
+        from django.core.management import call_command
+        SuppressedRecipe.objects.create(code="NPD-R800")
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        self.assertFalse(Recipe.objects.filter(code="NPD-R800").exists())
+        # Un-suppress
+        SuppressedRecipe.objects.filter(code="NPD-R800").delete()
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        self.assertTrue(Recipe.objects.filter(code="NPD-R800").exists())
+
+    def test_delete_cross_department_returns_403(self):
+        other = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                      department=self.other_dept)
+        # GET confirmation page → 403
+        r = self.client.get(f"/recipes/{other.pk}/delete/")
+        self.assertEqual(r.status_code, 403)
+        # POST → 403, recipe still exists
+        r = self.client.post(f"/recipes/{other.pk}/delete/")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R777").exists())
+        # No suppression row was written either.
+        self.assertFalse(SuppressedRecipe.objects.filter(code="NPD-R777").exists())
+
+    def test_delete_requires_login(self):
+        r = Recipe.objects.create(code="NPD-R999", name="Gone",
+                                  department=self.dept)
+        anon = Client()
+        for verb in ("get", "post"):
+            resp = getattr(anon, verb)(f"/recipes/{r.pk}/delete/")
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn("/login/", resp.headers["Location"])
+
+    def test_delete_via_get_does_not_delete(self):
+        # Hitting the URL with GET shows the confirmation but must never
+        # mutate; only the explicit POST commits the deletion.
+        r = Recipe.objects.create(code="NPD-R999", name="Gone",
+                                  department=self.dept)
+        resp = self.client.get(f"/recipes/{r.pk}/delete/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R999").exists())
+        self.assertFalse(SuppressedRecipe.objects.filter(code="NPD-R999").exists())
+
+    # ---- edit basic fields ----
+
+    def test_edit_form_renders_with_current_values(self):
+        r = Recipe.objects.create(
+            code="NPD-R100", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("400"),
+            deposit_weight_g=Decimal("420"),
+            cook_loss_pct=Decimal("5.00"),
+            sold_as_product=True)
+        resp = self.client.get(f"/recipes/{r.pk}/edit/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('value="Loaf"', body)
+        self.assertIn('value="400.000"', body)
+        self.assertIn('value="420.000"', body)
+        self.assertIn('value="5.00"', body)
+        self.assertIn('checked', body)
+
+    def test_edit_persists_basic_fields_and_flips_manual_flag(self):
+        r = Recipe.objects.create(
+            code="NPD-R100", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("400"),
+            sold_as_product=True)
+        resp = self.client.post(f"/recipes/{r.pk}/edit/", {
+            "name": "Big Loaf",
+            "finished_weight_g": "500",
+            "deposit_weight_g": "525",
+            "cook_loss_pct": "5",
+            # sold checkbox deliberately unchecked
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.headers["Location"], f"/recipes/{r.pk}/")
+        r.refresh_from_db()
+        self.assertEqual(r.name, "Big Loaf")
+        self.assertEqual(r.finished_weight_g, Decimal("500"))
+        self.assertEqual(r.deposit_weight_g, Decimal("525"))
+        self.assertEqual(r.cook_loss_pct, Decimal("5"))
+        self.assertFalse(r.sold_as_product)
+        # Both manual flags flipped on — protects against re-import overwrite.
+        self.assertTrue(r.is_basic_manual)
+        self.assertTrue(r.is_sold_manual)
+
+    def test_edit_survives_bulk_reimport(self):
+        # Edit a recipe by hand, then re-import the same workbook —
+        # the edited basic fields must survive (lines still rebuild).
+        from django.core.management import call_command
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        r = Recipe.objects.get(code="NPD-R800")
+        self.client.post(f"/recipes/{r.pk}/edit/", {
+            "name": "Custom Name",
+            "finished_weight_g": "1234",
+            "deposit_weight_g": "1300",
+            "cook_loss_pct": "9.99",
+            "sold_as_product": "on",
+        })
+        # Re-import
+        call_command("import_recipe", SAMPLE_RECIPE_XLSX,
+                     "--department", "Bakery")
+        r.refresh_from_db()
+        self.assertEqual(r.name, "Custom Name")
+        self.assertEqual(r.finished_weight_g, Decimal("1234"))
+        self.assertEqual(r.deposit_weight_g, Decimal("1300"))
+        self.assertEqual(r.cook_loss_pct, Decimal("9.99"))
+        self.assertTrue(r.sold_as_product)
+        # Lines were rebuilt from the workbook (Stage A doesn't touch
+        # lines), so the bill of materials is in sync.
+        self.assertEqual(r.lines.count(), 1)
+
+    def test_edit_validates_required_name(self):
+        r = Recipe.objects.create(code="NPD-R100", name="Loaf",
+                                  department=self.dept)
+        resp = self.client.post(f"/recipes/{r.pk}/edit/", {
+            "name": "",
+            "finished_weight_g": "",
+            "deposit_weight_g": "",
+            "cook_loss_pct": "",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Name is required", resp.content)
+        r.refresh_from_db()
+        self.assertEqual(r.name, "Loaf")
+        self.assertFalse(r.is_basic_manual)
+
+    def test_edit_cross_department_returns_403(self):
+        other = Recipe.objects.create(code="NPD-R777", name="Theirs",
+                                      department=self.other_dept)
+        r = self.client.get(f"/recipes/{other.pk}/edit/")
+        self.assertEqual(r.status_code, 403)
+        r = self.client.post(f"/recipes/{other.pk}/edit/", {"name": "X"})
+        self.assertEqual(r.status_code, 403)
+        other.refresh_from_db()
+        self.assertEqual(other.name, "Theirs")
+
+    def test_edit_requires_login(self):
+        r = Recipe.objects.create(code="NPD-R100", name="Loaf",
+                                  department=self.dept)
+        anon = Client()
+        resp = anon.get(f"/recipes/{r.pk}/edit/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/login/", resp.headers["Location"])
+
+    def test_detail_page_links_to_edit_and_delete(self):
+        r = Recipe.objects.create(code="NPD-R100", name="Loaf",
+                                  department=self.dept)
+        resp = self.client.get(f"/recipes/{r.pk}/")
+        body = resp.content.decode()
+        self.assertIn(f'href="/recipes/{r.pk}/edit/"', body)
+        self.assertIn(f'href="/recipes/{r.pk}/delete/"', body)
+
+    def test_bulk_import_skips_suppressed_subrecipe_reference(self):
+        # A workbook references NPD-R901 as a sub-recipe of NPD-R900.
+        # NPD-R901 is suppressed, so the bulk import must NOT auto-stub
+        # a new Recipe row for it; the parent's line is dropped instead.
+        import os
+        import tempfile
+        from openpyxl import Workbook
+        from stock.recipe_import import save_recipes, parse_recipe_workbook_bulk
+
+        SuppressedRecipe.objects.create(code="NPD-R901",
+                                        reason="Deleted by hand")
+        fd, path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            wb = Workbook()
+            wb.remove(wb.active)
+
+            def _sheet(title, code, name, lines):
+                ws = wb.create_sheet(title=title)
+                ws.append(["Recipe Code:", code])
+                ws.append(["Recipe Description:", name])
+                ws.append([])
+                ws.append(["Code", "Description", "Weight (g)"])
+                for c, d, w in lines:
+                    ws.append([c, d, w])
+                ws.append(["Total", "", sum(w for _, _, w in lines)])
+
+            _sheet("R900", "NPD-R900", "Loaf",
+                   [("NPD-I9001", "Flour", 200),
+                    ("NPD-R901", "Suppressed Filling", 50)])
+            wb.save(path)
+            parsed, failures, n = parse_recipe_workbook_bulk(path)
+        finally:
+            os.unlink(path)
+        stats = save_recipes(parsed, self.dept)
+        self.assertIn("NPD-R901", stats["suppressed_skipped"])
+        # NPD-R901 was NOT auto-stubbed.
+        self.assertFalse(Recipe.objects.filter(code="NPD-R901").exists())
+        # NPD-R900 imported with only the surviving ingredient line.
+        r900 = Recipe.objects.get(code="NPD-R900")
+        self.assertEqual(r900.lines.count(), 1)
+        self.assertEqual(r900.lines.get().ingredient.code, "NPD-I9001")

@@ -56,6 +56,12 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(
                 f"  {len(stats['stub_products'])} unknown ingredient(s) stubbed "
                 "(add supplier prices later)"))
+        if stats.get("suppressed_skipped"):
+            self.stdout.write(self.style.WARNING(
+                f"  {len(stats['suppressed_skipped'])} suppressed code(s) "
+                "skipped (deleted in the UI; un-suppress via admin):"))
+            for code in stats["suppressed_skipped"]:
+                self.stdout.write(f"    {code}")
         if failures:
             self.stdout.write(self.style.WARNING("  Sheets that failed to parse:"))
             for title, reason in failures:

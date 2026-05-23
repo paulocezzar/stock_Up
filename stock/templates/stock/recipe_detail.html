@@ -158,9 +158,8 @@ field couldn't express.
 <p>
   <a href="{% url 'recipes' %}">← all recipes</a>
   &nbsp;·&nbsp;
-  <form method="post" action="{% url 'recipe_delete' recipe.pk %}" style="display:inline"
-        onsubmit="return confirm('Delete recipe {{ recipe.code }}? Its lines will be removed but ingredient products are kept.')">{% csrf_token %}
-    <button class="btn ghost" style="padding:4px 12px">delete recipe</button>
-  </form>
+  <a href="{% url 'recipe_edit' recipe.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  &nbsp;
+  <a href="{% url 'recipe_delete' recipe.pk %}" class="btn ghost" style="padding:4px 12px">delete recipe</a>
 </p>
 {% endblock %}
