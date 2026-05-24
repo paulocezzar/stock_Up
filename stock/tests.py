@@ -8612,3 +8612,139 @@ class HistoricalImportVersionGateTests(TestCase):
         call_command("import_historical_orders", self.SHEET, stdout=out2)
         body2 = out2.getvalue()
         self.assertIn("already imported", body2)
+
+
+def _seed_all_w_c_30_mar_customers(dept):
+    """Seed every Customer the w/c 30 Mar 2026 historical sheet
+    references — both per-customer tabs and wholesale customer rows.
+    Without products it doesn't matter for reconciliation: every
+    OrderLine still snapshots the sheet's name + price, so the DB
+    total per customer matches the sheet total exactly. Returns a
+    dict ``{name: Customer}`` for callers that want a handle."""
+    names = [
+        # Customer tabs (the ones with actual orders w/c 30 Mar).
+        "ECOM", "CREAMERY FARMSHOP", "FARMSHOP", "FARMYARD",
+        "CREAMERY F&B", "BOTANICAL ROOMS", "Garden Cafe", "CBK",
+        "ROMAN VILLA", "FARM KITCHEN", "NPD", "STAFF FOOD",
+        "BAKERY INTERNAL USE", "VA & EVENTS", "GELATO", "GGE",
+        "HIVE", "HK", "HR", "ECOM MKT", "SOG", "TN100", "QAS",
+        "BUTCHERY", "STAFF FOOD AVALON", "BAKERY WASTAGE",
+        "YARLINGTON",
+        # Wholesale customers from the WHOLESALE tab.
+        "THE OLD PHARMACY", "NUMBER ONE BRUTON", "TEALS",
+        "TEALS KITCHEN", "TREETOPS CAFÉ",
+        "PINKMANS - WHITELADIES ROAD", "PINKMANS - WESTBURY-ON-TRYN",
+        "PINKMANS - CATHEDRAL", "PINKMANS - STOKES CROFT",
+        "BISHOPSTROW HOTEL", "THE EYE", "WE THE CURIOUS",
+        "SOCIETY- CORRIDOR", "SOCIETY- KINGSMEAD",
+        "SOCIETY- BALDWIN ST", "SOCIETY- HARBOURSIDE",
+        "CORTADO", "MJOLK", "WHOLESALE SAMPLES",
+    ]
+    out = {}
+    for name in names:
+        out[name], _ = Customer.objects.get_or_create(
+            name=name, defaults={"department": dept})
+    return out
+
+
+class ReconcileOrdersCommandTests(TestCase):
+    """End-to-end check that reconcile_orders prints a clean
+    RECONCILES verdict for an imported historical week."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+    WEEK_START = datetime.date(2026, 3, 30)
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        _seed_all_w_c_30_mar_customers(self.dept)
+
+    def test_w_c_30_mar_reconciles_to_eighteen_six_ten_oh_five(self):
+        from django.core.management import call_command
+        from io import StringIO
+        from stock.order_import import import_historical_workbook
+        # Populate the DB exactly the way the deploy would.
+        import_historical_workbook(self.SHEET, force=True)
+        # Then run the reconciliation report and inspect its output.
+        out = StringIO()
+        call_command("reconcile_orders", self.SHEET, stdout=out)
+        body = out.getvalue()
+        # The verdict.
+        self.assertIn("RECONCILES", body)
+        self.assertNotIn("MISMATCH", body)
+        # Grand totals (both per-sheet and imported) line up.
+        self.assertIn("£ 18,610.05", body)
+        # Section headings present (per-customer table + wholesale).
+        self.assertIn("CUSTOMER TABS", body)
+        self.assertIn("WHOLESALE BREAKDOWN", body)
+        # Customer-tabs subtotal and wholesale subtotal.
+        self.assertIn("£ 12,949.60", body)
+        self.assertIn("£  5,660.45", body)
+        # Every per-row entry says OK, none flagged.
+        self.assertNotIn("NO CUSTOMER ROW", body)
+        # Difference line.
+        self.assertIn("Difference:", body)
+        self.assertIn("£      0.00", body)
+
+    def test_command_is_read_only(self):
+        # Before/after snapshot of every Order + OrderLine + stamp —
+        # reconcile_orders must touch none of them.
+        from django.core.management import call_command
+        from stock.order_import import import_historical_workbook
+        from stock.models import HistoricalImport
+        import_historical_workbook(self.SHEET, force=True)
+        before = (
+            set(Order.objects.values_list("pk", "customer_id",
+                                          "order_date")),
+            set(OrderLine.objects.values_list(
+                "pk", "order_id", "product_name", "unit_price",
+                "qty_ordered")),
+            set(HistoricalImport.objects.values_list(
+                "pk", "week_start", "import_version")),
+        )
+        call_command("reconcile_orders", self.SHEET)
+        after = (
+            set(Order.objects.values_list("pk", "customer_id",
+                                          "order_date")),
+            set(OrderLine.objects.values_list(
+                "pk", "order_id", "product_name", "unit_price",
+                "qty_ordered")),
+            set(HistoricalImport.objects.values_list(
+                "pk", "week_start", "import_version")),
+        )
+        self.assertEqual(before, after,
+            "reconcile_orders must not modify any data")
+
+    def test_command_reports_missing_file_as_command_error(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command(
+                "reconcile_orders",
+                "data/historical/does_not_exist.xlsm")
+
+    def test_command_flags_per_customer_mismatch(self):
+        # If a single customer's DB total drifts from the sheet, the
+        # report must flag the per-row mismatch AND the overall verdict.
+        from django.core.management import call_command
+        from io import StringIO
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET, force=True)
+        # Pick a customer with imported lines and bump one qty so the
+        # DB total no longer matches the sheet.
+        teals = Customer.objects.get(name__iexact="TEALS")
+        line = OrderLine.objects.filter(
+            order__customer=teals,
+            order__order_date=self.WEEK_START).first()
+        self.assertIsNotNone(line)
+        line.qty_ordered = line.qty_ordered + Decimal("1")
+        line.save()
+        out = StringIO()
+        call_command("reconcile_orders", self.SHEET, stdout=out)
+        body = out.getvalue()
+        self.assertIn("MISMATCH", body)
+        # The per-row TEALS line is flagged too — the report isn't
+        # just summary-level.
+        teals_line = next(
+            (l for l in body.splitlines() if l.startswith("TEALS ")), None)
+        self.assertIsNotNone(teals_line, "TEALS row missing from report")
+        self.assertIn("MISMATCH", teals_line)
