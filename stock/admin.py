@@ -1,8 +1,17 @@
 from django.contrib import admin
 from .models import (
     Department, Supplier, Product, SupplierPrice, Stocktake, StockLine,
-    SuppressedRecipe,
+    SuppressedRecipe, Customer,
 )
+
+
+@admin.register(Customer)
+class CustomerAdmin(admin.ModelAdmin):
+    list_display = ("name", "customer_type", "is_internal",
+                    "department", "active")
+    list_filter = ("customer_type", "is_internal", "department", "active")
+    list_editable = ("is_internal",)
+    search_fields = ("name", "location", "ordered_by")
 
 
 @admin.register(Department)

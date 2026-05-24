@@ -32,6 +32,22 @@ products × days grid fits more day columns without horizontal scroll.
   .day-tile .count{font-size:11px;color:var(--muted);margin-top:2px}
   .day-tile .value{font-family:var(--mono);font-weight:600;font-size:13px}
   .day-tile.empty .value{color:var(--muted);font-weight:400}
+  /* Internal-use subtotal line. Sits below the day strip, same
+     monospace number column so the eye lines up the figure under
+     the Week tile. Muted so it never competes with the headline. */
+  .internal-subtotal{display:flex;justify-content:flex-end;align-items:baseline;
+    gap:10px;margin:-6px 0 14px;font-size:11px;color:var(--muted);
+    font-variant-numeric:tabular-nums}
+  .internal-subtotal .label{font-family:var(--disp);letter-spacing:.5px;
+    text-transform:uppercase}
+  .internal-subtotal .value{font-family:var(--mono);font-weight:600;
+    color:inherit}
+  /* "internal" pill in the customer list. Muted by default so it
+     reads as an annotation, not as a state change. */
+  .cust-list .cust .tag-internal{font-family:var(--disp);font-size:10px;
+    letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;
+    border:1px solid var(--line);border-radius:2px;color:var(--muted);
+    margin-left:8px}
 
   /* Customer picker — active-first list with order count + value badge,
      inactives dimmed but still clickable. */
@@ -109,9 +125,13 @@ products × days grid fits more day columns without horizontal scroll.
 
 {% comment %}
 Compact per-day totals strip — the single at-a-glance summary for
-the week. The final "Week" tile rolls Mon..Sun into a grand total,
-so a separate stats block above would be redundant. Each weekday
-tile is a link that narrows the view to that specific day via ?date=.
+the week. The final "Week" tile rolls Mon..Sun into a grand total
+of EXTERNAL revenue (Customer.is_internal=False). Internal-use
+customers (BAKERY INTERNAL USE, BAKERY WASTAGE) are excluded from
+these figures so the headline reflects real external sales; their
+subtotal renders directly underneath the strip so the bakery's own
+consumption stays visible without inflating the revenue. Each
+weekday tile is a link that narrows the view to that specific day.
 {% endcomment %}
 <div class="day-strip">
   {% for day in days %}
@@ -130,6 +150,12 @@ tile is a link that narrows the view to that specific day via ?date=.
     <span class="value">£{{ week_total_value }}</span>
   </div>
 </div>
+{% if week_total_internal %}
+  <div class="internal-subtotal">
+    <span class="label">Internal use (excluded from week total)</span>
+    <span class="value">£{{ week_total_internal }}</span>
+  </div>
+{% endif %}
 
 {% if customer_links and not grid %}
 <div class="card">
@@ -145,7 +171,7 @@ tile is a link that narrows the view to that specific day via ?date=.
         {% endif %}
       {% endifchanged %}
       <li class="cust {% if cl.active %}active{% else %}muted{% endif %}">
-        <span class="name"><a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a></span>
+        <span class="name"><a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}">{{ cl.customer.name }}</a>{% if cl.is_internal %}<span class="tag-internal" title="Non-revenue: this customer's orders are EXCLUDED from the Week total but still listed.">internal</span>{% endif %}</span>
         {% if cl.active %}
           <span class="badge">{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}</span>
         {% else %}

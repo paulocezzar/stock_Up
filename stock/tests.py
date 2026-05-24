@@ -8748,3 +8748,207 @@ class ReconcileOrdersCommandTests(TestCase):
             (l for l in body.splitlines() if l.startswith("TEALS ")), None)
         self.assertIsNotNone(teals_line, "TEALS row missing from report")
         self.assertIn("MISMATCH", teals_line)
+
+
+class CustomerIsInternalTests(TestCase):
+    """``Customer.is_internal`` carves out non-revenue customers
+    (BAKERY INTERNAL USE + BAKERY WASTAGE). The flag is set by the
+    0024 data migration and is editable on the customer edit page +
+    in Django admin. It changes the displayed Week / per-day totals
+    but never mutates the underlying orders."""
+
+    def test_migration_flagged_exactly_two_named_customers(self):
+        # Apply-time check: the migration ran against the test DB on
+        # setup, but we don't have those rows here. Create them now
+        # and call the data function directly so we can assert its
+        # selectivity in isolation from any other test fixture.
+        from importlib import import_module
+        mig = import_module("stock.migrations.0024_customer_is_internal")
+        dept = Department.objects.create(name="Bakery")
+        Customer.objects.create(name="BAKERY INTERNAL USE", department=dept)
+        Customer.objects.create(name="bakery wastage",  # lower-case to prove iexact
+                                department=dept)
+        Customer.objects.create(name="GARDEN CAFE", department=dept)
+        Customer.objects.create(name="TEALS", department=dept)
+        Customer.objects.update(is_internal=False)
+
+        class _AppsStub:
+            def get_model(self, _app_label, _model_name):
+                return Customer
+        mig.flag_internal_customers(_AppsStub(), schema_editor=None)
+
+        flagged = set(Customer.objects.filter(is_internal=True)
+                      .values_list("name", flat=True))
+        self.assertEqual(flagged, {"BAKERY INTERNAL USE", "bakery wastage"})
+        # All others stay external — the flag is opt-in.
+        for name in ("GARDEN CAFE", "TEALS"):
+            self.assertFalse(
+                Customer.objects.get(name=name).is_internal,
+                f"{name} must NOT be flagged is_internal")
+
+
+class OrdersWeekViewInternalSplitTests(TestCase):
+    """The orders weekly view splits totals: external (headline Week +
+    per-day tiles) vs internal-use subtotal. Internal customers stay
+    in the customer list with their own figures + an 'internal' tag."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Three customers covering the matrix.
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", department=self.dept)  # external
+        self.bakery_use = Customer.objects.create(
+            name="BAKERY INTERNAL USE", department=self.dept,
+            is_internal=True)
+        self.bakery_waste = Customer.objects.create(
+            name="BAKERY WASTAGE", department=self.dept,
+            is_internal=True)
+        self.croissant = SaleProduct.objects.create(
+            name="Croissant (Loose)", price=Decimal("1.10"),
+            department=self.dept)
+        # One Garden Café order (external £11.00) and two internal
+        # orders (£5.50 + £2.20 = £7.70 internal subtotal).
+        self.week_start = datetime.date(2026, 5, 18)
+        for cust, qty in [(self.garden, Decimal("10")),
+                          (self.bakery_use, Decimal("5")),
+                          (self.bakery_waste, Decimal("2"))]:
+            o = Order.objects.create(
+                customer=cust, department=self.dept,
+                order_date=self.week_start)
+            OrderLine.objects.create(
+                order=o, sale_product=self.croissant, qty_ordered=qty)
+
+    def _get(self, **params):
+        params.setdefault("week", self.week_start.isoformat())
+        from urllib.parse import urlencode
+        return self.client.get(f"/orders/?{urlencode(params)}")
+
+    def test_week_total_excludes_internal_customers(self):
+        resp = self._get()
+        ctx = resp.context
+        # External revenue only: 10 × 1.10 = £11.00.
+        self.assertEqual(ctx["week_total_value"], Decimal("11.00"))
+        # Internal subtotal: 5×1.10 + 2×1.10 = £7.70.
+        self.assertEqual(ctx["week_total_internal"], Decimal("7.70"))
+
+    def test_per_day_total_excludes_internal_customers(self):
+        resp = self._get()
+        days = resp.context["days"]
+        mon = next(d for d in days if d["date"] == self.week_start)
+        self.assertEqual(mon["total"], Decimal("11.00"),
+            "Monday's headline 'total' must be external-only")
+        self.assertEqual(mon["total_internal"], Decimal("7.70"),
+            "Monday's internal subtotal must capture the internal orders")
+        # Counts still include ALL orders (data-completeness: the
+        # 'N orders' chip on the tile reflects everything that landed).
+        self.assertEqual(mon["count"], 3)
+
+    def test_internal_subtotal_rendered_when_non_zero(self):
+        # Page surfaces an "Internal use (excluded from week total)"
+        # line directly under the day strip iff there's any internal
+        # order in the week.
+        body = self._get().content.decode()
+        self.assertIn("Internal use (excluded from week total)", body)
+        self.assertIn("£7.70", body)
+        # And the headline week tile shows the external £11.00, not
+        # the inflated £18.70.
+        self.assertIn("£11.00", body)
+        self.assertNotIn("£18.70", body)
+
+    def test_internal_subtotal_hidden_when_no_internal_orders(self):
+        # If only external orders exist, the subtotal line should NOT
+        # show up — no point taking up screen space for £0.
+        for cust in (self.bakery_use, self.bakery_waste):
+            Order.objects.filter(customer=cust).delete()
+        body = self._get().content.decode()
+        self.assertNotIn("Internal use (excluded from week total)", body)
+
+    def test_internal_customers_still_in_customer_list_with_tag(self):
+        # Every customer is listed with their own value + an
+        # 'internal' tag on the non-revenue ones. Their order count
+        # and value remain visible — the flag only changes whether
+        # they roll up into the week headline.
+        body = self._get().content.decode()
+        self.assertIn("BAKERY INTERNAL USE", body)
+        self.assertIn("BAKERY WASTAGE", body)
+        # The "internal" pill renders next to each flagged customer
+        # (rendered as `<span class="tag-internal">internal</span>`).
+        self.assertEqual(body.count(">internal<"), 2,
+            "internal pill must appear exactly once per flagged customer")
+        # Per-customer value still visible — internal use is £5.50,
+        # bakery wastage is £2.20.
+        self.assertIn("£5.50", body)
+        self.assertIn("£2.20", body)
+
+    def test_customer_edit_page_exposes_is_internal_toggle(self):
+        # The checkbox is rendered on the edit form so an operator
+        # can flip the flag without dropping into the admin.
+        body = self.client.get(
+            f"/customers/{self.bakery_use.pk}/edit/").content.decode()
+        self.assertIn('name="is_internal"', body)
+        self.assertIn("checked", body)
+        # Submitting unchecked clears the flag; submitting checked
+        # sets it. Round-trip via POST.
+        resp = self.client.post(f"/customers/{self.bakery_use.pk}/edit/", {
+            "name": self.bakery_use.name,
+            "customer_type": self.bakery_use.customer_type,
+            "location": "",
+            "ordered_by": "",
+            # is_internal omitted from POST → unchecked → False
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.bakery_use.refresh_from_db()
+        self.assertFalse(self.bakery_use.is_internal)
+
+    def test_filtering_to_internal_customer_still_shows_their_orders(self):
+        # ?customer=<internal> still narrows the page to that
+        # customer's grid (we don't hide internal customers; we just
+        # exclude them from the headline). The filtered view's grid
+        # still shows their orders.
+        resp = self._get(customer=str(self.bakery_use.pk))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["selected_customer"],
+                         self.bakery_use)
+
+
+class ReconcileIncludesInternalCustomersTests(TestCase):
+    """The reconciliation report MUST include internal-use customers —
+    it's a data-completeness check, orthogonal to the
+    revenue-display split."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+
+    def test_reconcile_orders_still_lists_internal_customers(self):
+        from django.core.management import call_command
+        from io import StringIO
+        dept = Department.objects.create(name="Bakery")
+        _seed_all_w_c_30_mar_customers(dept)
+        # Apply the same data-migration logic the live deploy uses so
+        # the seeded BAKERY INTERNAL USE / BAKERY WASTAGE customers
+        # carry is_internal=True for this test.
+        Customer.objects.filter(
+            name__iexact="BAKERY INTERNAL USE").update(is_internal=True)
+        Customer.objects.filter(
+            name__iexact="BAKERY WASTAGE").update(is_internal=True)
+        from stock.order_import import import_historical_workbook
+        import_historical_workbook(self.SHEET, force=True)
+        out = StringIO()
+        call_command("reconcile_orders", self.SHEET, stdout=out)
+        body = out.getvalue()
+        # Both internal customers appear in the per-tab table — their
+        # data still flows through the reconciliation just like every
+        # other customer. The is_internal flag is purely a Week-total
+        # display thing, not a reconcile-time filter.
+        self.assertIn("BAKERY INTERNAL USE", body)
+        # BAKERY WASTAGE happens to be an "empty" tab on this week's
+        # sheet (no priced lines), so it lands in the empty-tab pool
+        # rather than as a per-row line — but it's still seeded as a
+        # Customer and still listed elsewhere if it had orders.
+        # The crucial RECONCILES verdict must still hold.
+        self.assertIn("RECONCILES", body)

@@ -419,6 +419,20 @@ class Customer(models.Model):
     # the order sheet). The importer skips these entirely on every run, so
     # hand-added customers never get clobbered or deleted by a re-import.
     is_manual_entry = models.BooleanField(default=False)
+    # ``is_internal`` flags non-revenue "customer" rows used purely to track
+    # the bakery's OWN consumption (BAKERY INTERNAL USE) or waste
+    # (BAKERY WASTAGE). They keep first-class Orders so the data is visible
+    # and reconcilable, but the Orders weekly view excludes them from the
+    # external-revenue Week / per-day totals and surfaces them as a
+    # separate "internal use" subtotal. Orthogonal to ``customer_type``
+    # — that's an Estate-vs-wholesale account classifier; both kinds are
+    # external revenue. ``is_internal`` is the "doesn't count as revenue"
+    # axis. Defaults False so adding a new customer never silently drops
+    # them from the headline.
+    is_internal = models.BooleanField(
+        default=False,
+        help_text="Internal use / non-revenue (bakery's own consumption or "
+                  "wastage). Excluded from the Week total but still listed.")
     department = models.ForeignKey(
         "Department", related_name="customers",
         on_delete=models.CASCADE, null=True, blank=True)

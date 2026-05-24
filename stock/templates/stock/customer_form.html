@@ -28,6 +28,22 @@
       <input type="text" name="ordered_by" value="{{ form.ordered_by }}"
              placeholder="contact name" style="width:260px"></div>
   </div>
+  {% if mode == "edit" %}
+  <div class="row" style="margin-top:10px">
+    <div class="field" style="max-width:560px">
+      <label style="display:flex;gap:8px;align-items:center;font-weight:400">
+        <input type="checkbox" name="is_internal"
+               {% if form.is_internal %}checked{% endif %}>
+        <span><strong>Internal use / non-revenue</strong>
+          <span class="muted" style="font-size:12px">
+            — bakery's own consumption or wastage. Still listed with its
+            own orders + value, but excluded from the Week revenue total.
+          </span>
+        </span>
+      </label>
+    </div>
+  </div>
+  {% endif %}
 </div>
 <p>
   <button class="btn" type="submit">{% if mode == "edit" %}Save changes{% else %}Create customer{% endif %}</button>

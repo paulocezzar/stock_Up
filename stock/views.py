@@ -1752,9 +1752,12 @@ def customer_edit(request, pk):
         location = (request.POST.get("location") or "").strip()
         ordered_by = (request.POST.get("ordered_by") or "").strip()
         customer_type = request.POST.get("customer_type")
+        # Checkbox: present in POST iff ticked; absent means False.
+        is_internal = bool(request.POST.get("is_internal"))
         valid_types = {k for k, _ in Customer.TYPE_CHOICES}
         form = {"name": name, "location": location,
-                "ordered_by": ordered_by, "customer_type": customer_type}
+                "ordered_by": ordered_by, "customer_type": customer_type,
+                "is_internal": is_internal}
         if not name:
             messages.error(request, "Name is required.")
             return render(request, "stock/customer_form.html",
@@ -1780,6 +1783,7 @@ def customer_edit(request, pk):
         customer.location = location
         customer.ordered_by = ordered_by
         customer.customer_type = customer_type
+        customer.is_internal = is_internal
         customer.is_type_manual = True  # operator owns this row's content now
         customer.save()
         messages.success(request, f"Saved changes to '{customer.name}'.")
@@ -1787,7 +1791,8 @@ def customer_edit(request, pk):
 
     form = {"name": customer.name, "location": customer.location,
             "ordered_by": customer.ordered_by,
-            "customer_type": customer.customer_type}
+            "customer_type": customer.customer_type,
+            "is_internal": customer.is_internal}
     return render(request, "stock/customer_form.html",
                   _customer_form_context(form, mode="edit",
                                          default_type=customer.customer_type,
@@ -2525,23 +2530,36 @@ def orders_home(request):
 
     # Per-day buckets (Mon–Sun) — the rendered week always shows the
     # full strip even when a day is empty, so the operator sees the
-    # week's shape rather than a sparse list.
+    # week's shape rather than a sparse list. Day totals split into
+    # external (the headline revenue) and internal (BAKERY INTERNAL USE
+    # + BAKERY WASTAGE etc. — anything Customer.is_internal). Templates
+    # show external on the tiles; internal surfaces as a subtotal line
+    # underneath so the bakery's own consumption stays visible without
+    # inflating the revenue figure.
     days = []
     for i in range(7):
         day = week_start + datetime.timedelta(days=i)
         day_orders = [o for o in orders if o.order_date == day]
-        day_total = sum((o.total_value() for o in day_orders), Decimal("0"))
+        day_total_external = sum(
+            (o.total_value() for o in day_orders
+             if not o.customer.is_internal), Decimal("0"))
+        day_total_internal = sum(
+            (o.total_value() for o in day_orders
+             if o.customer.is_internal), Decimal("0"))
         days.append({
             "date": day,
             "label": day.strftime("%A"),
             "is_today": day == datetime.date.today(),
             "orders": day_orders,
             "count": len(day_orders),
-            "total": day_total,
+            "total": day_total_external,
+            "total_internal": day_total_internal,
         })
 
     week_total_orders = len(orders)
     week_total_value = sum((d["total"] for d in days), Decimal("0"))
+    week_total_internal = sum(
+        (d["total_internal"] for d in days), Decimal("0"))
 
     customers = list(Customer.objects.filter(department=dept).order_by("name"))
     today_week = _monday_of(datetime.date.today())
@@ -2576,6 +2594,7 @@ def orders_home(request):
                 "n_orders": n_orders,
                 "total_value": total_value,
                 "active": n_orders > 0,
+                "is_internal": c.is_internal,
             })
         customer_links.sort(
             key=lambda cl: (0 if cl["active"] else 1,
@@ -2608,6 +2627,7 @@ def orders_home(request):
         "days": days,
         "week_total_orders": week_total_orders,
         "week_total_value": week_total_value,
+        "week_total_internal": week_total_internal,
         "selected_customer": selected_customer,
         "grid": grid,
         "customer_links": customer_links,
