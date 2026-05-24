@@ -9269,3 +9269,313 @@ class BlankPriceRecoveryIntegrationTests(TestCase):
             product_name="TN Biscuits Easter Bag_EA").first()
         self.assertIsNotNone(easter)
         self.assertEqual(easter.unit_price, Decimal("2.50"))
+
+
+class FinancialsClassificationTests(TestCase):
+    """Customer.customer_type + Customer.is_internal already encode the
+    3-way channel classification the Financials page needs, so the
+    page doesn't need a separate is_wholesale field or any per-request
+    derivation from the order-sheet's WHOLESALE-tab provenance.
+
+    * customer_type='wholesale' → wholesale channel
+    * customer_type='internal' + is_internal=False → internal channel
+    * is_internal=True → excluded (BAKERY INTERNAL USE / BAKERY WASTAGE
+      — the bakery's own consumption, not demand).
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        # Estate outlets (internal channel)
+        for n in ("GARDEN CAFE", "FARMSHOP", "BOTANICAL ROOMS", "CBK"):
+            Customer.objects.create(
+                name=n, customer_type=Customer.INTERNAL,
+                department=self.dept)
+        # Wholesale accounts (set by import_customers from WHOLESALE tab)
+        for n in ("TEALS", "MJOLK", "CORTADO",
+                  "PINKMANS - WHITELADIES ROAD",
+                  "SOCIETY- CORRIDOR"):
+            Customer.objects.create(
+                name=n, customer_type=Customer.WHOLESALE,
+                department=self.dept)
+        # Excluded (set by migration 0024)
+        Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        Customer.objects.create(
+            name="BAKERY WASTAGE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+
+    def test_known_wholesale_accounts_classify_as_wholesale(self):
+        for n in ("TEALS", "MJOLK", "CORTADO",
+                  "PINKMANS - WHITELADIES ROAD",
+                  "SOCIETY- CORRIDOR"):
+            c = Customer.objects.get(name=n)
+            self.assertEqual(
+                c.customer_type, Customer.WHOLESALE,
+                f"{n} should be classified wholesale (set by "
+                f"import_customers from WHOLESALE-tab membership)")
+            self.assertFalse(
+                c.is_internal,
+                f"{n} is a real wholesale account, not bakery-own-use")
+
+    def test_estate_outlets_classify_as_internal_channel(self):
+        for n in ("GARDEN CAFE", "FARMSHOP", "BOTANICAL ROOMS", "CBK"):
+            c = Customer.objects.get(name=n)
+            self.assertEqual(c.customer_type, Customer.INTERNAL)
+            self.assertFalse(
+                c.is_internal,
+                f"{n} is an Estate outlet — real revenue, must NOT be "
+                f"in the excluded bakery-own-use bucket")
+
+    def test_bakery_internal_use_and_wastage_are_excluded(self):
+        for n in ("BAKERY INTERNAL USE", "BAKERY WASTAGE"):
+            c = Customer.objects.get(name=n)
+            self.assertTrue(
+                c.is_internal,
+                f"{n} must be flagged is_internal=True so the Financials "
+                f"page excludes it from every total")
+
+    def test_every_customer_is_exactly_one_channel(self):
+        # Each Customer in the dept maps to exactly one of
+        # {wholesale, internal, excluded} — the page's classification
+        # is a TOTAL partition, no double-counting and no orphans.
+        buckets = {"wholesale": 0, "internal": 0, "excluded": 0}
+        for c in Customer.objects.filter(department=self.dept):
+            channels = []
+            if c.is_internal:
+                channels.append("excluded")
+            elif c.customer_type == Customer.WHOLESALE:
+                channels.append("wholesale")
+            elif c.customer_type == Customer.INTERNAL:
+                channels.append("internal")
+            self.assertEqual(
+                len(channels), 1,
+                f"{c.name} matched {channels} — must be exactly one")
+            buckets[channels[0]] += 1
+        # Sanity: setUp seeded 4 internal, 5 wholesale, 2 excluded.
+        self.assertEqual(buckets, {"internal": 4, "wholesale": 5,
+                                   "excluded": 2})
+
+
+class FinancialsAggregationTests(TestCase):
+    """range_totals + per_week_split + per_customer_in_channel are the
+    three pure aggregation primitives the Financials page is built
+    from. Their contract:
+
+    * internal_total + wholesale_total == range grand total (over all
+      non-excluded customers)
+    * each channel's per-customer rows sum to that channel's total
+    * is_internal=True customers never contribute to any total
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.wc1 = datetime.date(2026, 3, 30)   # Monday
+        self.wc2 = datetime.date(2026, 4, 6)    # Monday
+        self.wc3 = datetime.date(2026, 4, 13)   # Monday
+        # 2 internal Estate outlets, 2 wholesale accounts, 1 excluded.
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.farmshop = Customer.objects.create(
+            name="FARMSHOP", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.mjolk = Customer.objects.create(
+            name="MJOLK", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.internal_use = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        # Seed orders × lines across the 3 weeks. Values picked so
+        # every assertion is exact rather than approximate.
+        self._line(self.garden, self.wc1, Decimal("10"), Decimal("2.50"))   # 25.00
+        self._line(self.garden, self.wc2, Decimal("4"), Decimal("3.00"))    # 12.00
+        self._line(self.farmshop, self.wc1, Decimal("8"), Decimal("1.25"))  # 10.00
+        self._line(self.farmshop, self.wc3, Decimal("5"), Decimal("2.00"))  # 10.00
+        self._line(self.teals, self.wc1, Decimal("20"), Decimal("1.10"))    # 22.00
+        self._line(self.teals, self.wc2, Decimal("6"), Decimal("1.50"))     # 9.00
+        self._line(self.mjolk, self.wc2, Decimal("10"), Decimal("1.10"))    # 11.00
+        self._line(self.mjolk, self.wc3, Decimal("4"), Decimal("1.50"))     # 6.00
+        # An excluded order — must NOT show up in any total.
+        self._line(self.internal_use, self.wc1, Decimal("100"),
+                   Decimal("9.99"))                                          # 999.00
+        # Pre-computed expectations
+        self.exp_internal = Decimal("57.00")    # 25 + 12 + 10 + 10
+        self.exp_wholesale = Decimal("48.00")   # 22 + 9 + 11 + 6
+        self.exp_grand = Decimal("105.00")
+
+    def _line(self, customer, order_date, qty, price):
+        o = Order.objects.create(
+            customer=customer, department=self.dept,
+            order_date=order_date)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=f"P{o.pk}",
+            unit_price=price, qty_ordered=qty)
+
+    def test_range_totals_internal_plus_wholesale_equals_grand_total(self):
+        from stock.financials import range_totals
+        r = range_totals(self.dept, self.wc1, self.wc3)
+        self.assertEqual(r["internal"], self.exp_internal)
+        self.assertEqual(r["wholesale"], self.exp_wholesale)
+        self.assertEqual(r["total"], self.exp_grand)
+        self.assertEqual(r["internal"] + r["wholesale"], r["total"])
+
+    def test_range_totals_excludes_is_internal_customers(self):
+        # The BAKERY INTERNAL USE order is £999 — if it leaked in, the
+        # grand total would be £1,104. It must NOT contribute.
+        from stock.financials import range_totals
+        r = range_totals(self.dept, self.wc1, self.wc3)
+        self.assertEqual(r["total"], Decimal("105.00"))
+        # Defensive: deleting the BAKERY INTERNAL USE order shouldn't
+        # change ANY total.
+        Order.objects.filter(customer=self.internal_use).delete()
+        r2 = range_totals(self.dept, self.wc1, self.wc3)
+        self.assertEqual(r2, r)
+
+    def test_range_totals_narrowed_range_only_counts_in_range(self):
+        from stock.financials import range_totals
+        # Just wc2 → garden=12 + teals=9 + mjolk=11 = 32
+        r = range_totals(self.dept, self.wc2, self.wc2)
+        self.assertEqual(r["internal"], Decimal("12.00"))
+        self.assertEqual(r["wholesale"], Decimal("20.00"))
+        self.assertEqual(r["total"], Decimal("32.00"))
+
+    def test_per_week_split_each_week_sums_to_week_total(self):
+        from stock.financials import per_week_split
+        rows = per_week_split(self.dept, self.wc1, self.wc3)
+        self.assertEqual([r["wc"] for r in rows],
+                         [self.wc1, self.wc2, self.wc3])
+        by_wc = {r["wc"]: r for r in rows}
+        # wc1: garden 25 + farmshop 10 internal; teals 22 wholesale
+        self.assertEqual(by_wc[self.wc1]["internal"], Decimal("35.00"))
+        self.assertEqual(by_wc[self.wc1]["wholesale"], Decimal("22.00"))
+        self.assertEqual(by_wc[self.wc1]["total"], Decimal("57.00"))
+        # wc3: farmshop 10 internal; mjolk 6 wholesale
+        self.assertEqual(by_wc[self.wc3]["internal"], Decimal("10.00"))
+        self.assertEqual(by_wc[self.wc3]["wholesale"], Decimal("6.00"))
+        # Every week's internal+wholesale equals its total.
+        for r in rows:
+            self.assertEqual(r["internal"] + r["wholesale"], r["total"])
+
+    def test_per_week_split_sums_to_range_total(self):
+        from stock.financials import per_week_split, range_totals
+        rows = per_week_split(self.dept, self.wc1, self.wc3)
+        rt = range_totals(self.dept, self.wc1, self.wc3)
+        self.assertEqual(sum(r["internal"] for r in rows), rt["internal"])
+        self.assertEqual(sum(r["wholesale"] for r in rows), rt["wholesale"])
+        self.assertEqual(sum(r["total"] for r in rows), rt["total"])
+
+    def test_per_week_split_empty_weeks_render_as_zero(self):
+        from stock.financials import per_week_split
+        # Add an extra week beyond wc3 — no orders, must still appear.
+        wc4 = self.wc3 + datetime.timedelta(days=7)
+        rows = per_week_split(self.dept, self.wc1, wc4)
+        self.assertEqual(len(rows), 4)
+        last = rows[-1]
+        self.assertEqual(last["wc"], wc4)
+        self.assertEqual(last["total"], Decimal("0"))
+
+    def test_per_customer_wholesale_rows_sum_to_wholesale_total(self):
+        from stock.financials import (
+            per_customer_in_channel, range_totals)
+        rows = per_customer_in_channel(
+            self.dept, Customer.WHOLESALE, self.wc1, self.wc3)
+        names = [r["name"] for r in rows]
+        # Both wholesale customers present, ranked biggest first.
+        self.assertEqual(set(names), {"TEALS", "MJOLK"})
+        self.assertEqual(names[0], "TEALS")  # 31.00 vs MJOLK 17.00
+        self.assertEqual(rows[0]["total"], Decimal("31.00"))
+        self.assertEqual(rows[1]["total"], Decimal("17.00"))
+        # Sum equals wholesale channel total from range_totals.
+        rt = range_totals(self.dept, self.wc1, self.wc3)
+        self.assertEqual(sum(r["total"] for r in rows), rt["wholesale"])
+        # % shares add to 100 (within rounding).
+        self.assertAlmostEqual(
+            float(sum(r["pct"] for r in rows)), 100.0, places=1)
+
+    def test_per_customer_internal_excludes_bakery_internal_use(self):
+        # The internal-channel breakdown is Estate outlets ONLY —
+        # BAKERY INTERNAL USE must NEVER appear here even though it
+        # carries customer_type='internal'.
+        from stock.financials import per_customer_in_channel
+        rows = per_customer_in_channel(
+            self.dept, Customer.INTERNAL, self.wc1, self.wc3)
+        names = {r["name"] for r in rows}
+        self.assertEqual(names, {"GARDEN CAFE", "FARMSHOP"})
+        self.assertNotIn("BAKERY INTERNAL USE", names)
+
+    def test_available_week_range_returns_earliest_and_latest_mondays(self):
+        from stock.financials import available_week_range
+        earliest, latest = available_week_range(self.dept)
+        self.assertEqual(earliest, self.wc1)
+        self.assertEqual(latest, self.wc3)
+
+
+class FinancialsViewTests(TestCase):
+    """The /financials/ page renders the channel split, weekly trend
+    and per-customer breakdowns. Smoke-level checks: status code +
+    expected sections + sane defaults."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["current_department_pk"] = self.dept.pk
+        session.save()
+        self.wc = datetime.date(2026, 3, 30)
+        teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        for cust, qty, price in (
+            (teals, Decimal("10"), Decimal("2.00")),     # 20.00 wholesale
+            (garden, Decimal("4"), Decimal("3.50")),     # 14.00 internal
+        ):
+            o = Order.objects.create(
+                customer=cust, department=self.dept, order_date=self.wc)
+            OrderLine.objects.create(
+                order=o, product_name="P", unit_price=price,
+                qty_ordered=qty)
+
+    def test_default_range_renders_with_split_and_tables(self):
+        r = self.client.get("/financials/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Headline channel split
+        self.assertIn("Internal", body)
+        self.assertIn("Wholesale", body)
+        self.assertIn("£20.00", body)   # wholesale total
+        self.assertIn("£14.00", body)   # internal total
+        self.assertIn("£34.00", body)   # grand total
+        # Both breakdown tables present
+        self.assertIn("TEALS", body)
+        self.assertIn("GARDEN CAFE", body)
+        # BAKERY INTERNAL USE excluded everywhere
+        self.assertNotIn("BAKERY INTERNAL USE", body)
+
+    def test_narrowed_range_renders(self):
+        # Same start + end → just one week — must still render.
+        r = self.client.get(
+            f"/financials/?from={self.wc.isoformat()}"
+            f"&to={self.wc.isoformat()}")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("£34.00", r.content.decode())
+
+    def test_nav_includes_financials_link(self):
+        r = self.client.get("/home/")
+        self.assertIn('href="/financials/"', r.content.decode())

@@ -2490,6 +2490,82 @@ def _default_week_start(dept):
 
 
 @login_required
+def financials_home(request):
+    """Channel split (Internal vs Wholesale) for a week range.
+
+    Defaults to the full data window — earliest week with orders →
+    latest. The two ``?from=YYYY-MM-DD&to=YYYY-MM-DD`` params snap
+    to their Monday so any day within a week resolves to that week.
+    BAKERY INTERNAL USE + BAKERY WASTAGE (Customer.is_internal) are
+    EXCLUDED from every total here; they're the bakery's own
+    consumption, not external demand.
+    """
+    from .financials import (
+        available_week_range, per_customer_in_channel,
+        per_week_split, range_totals,
+    )
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+
+    default_from, default_to = available_week_range(dept)
+
+    def _snap(raw, fallback):
+        raw = (raw or "").strip()
+        if not raw:
+            return fallback
+        try:
+            return _monday_of(datetime.date.fromisoformat(raw))
+        except ValueError:
+            return fallback
+
+    from_wc = _snap(request.GET.get("from"), default_from)
+    to_wc = _snap(request.GET.get("to"), default_to)
+    if to_wc < from_wc:
+        # Operator typo — silently swap rather than show an empty page.
+        from_wc, to_wc = to_wc, from_wc
+
+    totals = range_totals(dept, from_wc, to_wc)
+    weekly = per_week_split(dept, from_wc, to_wc)
+    wholesale_rows = per_customer_in_channel(
+        dept, Customer.WHOLESALE, from_wc, to_wc)
+    internal_rows = per_customer_in_channel(
+        dept, Customer.INTERNAL, from_wc, to_wc)
+
+    # CSS bar widths — the headline split uses two segments summing to
+    # 100%; the weekly trend scales each bar to the largest week so
+    # the eye reads the peak as full-height. Computed here, not in
+    # the template, so the template stays purely declarative.
+    total = totals["total"] or Decimal("1")
+    pct_internal = (totals["internal"] / total * 100) if totals["total"] else Decimal("0")
+    pct_wholesale = (totals["wholesale"] / total * 100) if totals["total"] else Decimal("0")
+    max_week_total = max((w["total"] for w in weekly), default=Decimal("0"))
+    for w in weekly:
+        scale = (w["total"] / max_week_total * 100
+                 if max_week_total else Decimal("0"))
+        w["bar_pct"] = float(scale)
+        if w["total"]:
+            w["bar_internal_pct"] = float(w["internal"] / w["total"] * 100)
+            w["bar_wholesale_pct"] = float(w["wholesale"] / w["total"] * 100)
+        else:
+            w["bar_internal_pct"] = 0.0
+            w["bar_wholesale_pct"] = 0.0
+
+    return render(request, "stock/financials.html", {
+        "from_wc": from_wc,
+        "to_wc": to_wc,
+        "default_from": default_from,
+        "default_to": default_to,
+        "totals": totals,
+        "pct_internal": pct_internal.quantize(Decimal("0.1")),
+        "pct_wholesale": pct_wholesale.quantize(Decimal("0.1")),
+        "weekly": weekly,
+        "wholesale_rows": wholesale_rows,
+        "internal_rows": internal_rows,
+    })
+
+
+@login_required
 def orders_home(request):
     """Orders list grouped by week, then by day (Mon–Sun).
 

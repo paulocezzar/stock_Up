@@ -65,6 +65,9 @@ urlpatterns = [
          name="sale_product_delete"),
     path("sale-products/<int:pk>/link/", views.sale_product_link_set,
          name="sale_product_link_set"),
+    # Financials — channel split (Internal vs Wholesale) over a week
+    # range. Read-only; aggregates from existing OrderLine snapshots.
+    path("financials/", views.financials_home, name="financials"),
     # Orders — chunk 1: model + manual CRUD. No import yet.
     path("orders/", views.orders_home, name="orders"),
     path("orders/new/", views.order_new, name="order_new"),

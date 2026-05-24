@@ -1,0 +1,234 @@
+{% extends "stock/_section_financials.html" %}
+{% block n_financials %}on{% endblock %}
+{% block body %}
+<style>
+  /* Range selector — same shape as the Orders week-nav so the two
+     pages feel like siblings. */
+  .fin-range{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);
+    padding:10px 14px;margin-bottom:18px}
+  .fin-range .label{font-family:var(--disp);font-size:11px;
+    text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .fin-range form{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    margin:0}
+  .fin-range input[type=date]{padding:4px 8px}
+  .fin-range .current{font-family:var(--disp);font-weight:600;font-size:14px;
+    color:var(--amber)}
+
+  /* Channel split — two-segment horizontal bar above the headline
+     numbers. Pure CSS — no JS, no chart library. */
+  .fin-split{margin-bottom:24px}
+  .fin-split .nums{display:flex;align-items:baseline;gap:22px;flex-wrap:wrap;
+    margin-bottom:10px}
+  .fin-split .nums .stat{display:flex;flex-direction:column;gap:2px}
+  .fin-split .nums .k{font-family:var(--disp);font-size:11px;
+    text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .fin-split .nums .v{font-family:var(--disp);font-weight:600;font-size:22px;
+    font-variant-numeric:tabular-nums}
+  .fin-split .nums .pct{font-family:var(--mono);font-size:12px;color:var(--muted);
+    margin-left:6px}
+  .fin-split .nums .grand .v{color:var(--amber)}
+  .fin-split .bar{display:flex;height:24px;background:var(--panel2);
+    border:1px solid var(--line);overflow:hidden}
+  .fin-split .seg{display:flex;align-items:center;justify-content:center;
+    font-family:var(--disp);font-size:11px;letter-spacing:.5px;
+    text-transform:uppercase;color:#111;min-width:0;overflow:hidden;
+    white-space:nowrap}
+  .fin-split .seg.internal{background:var(--amber)}
+  .fin-split .seg.wholesale{background:#9d6f00}
+  .fin-split .seg.wholesale{color:#fff}
+
+  /* Weekly trend — one stacked column per week, scaled to the
+     tallest week so the peak reads as 100%. CSS-only stacking via
+     flex-direction:column-reverse so internal sits at the bottom. */
+  .fin-trend{margin-bottom:24px}
+  .fin-trend h3{font-family:var(--disp);font-size:13px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);margin:0 0 14px}
+  .fin-trend .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);
+    margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;
+    font-family:var(--disp)}
+  .fin-trend .legend .swatch{display:inline-block;width:10px;height:10px;
+    margin-right:5px;vertical-align:middle}
+  .fin-trend .legend .swatch.internal{background:var(--amber)}
+  .fin-trend .legend .swatch.wholesale{background:#9d6f00}
+  .fin-trend .chart{display:flex;align-items:flex-end;gap:6px;height:180px;
+    padding:8px;background:var(--panel2);border:1px solid var(--line);
+    overflow-x:auto}
+  .fin-trend .wk{display:flex;flex-direction:column;align-items:stretch;
+    flex:1 1 0;min-width:38px;height:100%;gap:4px}
+  .fin-trend .wk .col{flex:1;display:flex;flex-direction:column-reverse;
+    border:1px solid var(--line);background:transparent;min-height:1px;
+    position:relative}
+  .fin-trend .wk .stack{display:flex;flex-direction:column-reverse;
+    width:100%;align-items:stretch}
+  .fin-trend .wk .seg{width:100%}
+  .fin-trend .wk .seg.internal{background:var(--amber)}
+  .fin-trend .wk .seg.wholesale{background:#9d6f00}
+  .fin-trend .wk .meta{font-family:var(--mono);font-size:10px;color:var(--muted);
+    text-align:center;line-height:1.2}
+  .fin-trend .wk .meta .wc{display:block;font-family:var(--disp);
+    text-transform:uppercase;letter-spacing:.5px}
+  .fin-trend .wk .meta .v{font-variant-numeric:tabular-nums}
+
+  /* Per-channel breakdown tables — ranked, with a CSS-bar % column
+     so the eye reads the long-tail shape at a glance. */
+  .fin-tables{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:900px){.fin-tables{grid-template-columns:1fr}}
+  .fin-tables table{margin:0}
+  .fin-tables td.num,.fin-tables th.num{text-align:right;
+    font-variant-numeric:tabular-nums}
+  .fin-tables td.bar-cell{width:120px;padding:8px 14px}
+  .fin-tables .pctbar{position:relative;height:8px;background:var(--panel2);
+    border:1px solid var(--line)}
+  .fin-tables .pctbar .fill{position:absolute;top:0;left:0;bottom:0;
+    background:var(--amber)}
+  .fin-tables .wholesale .pctbar .fill{background:#9d6f00}
+  .fin-tables tfoot td{font-weight:600;background:var(--panel2);
+    border-top:2px solid var(--line);
+    font-family:var(--disp);text-transform:uppercase;letter-spacing:.5px;
+    font-size:12px}
+</style>
+
+<h2>Financials <span class="muted" style="font-size:14px">channel split</span></h2>
+
+<div class="fin-range">
+  <span class="label">Range</span>
+  <span class="current">w/c {{ from_wc|date:"d M Y" }} → w/c {{ to_wc|date:"d M Y" }}</span>
+  <form method="get" style="margin-left:auto">
+    <label class="label">from</label>
+    <input type="date" name="from" value="{{ from_wc|date:'Y-m-d' }}">
+    <label class="label">to</label>
+    <input type="date" name="to" value="{{ to_wc|date:'Y-m-d' }}">
+    <button class="btn ghost" type="submit" style="padding:3px 12px;font-size:11px">go</button>
+    {% if from_wc != default_from or to_wc != default_to %}
+      <a href="{% url 'financials' %}" class="muted" style="font-size:11px;margin-left:6px">reset</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card fin-split">
+  <h3 style="margin:0 0 14px;font-family:var(--disp);font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Channel split — total ordered for range</h3>
+  <div class="nums">
+    <div class="stat grand">
+      <span class="k">Grand total ordered</span>
+      <span class="v">£{{ totals.total }}</span>
+    </div>
+    <div class="stat">
+      <span class="k">Internal demand</span>
+      <span class="v">£{{ totals.internal }}<span class="pct">{{ pct_internal }}%</span></span>
+    </div>
+    <div class="stat">
+      <span class="k">Wholesale demand</span>
+      <span class="v">£{{ totals.wholesale }}<span class="pct">{{ pct_wholesale }}%</span></span>
+    </div>
+  </div>
+  {% if totals.total %}
+    <div class="bar" title="Internal {{ pct_internal }}% · Wholesale {{ pct_wholesale }}%">
+      {% if pct_internal %}<div class="seg internal" style="width:{{ pct_internal }}%">
+        Internal {{ pct_internal }}%
+      </div>{% endif %}
+      {% if pct_wholesale %}<div class="seg wholesale" style="width:{{ pct_wholesale }}%">
+        Wholesale {{ pct_wholesale }}%
+      </div>{% endif %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin:0">No orders for the selected range.</p>
+  {% endif %}
+</div>
+
+<div class="card fin-trend">
+  <h3>Weekly trend</h3>
+  <div class="legend">
+    <span><span class="swatch internal"></span>Internal</span>
+    <span><span class="swatch wholesale"></span>Wholesale</span>
+  </div>
+  <div class="chart">
+    {% for w in weekly %}
+      <div class="wk" title="w/c {{ w.wc|date:'d M Y' }} — Internal £{{ w.internal }} · Wholesale £{{ w.wholesale }} · Total £{{ w.total }}">
+        <div class="col">
+          {% if w.total %}
+            <div class="stack" style="height:{{ w.bar_pct }}%">
+              <div class="seg internal" style="height:{{ w.bar_internal_pct }}%"></div>
+              <div class="seg wholesale" style="height:{{ w.bar_wholesale_pct }}%"></div>
+            </div>
+          {% endif %}
+        </div>
+        <div class="meta">
+          <span class="wc">{{ w.wc|date:"d M" }}</span>
+          <span class="v">£{{ w.total }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="fin-tables">
+  <div class="card wholesale">
+    <h3>Wholesale breakdown</h3>
+    <table>
+      <thead><tr>
+        <th>Customer</th>
+        <th class="num">Ordered</th>
+        <th class="num">% of wholesale</th>
+        <th class="bar-cell"></th>
+      </tr></thead>
+      <tbody>
+      {% for r in wholesale_rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td class="num">£{{ r.total }}</td>
+          <td class="num">{{ r.pct }}%</td>
+          <td class="bar-cell"><div class="pctbar"><div class="fill" style="width:{{ r.pct }}%"></div></div></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No wholesale orders in range.</td></tr>
+      {% endfor %}
+      </tbody>
+      {% if wholesale_rows %}
+      <tfoot>
+        <tr>
+          <td>Wholesale total</td>
+          <td class="num">£{{ totals.wholesale }}</td>
+          <td class="num">100%</td>
+          <td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="card internal">
+    <h3>Internal breakdown <span class="muted" style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">Estate outlets only — Bakery Internal Use / Wastage excluded</span></h3>
+    <table>
+      <thead><tr>
+        <th>Customer</th>
+        <th class="num">Ordered</th>
+        <th class="num">% of internal</th>
+        <th class="bar-cell"></th>
+      </tr></thead>
+      <tbody>
+      {% for r in internal_rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td class="num">£{{ r.total }}</td>
+          <td class="num">{{ r.pct }}%</td>
+          <td class="bar-cell"><div class="pctbar"><div class="fill" style="width:{{ r.pct }}%"></div></div></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No internal orders in range.</td></tr>
+      {% endfor %}
+      </tbody>
+      {% if internal_rows %}
+      <tfoot>
+        <tr>
+          <td>Internal total</td>
+          <td class="num">£{{ totals.internal }}</td>
+          <td class="num">100%</td>
+          <td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endblock %}
