@@ -8472,6 +8472,130 @@ class WholesaleImportTests(TestCase):
         self.assertNotIn("wholesale", META_TABS)
 
 
+class WholesaleResilienceTests(TestCase):
+    """w/c 4 May 2026 used to import with ZERO wholesale orders.
+    The cause: rows 89 + 97 of the WHOLESALE tab are an exact
+    (PINKMANS-WAPPING WHARF, 'Sliced Apple Waste Sourdough', Sat)
+    duplicate that collides with OrderLine's partial-unique
+    (order, sale_product) constraint. Under the outer @transaction.
+    atomic, that single IntegrityError rolled back every wholesale
+    line for the week. The fix wraps each create in a savepoint so
+    the dup is dropped (first occurrence wins) and every other
+    priced line lands. The TEALS new-product blank-price rows
+    (Fruited Sourdough Loaf, 'Wheat & Rye Sourdough ' with trailing
+    space, Seeded Sourdough) snapshot at £0 and are surfaced via
+    ``lines_unpriced`` rather than aborting the tab."""
+
+    SHEET = "data/historical/order_sheet_2026_05_04.xlsm"
+    WEEK_START = datetime.date(2026, 5, 4)
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        # Seed the wholesale customers whose lines we care about. The
+        # rest legitimately land in customer_unmatched and don't affect
+        # this test.
+        self.pinkmans = Customer.objects.create(
+            name="PINKMANS-WAPPING WHARF",
+            customer_type=Customer.WHOLESALE, department=self.dept)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.society = Customer.objects.create(
+            name="SOCIETY- BALDWIN ST",
+            customer_type=Customer.WHOLESALE, department=self.dept)
+        # A name-matched SaleProduct so the dup-row collision is the
+        # real partial-unique constraint, not a happy NULL accident.
+        SaleProduct.objects.create(
+            name="Sliced Apple Waste Sourdough",
+            price=Decimal("2.30"), department=self.dept)
+
+    def _import(self):
+        from stock.order_import import (
+            import_wholesale_tab, make_price_recovery)
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            return import_wholesale_tab(
+                wb, recover_price=make_price_recovery(wb))
+        finally:
+            wb.close()
+
+    def test_duplicate_row_does_not_abort_wholesale_tab(self):
+        result = self._import()
+        # The whole reason this test exists: pre-fix this came back at 0.
+        self.assertGreater(
+            result["lines_imported"], 0,
+            "WHOLESALE tab must yield lines even when a duplicate row "
+            "trips the partial-unique (order, sale_product) constraint")
+        # PINKMANS-WAPPING WHARF (the customer holding the dup) must
+        # still have orders for the week — only the second occurrence
+        # of the offending row is dropped, not the whole customer.
+        week = [self.WEEK_START + datetime.timedelta(days=i)
+                for i in range(7)]
+        self.assertTrue(
+            Order.objects.filter(
+                customer=self.pinkmans, order_date__in=week).exists(),
+            "PINKMANS-WAPPING WHARF should still have orders despite "
+            "carrying the duplicate row")
+        # The dup itself surfaces in lines_skipped so the operator can
+        # see why one row was dropped.
+        skipped_names = [name for _, name, _, _ in result["lines_skipped"]]
+        self.assertIn("Sliced Apple Waste Sourdough", skipped_names)
+
+    def test_other_wholesale_customers_priced_lines_present(self):
+        # The pre-fix failure mode wiped every wholesale customer —
+        # TEALS and SOCIETY-BALDWIN ST included, even though their
+        # blocks have nothing to do with the duplicate. Assert their
+        # priced lines actually landed.
+        self._import()
+        week = [self.WEEK_START + datetime.timedelta(days=i)
+                for i in range(7)]
+        # TEALS — Croissant (Loose) at £1.10, qty=28 on Mon → £30.80
+        # line. Picking one priced TEALS line is enough to prove the
+        # tab didn't get rolled back.
+        teals_croissant = OrderLine.objects.filter(
+            order__customer=self.teals,
+            order__order_date__in=week,
+            product_name="Croissant (Loose)")
+        self.assertGreater(teals_croissant.count(), 0)
+        self.assertTrue(all(l.unit_price == Decimal("1.10")
+                            for l in teals_croissant))
+        # SOCIETY- BALDWIN ST — priced Sultana Pain Suisse rows landed.
+        society_lines = OrderLine.objects.filter(
+            order__customer=self.society,
+            order__order_date__in=week,
+            product_name__icontains="Sultana Pain Suisse")
+        self.assertGreater(society_lines.count(), 0)
+
+    def test_teals_new_product_blank_price_rows_recovered_from_products_tab(self):
+        # The three TEALS rows this week (Fruited Sourdough Loaf,
+        # 'Wheat & Rye Sourdough ' with trailing whitespace, Seeded
+        # Sourdough) have a blank Price£ cell on the WHOLESALE tab.
+        # They sit at £2.30 / £2.20 / £2.20 in the workbook's own
+        # Products tab — the price-recovery cascade must apply per
+        # line on the wholesale path, exactly as it does on customer
+        # tabs, so these rows land priced rather than skipping the
+        # whole tab. Trailing whitespace on the product name must not
+        # break the Products-tab lookup either.
+        self._import()
+        fri = self.WEEK_START + datetime.timedelta(days=4)
+        cases = [
+            ("Fruited Sourdough Loaf", Decimal("2.30")),
+            ("Wheat & Rye Sourdough", Decimal("2.20")),
+            ("Seeded Sourdough", Decimal("2.20")),
+        ]
+        for name, expected_price in cases:
+            line = OrderLine.objects.filter(
+                order__customer=self.teals, order__order_date=fri,
+                product_name=name).first()
+            self.assertIsNotNone(
+                line, f"{name!r} TEALS line missing for Fri {fri}")
+            self.assertEqual(
+                line.unit_price, expected_price,
+                f"{name!r} should be recovered from the workbook "
+                f"Products tab at {expected_price}, not £0")
+
+
 class HistoricalImportReconciliationTests(TestCase):
     """End-to-end reconciliation: the full historical import routes
     WHOLESALE through its handler, fixes blank-price rows to £0, and

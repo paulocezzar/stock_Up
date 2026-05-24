@@ -33,7 +33,7 @@ from collections import OrderedDict
 from decimal import Decimal, InvalidOperation
 import datetime
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 # Day-column offsets within each tab — 3-cell stride (Ordered /
 # Sent / Comments). The "ordered" cell is the one we care about.
@@ -510,7 +510,14 @@ WHOLESALE_TAB = "WHOLESALE"
 #   v3 — blank Price cells recovered from THIS workbook's Products
 #        tab, then from data/reference_prices.csv, before falling
 #        back to £0 (sheet-authoritative price recovery).
-HISTORICAL_IMPORT_VERSION = 3
+#   v4 — WHOLESALE per-line resilience: a duplicate (customer, product,
+#        day) row used to raise IntegrityError under the outer
+#        @transaction.atomic and roll back EVERY wholesale line for the
+#        week (w/c 4 May 2026 was the trigger — see the (PINKMANS-
+#        WAPPING WHARF, Sliced Apple Waste Sourdough, Sat) dup). Each
+#        OrderLine create now runs in its own savepoint so the dup is
+#        dropped (first occurrence wins) and the rest of the tab lands.
+HISTORICAL_IMPORT_VERSION = 4
 
 # WHOLESALE layout: column 0 is the wholesale customer name (repeated
 # on every product row of that customer's block), then SKU at 1,
@@ -700,6 +707,17 @@ def import_wholesale_tab(workbook, *, recover_price=None):
     products_matched = set()
     products_unmatched = []
     per_customer = OrderedDict()
+    # Per-line resilience tracking: a single bad row on the WHOLESALE tab
+    # (typically a duplicate (customer, product, day) that collides with
+    # OrderLine's partial-unique constraint, or an unpriced line) must
+    # never abort the whole tab the way it used to when the outer
+    # @transaction.atomic was the only safety net. Each create runs in a
+    # savepoint; on IntegrityError we log + skip the offending line and
+    # keep the rest of the tab. Unpriced lines snapshot at £0 (the
+    # recovery chain's terminal value) and are tracked here so the
+    # operator can see at a glance which rows need a price filled in.
+    lines_skipped = []
+    lines_unpriced = []
 
     for key, (customer, rows) in resolved.items():
         dept = customer.department or bakery
@@ -737,11 +755,24 @@ def import_wholesale_tab(workbook, *, recover_price=None):
                     order = Order.objects.create(
                         customer=customer, department=dept, order_date=day)
                     order_cache[(customer.pk, day)] = order
-                OrderLine.objects.create(
-                    order=order, sale_product=sp,
-                    product_name=sheet_name,
-                    unit_price=unit_price,
-                    qty_ordered=qty)
+                try:
+                    with transaction.atomic():
+                        OrderLine.objects.create(
+                            order=order, sale_product=sp,
+                            product_name=sheet_name,
+                            unit_price=unit_price,
+                            qty_ordered=qty)
+                except IntegrityError as e:
+                    # Almost always the partial-unique (order,
+                    # sale_product) collision from a duplicate
+                    # (customer, product, day) row on the WHOLESALE
+                    # tab. Drop the dup — the first occurrence already
+                    # landed — and keep the rest of the tab going.
+                    lines_skipped.append(
+                        (customer.name, sheet_name, day, str(e)))
+                    continue
+                if unit_price == 0:
+                    lines_unpriced.append((customer.name, sheet_name, day))
                 lines_imported += 1
                 cust_lines += 1
                 cust_value += qty * unit_price
@@ -777,6 +808,8 @@ def import_wholesale_tab(workbook, *, recover_price=None):
         "products_unmatched": products_unmatched,
         "customer_unmatched": customer_unmatched,
         "per_customer": per_customer,
+        "lines_skipped": lines_skipped,
+        "lines_unpriced": lines_unpriced,
     }
 
 
