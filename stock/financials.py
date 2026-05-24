@@ -29,7 +29,7 @@ free-tier's 30s budget.
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import DecimalField, F, Max, Min, Q, Sum
+from django.db.models import Count, DecimalField, F, Max, Min, Q, Sum
 
 from .models import Customer, Order, OrderLine
 
@@ -211,5 +211,177 @@ def per_customer_in_channel(dept, channel, start_wc, end_wc):
             "name": r["order__customer__name"],
             "total": _q2(total),
             "pct": pct.quantize(Decimal("0.1")),
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Single-week helpers — power the React dashboard's "week view".
+#
+# Same partition rule as the range helpers above (external = NOT
+# ``is_internal``; WHOLESALE = ``customer_type='wholesale'``; INTERNAL
+# = the complement). Every figure is derived from per-line snapshots
+# (``qty_ordered * unit_price``) — NEVER the sheet's "Total" columns,
+# which are formula cells and often blank / wrong. See CLAUDE.md.
+# ---------------------------------------------------------------------------
+
+
+def available_weeks(dept):
+    """All week-start (Monday) dates with at least one external order,
+    newest first. Used by the dashboard week-picker so the operator
+    can jump straight to any imported week without typing a date."""
+    dates = (Order.objects.filter(
+        department=dept, customer__is_internal=False,
+    ).values_list("order_date", flat=True).distinct())
+    weeks = sorted({_monday_of(d) for d in dates}, reverse=True)
+    return weeks
+
+
+def week_daily_totals(dept, week_start):
+    """7 rows (Mon..Sun) of ``{date, total}`` for one week.
+
+    Sums DAILY ordered cells × snapshotted price for external customers
+    only (``is_internal=False``). Days with no orders surface as £0 so
+    the dashboard's daily-trend bar chart always renders the full
+    week's shape, never a sparse strip.
+    """
+    end = week_start + timedelta(days=6)
+    rows = (OrderLine.objects.filter(
+        order__department=dept,
+        order__order_date__range=(week_start, end),
+        order__customer__is_internal=False,
+    ).values("order__order_date").annotate(total=_line_value_expr()))
+    by_date = {r["order__order_date"]: _q2(r["total"]) for r in rows}
+    out = []
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        out.append({"date": d, "total": by_date.get(d, Decimal("0.00"))})
+    return out
+
+
+def week_channel_split(dept, week_start):
+    """``{internal:{total,pct}, wholesale:{total,pct}}`` for one week.
+
+    Thin wrapper over :func:`range_totals` with ``start==end==week_start``
+    so the channel-split numbers reconcile EXACTLY with the range view
+    when the same week is selected on both pages.
+    """
+    rt = range_totals(dept, week_start, week_start)
+    total = rt["total"] or Decimal("0")
+
+    def _pct(part):
+        if not total:
+            return Decimal("0.0")
+        return (part / total * Decimal("100")).quantize(Decimal("0.1"))
+
+    return {
+        "internal": {"total": rt["internal"], "pct": _pct(rt["internal"])},
+        "wholesale": {"total": rt["wholesale"], "pct": _pct(rt["wholesale"])},
+    }
+
+
+def week_orders_count(dept, week_start):
+    """Number of external order LINES in the week.
+
+    "Lines" rather than "orders" because the dashboard's "total orders"
+    tile is really a line-count — one customer ordering 12 products
+    counts as 12, not 1. (If a future tile needs distinct orders,
+    add a separate helper rather than overloading this one.)
+    """
+    end = week_start + timedelta(days=6)
+    return OrderLine.objects.filter(
+        order__department=dept,
+        order__order_date__range=(week_start, end),
+        order__customer__is_internal=False,
+    ).count()
+
+
+def week_over_week(dept, week_start):
+    """Compare ``week_start`` to the immediately PRIOR imported week.
+
+    "Prior imported week" = the most recent week-start (Monday) before
+    ``week_start`` that has at least one external order — NOT
+    ``week_start - 7 days``, which would silently treat a gap week as
+    a -100% drop. Returns ``{prev_week_start, prev_total, total, pct}``;
+    ``prev_week_start`` is ``None`` and ``pct`` is ``None`` when this
+    is the very first imported week (nothing to compare to).
+    """
+    cur_total = range_totals(dept, week_start, week_start)["total"]
+    # Find the latest external order strictly before this week — its
+    # Monday is the previous imported week. Skipping gap weeks matters:
+    # otherwise the first week back from a holiday looks like infinite
+    # growth and the operator stops trusting the figure.
+    prev = (Order.objects.filter(
+        department=dept,
+        order_date__lt=week_start,
+        customer__is_internal=False,
+    ).order_by("-order_date").only("order_date").first())
+    if prev is None:
+        return {
+            "prev_week_start": None,
+            "prev_total": Decimal("0.00"),
+            "total": _q2(cur_total),
+            "pct": None,
+        }
+    prev_start = _monday_of(prev.order_date)
+    prev_total = range_totals(dept, prev_start, prev_start)["total"]
+    pct = None
+    if prev_total:
+        pct = float(((cur_total - prev_total) / prev_total * Decimal("100"))
+                    .quantize(Decimal("0.1")))
+    return {
+        "prev_week_start": prev_start,
+        "prev_total": _q2(prev_total),
+        "total": _q2(cur_total),
+        "pct": pct,
+    }
+
+
+def week_top_customers(dept, week_start, channel, n=5):
+    """Top ``n`` customers in ``channel`` for one week, biggest first.
+
+    Reuses :func:`per_customer_in_channel` (same partition rule, same
+    SQL) so the dashboard's per-customer numbers match the Financials
+    page byte-for-byte when both are looking at the same week.
+    """
+    rows = per_customer_in_channel(dept, channel, week_start, week_start)
+    return rows[:n]
+
+
+def recent_order_groups(dept, n=10):
+    """The ``n`` most recent customer-day order groups, newest first.
+
+    One row per Order (an Order is already a customer-day group in this
+    schema — ``Order.customer`` × ``Order.order_date``). The ``channel``
+    field is derived live from the customer's ``is_internal`` /
+    ``customer_type`` so a re-classified customer's history reflects
+    the current classification (no snapshot needed; partition rule is
+    the single source of truth — see module docstring). Excluded
+    (``is_internal``) groups are tagged ``"excluded"`` so the
+    dashboard can dim or filter them rather than silently dropping
+    bakery-internal-use activity from the operator's view.
+    """
+    orders = list(Order.objects
+                  .filter(department=dept)
+                  .select_related("customer")
+                  .prefetch_related("lines")
+                  .order_by("-order_date", "-id")[:n])
+    out = []
+    for o in orders:
+        lines = list(o.lines.all())
+        total = sum((line.line_value or Decimal("0") for line in lines),
+                    Decimal("0"))
+        if o.customer.is_internal:
+            channel = "excluded"
+        elif o.customer.customer_type == Customer.WHOLESALE:
+            channel = "wholesale"
+        else:
+            channel = "internal"
+        out.append({
+            "date": o.order_date,
+            "customer": o.customer.name,
+            "channel": channel,
+            "line_count": len(lines),
+            "ordered_total": _q2(total),
         })
     return out

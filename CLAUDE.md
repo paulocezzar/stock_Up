@@ -3,7 +3,8 @@
 ## Command execution
 - Run commands in the FOREGROUND and read their output directly.
 - NEVER use polling/wait loops (no `until ... do sleep`, no `tail -f` waits, no background log-file polling) — they hang forever if the expected text never appears.
-- Run the test suite directly (`python manage.py test`); it takes ~1-2 min. Use a real timeout if needed, never a sleep loop.
+- Default local test run: `python manage.py test --keepdb --exclude-tag slow` (fast, ~seconds with cached DB). NEVER use sleep/polling loops.
+- Tests run in the FOREGROUND only — never background the test run or tail/poll its log. If a run can't finish in a few minutes, that's a bug to fix (--keepdb, setUpTestData, tagging slow), not a reason to background it.
 - End each completed task with: powershell -c "[console]::beep(800,400); [console]::beep(1000,400)"
 - Commits: no Co-Authored-By trailer.
 
@@ -12,7 +13,11 @@
 - Render free-tier: 512MB RAM, ~30s worker timeout, NO shell. Bulk imports MUST use `load_workbook(read_only=True, data_only=True)` + `iter_rows(values_only=True)` and run in build.sh — never as a web upload (causes OOM/timeout).
 - Render phantom-failure: a vague "no open ports detected" during rapid deploys is usually false if gunicorn is serving — fix with dashboard "Manual Deploy → Deploy latest commit"; space out pushes.
 - `.xlsx/.xlsm` files are gitignored — data files need `git add -f`.
-- Always run the FULL test suite before committing; all tests must pass.
+- Test gate (tiered):
+   - Default during iteration: `--keepdb --exclude-tag slow`.
+   - After ANY models/migrations change, OR before any push to main: run once with `--create-db` and WITHOUT `--exclude-tag slow` (full, cold) — under --keepdb the cached schema can be stale and lie.
+   - Run the full suite at risk points (financials / import / models / migrations); otherwise run only the affected module's tests.
+   - Report pass count + any failures, not full output.
 
 ## Data model (critical conventions — do not break)
 - `Product` = INGREDIENTS. `SaleProduct` = sellable goods. NEVER overload `Product`.

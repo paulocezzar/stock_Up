@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
-from django.test import TestCase, SimpleTestCase, Client
+from django.test import TestCase, SimpleTestCase, Client, tag
 from django.utils import timezone
 from .models import Department, Supplier, Product, SupplierPrice, Stocktake, StockLine, Delivery, Batch, Adjustment, IngredientAllergen, Recipe, RecipeLine, RecipeCycleError, RecipePackaging, Customer, SuppressedRecipe, SaleProduct, Order, OrderLine
 from .ai_extract import parse_lines_json, auto_match
@@ -4489,8 +4489,15 @@ def _build_multisheet_workbook(path, *, include_malformed=True):
     wb.save(path)
 
 
+@tag("slow")
 class RecipeBulkImportTests(TestCase):
-    """The bulk parser loops over every sheet, reusing the per-recipe code."""
+    """The bulk parser loops over every sheet, reusing the per-recipe code.
+
+    Tagged ``slow`` because every test re-parses the committed 6 MB
+    ``recipes_bulk_93.xlsx`` end-to-end (~22 s/test on local hardware);
+    the default fast suite excludes ``--tag slow``. CI / pre-push runs
+    them via ``--tag slow``.
+    """
 
     def test_committed_93_sheet_workbook_parses_all_sheets(self):
         # The committed workbook has 93 sheets; the parser should walk
@@ -8034,10 +8041,17 @@ class HistoricalOrderImportTests(TestCase):
             self.assertGreater(order.total_value(), Decimal("0"))
 
 
+@tag("slow")
 class HistoricalWorkbookImportTests(TestCase):
     """End-to-end ``import_historical_orders`` against the real w/c
     30 Mar 2026 file: ALL customer tabs (not just Garden Café),
-    idempotent at the week level, non-fatal on any single bad tab."""
+    idempotent at the week level, non-fatal on any single bad tab.
+
+    Tagged ``slow`` because the import walks the entire 2.7 MB
+    workbook (every customer tab) on every test; the default fast
+    suite excludes ``--tag slow``. CI / pre-push runs them via
+    ``--tag slow``.
+    """
 
     SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
     WEEK_START = datetime.date(2026, 3, 30)
@@ -9611,6 +9625,251 @@ class FinancialsAggregationTests(TestCase):
         self.assertEqual(offenders, [],
             f"Found customers in neither / both channels: {offenders}")
 
+    def test_per_week_invariant_internal_plus_wholesale_equals_external_total(self):
+        # Per-week regression of the 18 May leak: for EVERY imported
+        # week, per_week_split's internal+wholesale must equal the
+        # unfiltered ordered total of external (non is_internal)
+        # customers in that week. If a customer slips out of both
+        # buckets, the week-level sum diverges from the Orders-page
+        # week total — the symptom the operator hit on w/c 18 May.
+        from stock.financials import per_week_split
+        # Add an oddball customer so the invariant has something to
+        # catch if the partition ever regresses.
+        oddball = Customer.objects.create(
+            name="OFF-PISTE OUTLET 18M", customer_type="",  # blank/typo
+            department=self.dept)
+        self._line(oddball, self.wc2, Decimal("3"), Decimal("7.35"))  # 22.05
+
+        rows = per_week_split(self.dept, self.wc1, self.wc3)
+        for r in rows:
+            wc = r["wc"]
+            end = wc + datetime.timedelta(days=6)
+            true_external = Decimal("0")
+            for o in Order.objects.filter(
+                    department=self.dept,
+                    order_date__range=(wc, end),
+                    customer__is_internal=False).select_related("customer"):
+                true_external += o.total_value()
+            self.assertEqual(
+                r["internal"] + r["wholesale"], r["total"],
+                f"week {wc}: internal+wholesale != total")
+            self.assertEqual(
+                r["total"], true_external,
+                f"week {wc}: Financials £{r['total']} != "
+                f"Orders-page external £{true_external} — a customer "
+                f"is slipping out of both channel buckets.")
+
+
+class FinancialsWeekHelperTests(TestCase):
+    """Unit tests for the single-week helpers in stock.financials —
+    the building blocks the dashboard's week view is computed from.
+    Same seeded data shape as FinancialsAggregationTests so the
+    week-level figures reconcile with the range-level ones."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.wc1 = datetime.date(2026, 3, 30)   # Monday
+        self.wc2 = datetime.date(2026, 4, 6)    # Monday
+        self.wc3 = datetime.date(2026, 4, 13)   # Monday
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.farmshop = Customer.objects.create(
+            name="FARMSHOP", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.mjolk = Customer.objects.create(
+            name="MJOLK", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.excluded = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        # wc2 spread across multiple days so daily_totals has shape to test.
+        self._line(self.garden, self.wc2 + datetime.timedelta(days=0),
+                   Decimal("4"), Decimal("3.00"))                # Mon 12.00 i
+        self._line(self.teals, self.wc2 + datetime.timedelta(days=2),
+                   Decimal("6"), Decimal("1.50"))                # Wed  9.00 w
+        self._line(self.mjolk, self.wc2 + datetime.timedelta(days=4),
+                   Decimal("10"), Decimal("1.10"))               # Fri 11.00 w
+        # wc1 = prior imported week (single line)
+        self._line(self.teals, self.wc1, Decimal("20"),
+                   Decimal("1.10"))                              # 22.00 wholesale
+        # wc3 (so we have a "current week" with one day's worth)
+        self._line(self.farmshop, self.wc3 + datetime.timedelta(days=1),
+                   Decimal("5"), Decimal("2.00"))                # Tue 10.00 i
+        self._line(self.mjolk, self.wc3 + datetime.timedelta(days=3),
+                   Decimal("4"), Decimal("1.50"))                # Thu  6.00 w
+        # Excluded — must NEVER move any total.
+        self._line(self.excluded, self.wc2, Decimal("100"),
+                   Decimal("9.99"))                              # 999.00
+
+    def _line(self, customer, order_date, qty, price):
+        o = Order.objects.create(
+            customer=customer, department=self.dept,
+            order_date=order_date)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=f"P{o.pk}",
+            unit_price=price, qty_ordered=qty)
+        return o
+
+    def test_available_weeks_lists_each_imported_monday_newest_first(self):
+        from stock.financials import available_weeks
+        weeks = available_weeks(self.dept)
+        self.assertEqual(weeks, [self.wc3, self.wc2, self.wc1])
+
+    def test_week_daily_totals_returns_seven_rows_mon_to_sun(self):
+        from stock.financials import week_daily_totals
+        rows = week_daily_totals(self.dept, self.wc2)
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(rows[0]["date"], self.wc2)
+        self.assertEqual(rows[6]["date"],
+                         self.wc2 + datetime.timedelta(days=6))
+
+    def test_week_daily_totals_sums_external_only_and_zero_fills_quiet_days(self):
+        from stock.financials import week_daily_totals
+        rows = week_daily_totals(self.dept, self.wc2)
+        by_date = {r["date"]: r["total"] for r in rows}
+        self.assertEqual(by_date[self.wc2 + datetime.timedelta(days=0)],
+                         Decimal("12.00"))
+        self.assertEqual(by_date[self.wc2 + datetime.timedelta(days=1)],
+                         Decimal("0.00"))
+        self.assertEqual(by_date[self.wc2 + datetime.timedelta(days=2)],
+                         Decimal("9.00"))
+        self.assertEqual(by_date[self.wc2 + datetime.timedelta(days=4)],
+                         Decimal("11.00"))
+
+    def test_week_daily_totals_excludes_is_internal_customer_orders(self):
+        # The 999 BAKERY INTERNAL USE line on Monday wc2 must NEVER
+        # land in a daily total — these are the bakery's own
+        # consumption, not external demand.
+        from stock.financials import week_daily_totals
+        rows = week_daily_totals(self.dept, self.wc2)
+        self.assertEqual(sum((r["total"] for r in rows), Decimal("0")),
+                         Decimal("32.00"))  # 12 + 9 + 11
+
+    def test_week_daily_totals_sum_reconciles_with_range_totals(self):
+        from stock.financials import week_daily_totals, range_totals
+        rt = range_totals(self.dept, self.wc2, self.wc2)
+        total = sum((r["total"] for r in week_daily_totals(self.dept, self.wc2)),
+                    Decimal("0"))
+        self.assertEqual(total, rt["total"])
+
+    def test_week_channel_split_totals_and_pcts(self):
+        from stock.financials import week_channel_split
+        s = week_channel_split(self.dept, self.wc2)
+        self.assertEqual(s["internal"]["total"], Decimal("12.00"))
+        self.assertEqual(s["wholesale"]["total"], Decimal("20.00"))
+        # 12 / 32 = 37.5%; 20 / 32 = 62.5%
+        self.assertEqual(s["internal"]["pct"], Decimal("37.5"))
+        self.assertEqual(s["wholesale"]["pct"], Decimal("62.5"))
+
+    def test_week_channel_split_zero_week_returns_zero_pcts(self):
+        from stock.financials import week_channel_split
+        empty_week = self.wc3 + datetime.timedelta(days=14)
+        s = week_channel_split(self.dept, empty_week)
+        self.assertEqual(s["internal"]["total"], Decimal("0.00"))
+        self.assertEqual(s["wholesale"]["total"], Decimal("0.00"))
+        self.assertEqual(s["internal"]["pct"], Decimal("0.0"))
+        self.assertEqual(s["wholesale"]["pct"], Decimal("0.0"))
+
+    def test_week_orders_count_counts_external_lines_only(self):
+        from stock.financials import week_orders_count
+        # wc2: 3 external lines (garden, teals, mjolk); excluded ignored.
+        self.assertEqual(week_orders_count(self.dept, self.wc2), 3)
+        # wc1: 1 external line.
+        self.assertEqual(week_orders_count(self.dept, self.wc1), 1)
+        # Empty week → 0.
+        self.assertEqual(
+            week_orders_count(
+                self.dept, self.wc3 + datetime.timedelta(days=14)),
+            0)
+
+    def test_week_over_week_compares_to_immediately_prior_imported_week(self):
+        from stock.financials import week_over_week
+        wow = week_over_week(self.dept, self.wc2)
+        self.assertEqual(wow["prev_week_start"], self.wc1)
+        self.assertEqual(wow["prev_total"], Decimal("22.00"))
+        self.assertEqual(wow["total"], Decimal("32.00"))
+        # (32-22)/22 * 100 = 45.45...% → 45.5
+        self.assertAlmostEqual(wow["pct"], 45.5, places=1)
+
+    def test_week_over_week_skips_gap_weeks(self):
+        # wc3 → prior imported week is wc2, not wc3-7 (which it is here
+        # anyway). Add a gap to make it concrete: a week between wc3
+        # and a future "current" week with no orders must be skipped.
+        from stock.financials import week_over_week
+        far_week = self.wc3 + datetime.timedelta(days=21)
+        self._line(self.teals, far_week + datetime.timedelta(days=2),
+                   Decimal("1"), Decimal("4.00"))               # 4.00
+        wow = week_over_week(self.dept, far_week)
+        # Prior imported week is wc3 (skipping the 2 empty intervening
+        # weeks) — NOT far_week - 7 days (which would be a £0 prev and
+        # a silently null pct).
+        self.assertEqual(wow["prev_week_start"], self.wc3)
+        self.assertEqual(wow["prev_total"], Decimal("16.00"))
+
+    def test_week_over_week_returns_none_pct_for_first_imported_week(self):
+        from stock.financials import week_over_week
+        wow = week_over_week(self.dept, self.wc1)
+        self.assertIsNone(wow["prev_week_start"])
+        self.assertEqual(wow["prev_total"], Decimal("0.00"))
+        self.assertIsNone(wow["pct"])
+
+    def test_week_top_customers_returns_biggest_first_capped_at_n(self):
+        from stock.financials import week_top_customers
+        rows = week_top_customers(
+            self.dept, self.wc2, Customer.WHOLESALE, n=5)
+        names = [r["name"] for r in rows]
+        # wc2 wholesale: MJOLK 11 vs TEALS 9.
+        self.assertEqual(names, ["MJOLK", "TEALS"])
+        # n=1 caps the list.
+        rows1 = week_top_customers(
+            self.dept, self.wc2, Customer.WHOLESALE, n=1)
+        self.assertEqual([r["name"] for r in rows1], ["MJOLK"])
+
+    def test_week_top_customers_internal_excludes_bakery_internal_use(self):
+        from stock.financials import week_top_customers
+        rows = week_top_customers(
+            self.dept, self.wc2, Customer.INTERNAL, n=5)
+        names = {r["name"] for r in rows}
+        self.assertNotIn("BAKERY INTERNAL USE", names)
+        self.assertIn("GARDEN CAFE", names)
+
+    def test_recent_order_groups_orders_by_date_desc_with_channel(self):
+        from stock.financials import recent_order_groups
+        groups = recent_order_groups(self.dept, n=10)
+        # newest first
+        dates = [g["date"] for g in groups]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+        # channel labels apply the partition rule live
+        by_customer = {g["customer"]: g for g in groups}
+        self.assertEqual(by_customer["TEALS"]["channel"], "wholesale")
+        self.assertEqual(by_customer["GARDEN CAFE"]["channel"], "internal")
+        self.assertEqual(by_customer["BAKERY INTERNAL USE"]["channel"],
+                         "excluded")
+
+    def test_recent_order_groups_line_count_and_ordered_total_match_order(self):
+        # Add a second line to one Order so line_count > 1 surfaces.
+        from stock.financials import recent_order_groups
+        o = Order.objects.create(
+            customer=self.teals, department=self.dept,
+            order_date=datetime.date(2026, 5, 4))  # later than all seed
+        OrderLine.objects.create(
+            order=o, product_name="A", unit_price=Decimal("1.00"),
+            qty_ordered=Decimal("3"))   # 3.00
+        OrderLine.objects.create(
+            order=o, product_name="B", unit_price=Decimal("2.00"),
+            qty_ordered=Decimal("4"))   # 8.00
+        groups = recent_order_groups(self.dept, n=1)
+        self.assertEqual(len(groups), 1)
+        g = groups[0]
+        self.assertEqual(g["customer"], "TEALS")
+        self.assertEqual(g["line_count"], 2)
+        self.assertEqual(g["ordered_total"], Decimal("11.00"))
+
 
 class FinancialsViewTests(TestCase):
     """The /financials/ page renders the channel split, weekly trend
@@ -9910,6 +10169,389 @@ class DashboardSummaryApiTests(TestCase):
         self.assertEqual(Decimal(str(data["wholesale"]["total"])),
                          Decimal("20.00"))
         self.assertEqual(len(data["weekly_trend"]), 1)
+
+
+class DashboardWeekModeApiTests(TestCase):
+    """``/api/dashboard/summary/?week=…`` — single-week dashboard payload.
+
+    The ``?week=`` query string puts the endpoint in week mode (a new
+    payload shape); without it the endpoint serves the existing
+    range-mode payload (covered by DashboardSummaryApiTests). Each test
+    asserts a specific contract — totals reconcile with financials.py,
+    is_internal customers never leak in, forbidden labels stay out,
+    available_weeks lists every imported Monday, etc.
+    """
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.wc1 = datetime.date(2026, 3, 30)   # Monday
+        self.wc2 = datetime.date(2026, 4, 6)    # Monday
+        self.wc3 = datetime.date(2026, 4, 13)   # Monday
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.mjolk = Customer.objects.create(
+            name="MJOLK", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.farmshop = Customer.objects.create(
+            name="FARMSHOP", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.excluded = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        # wc1: one prior-week line (22 wholesale)
+        self._line(self.teals, self.wc1, Decimal("20"), Decimal("1.10"))
+        # wc2: spread across the week so daily_trend has shape
+        self._line(self.garden, self.wc2 + datetime.timedelta(days=0),
+                   Decimal("4"), Decimal("3.00"))    # Mon 12.00 internal
+        self._line(self.teals, self.wc2 + datetime.timedelta(days=2),
+                   Decimal("6"), Decimal("1.50"))    # Wed  9.00 wholesale
+        self._line(self.mjolk, self.wc2 + datetime.timedelta(days=4),
+                   Decimal("10"), Decimal("1.10"))   # Fri 11.00 wholesale
+        # wc3: lighter week
+        self._line(self.farmshop, self.wc3 + datetime.timedelta(days=1),
+                   Decimal("5"), Decimal("2.00"))    # Tue 10.00 internal
+        self._line(self.mjolk, self.wc3 + datetime.timedelta(days=3),
+                   Decimal("4"), Decimal("1.50"))    # Thu  6.00 wholesale
+        # Excluded — must NEVER appear in any total / list
+        self._line(self.excluded, self.wc2, Decimal("100"), Decimal("9.99"))
+
+    def _line(self, customer, order_date, qty, price):
+        o = Order.objects.create(
+            customer=customer, department=self.dept,
+            order_date=order_date)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=f"P{o.pk}",
+            unit_price=price, qty_ordered=qty)
+
+    def _get(self, qs=""):
+        self.client.force_login(self.user)
+        url = "/api/dashboard/summary/"
+        if qs:
+            url += "?" + qs
+        r = self.client.get(url)
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    # ---- mode dispatch ----
+
+    def test_requires_authentication(self):
+        r = self.client.get("/api/dashboard/summary/?week=")
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_no_week_param_serves_range_payload_for_backward_compat(self):
+        # Without ?week= the endpoint must still emit the legacy
+        # multi-week payload so the older SPA client keeps working.
+        data = self._get()
+        self.assertIn("weekly_trend", data)
+        self.assertIn("avg_week", data)
+        self.assertNotIn("daily_trend", data)
+
+    def test_week_param_present_serves_week_payload(self):
+        data = self._get("week=")
+        self.assertIn("daily_trend", data)
+        self.assertIn("week_start", data)
+        self.assertNotIn("weekly_trend", data)
+
+    def test_week_defaults_to_latest_imported_week(self):
+        data = self._get("week=")
+        self.assertEqual(data["week_start"], self.wc3.isoformat())
+
+    def test_week_invalid_date_falls_back_to_latest(self):
+        data = self._get("week=not-a-date")
+        self.assertEqual(data["week_start"], self.wc3.isoformat())
+
+    def test_week_snaps_any_day_to_its_monday(self):
+        # A Thursday inside wc2 snaps back to wc2 Monday.
+        thursday = self.wc2 + datetime.timedelta(days=3)
+        data = self._get(f"week={thursday.isoformat()}")
+        self.assertEqual(data["week_start"], self.wc2.isoformat())
+
+    # ---- shape ----
+
+    def test_top_level_keys_present(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        for key in (
+            "week_start", "prev_week_start", "available_weeks",
+            "total_ordered", "total_orders",
+            "internal", "wholesale",
+            "avg_day", "wow",
+            "daily_trend",
+            "top_wholesale", "top_internal",
+            "recent_orders",
+            "highest_day", "lowest_day",
+        ):
+            self.assertIn(key, data, f"missing key: {key}")
+
+    def test_response_has_no_revenue_waste_or_margin_keys(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        as_text = str(data).lower()
+        for forbidden in (
+            "revenue", "sales", "margin", "profit", "waste", "wastage",
+        ):
+            self.assertNotIn(
+                forbidden, as_text,
+                f"forbidden key/value '{forbidden}' leaked into payload: "
+                f"{data!r}")
+
+    # ---- totals reconcile with financials.py ----
+
+    def test_total_ordered_equals_range_totals_for_single_week(self):
+        from stock.financials import range_totals
+        rt = range_totals(self.dept, self.wc2, self.wc2)
+        data = self._get(f"week={self.wc2.isoformat()}")
+        self.assertEqual(Decimal(str(data["total_ordered"])), rt["total"])
+        self.assertEqual(Decimal(str(data["total_ordered"])),
+                         Decimal("32.00"))
+
+    def test_internal_plus_wholesale_equals_total(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        i = Decimal(str(data["internal"]["total"]))
+        w = Decimal(str(data["wholesale"]["total"]))
+        t = Decimal(str(data["total_ordered"]))
+        self.assertEqual(i + w, t)
+
+    def test_channel_pcts_sum_to_100(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        ip = float(data["internal"]["pct"])
+        wp = float(data["wholesale"]["pct"])
+        self.assertAlmostEqual(ip + wp, 100.0, places=1)
+
+    def test_excluded_customer_never_appears_in_any_total_or_list(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        self.assertEqual(Decimal(str(data["total_ordered"])),
+                         Decimal("32.00"))  # NOT 32 + 999
+        names = {r["name"] for r in data["top_wholesale"]}
+        names |= {r["name"] for r in data["top_internal"]}
+        self.assertNotIn("BAKERY INTERNAL USE", names)
+        # recent_orders may still surface excluded groups (tagged
+        # "excluded") so the operator can SEE the activity — but the
+        # money never lands in a total.
+
+    # ---- daily_trend ----
+
+    def test_daily_trend_has_seven_rows_mon_to_sun(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        rows = data["daily_trend"]
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(rows[0]["date"], self.wc2.isoformat())
+        self.assertEqual(
+            rows[6]["date"],
+            (self.wc2 + datetime.timedelta(days=6)).isoformat())
+
+    def test_daily_trend_sums_to_total_ordered(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        total = sum(Decimal(str(r["total"])) for r in data["daily_trend"])
+        self.assertEqual(total, Decimal(str(data["total_ordered"])))
+
+    def test_daily_trend_includes_prev_week_totals_per_day(self):
+        # wc2 has 12 (Mon), 9 (Wed), 11 (Fri). wc1 has 22 on Monday.
+        # So daily_trend for wc2: row[0].prev_week_total = 22.00.
+        data = self._get(f"week={self.wc2.isoformat()}")
+        rows = data["daily_trend"]
+        self.assertEqual(
+            Decimal(str(rows[0]["prev_week_total"])), Decimal("22.00"))
+        # Days where prev week had no orders → 0.00.
+        self.assertEqual(
+            Decimal(str(rows[1]["prev_week_total"])), Decimal("0.00"))
+
+    def test_daily_trend_prev_week_zero_for_first_imported_week(self):
+        data = self._get(f"week={self.wc1.isoformat()}")
+        for r in data["daily_trend"]:
+            self.assertEqual(
+                Decimal(str(r["prev_week_total"])), Decimal("0.00"))
+
+    # ---- averages / wow / counts ----
+
+    def test_total_orders_counts_lines_external_only(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        # 3 external lines on wc2 (garden, teals, mjolk); excluded ignored.
+        self.assertEqual(data["total_orders"], 3)
+
+    def test_avg_day_is_total_divided_by_seven(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        # 32.00 / 7 = 4.571… → 4.57
+        self.assertEqual(Decimal(str(data["avg_day"])), Decimal("4.57"))
+
+    def test_wow_compares_to_prior_imported_week(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        self.assertEqual(data["prev_week_start"], self.wc1.isoformat())
+        # wow.total carries the prev-week total (22.00); wow.pct = change.
+        self.assertEqual(Decimal(str(data["wow"]["total"])),
+                         Decimal("22.00"))
+        # (32-22)/22 = 45.45...% → 45.5
+        self.assertAlmostEqual(float(data["wow"]["pct"]), 45.5, places=1)
+
+    def test_wow_pct_null_for_first_imported_week(self):
+        data = self._get(f"week={self.wc1.isoformat()}")
+        self.assertIsNone(data["prev_week_start"])
+        self.assertIsNone(data["wow"]["pct"])
+
+    # ---- ranked customer lists ----
+
+    def test_top_wholesale_ranked_with_pct(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        names = [r["name"] for r in data["top_wholesale"]]
+        # wc2 wholesale: MJOLK 11.00, TEALS 9.00.
+        self.assertEqual(names, ["MJOLK", "TEALS"])
+
+    def test_top_internal_ranked(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        names = [r["name"] for r in data["top_internal"]]
+        # wc2 internal: just GARDEN CAFE.
+        self.assertEqual(names, ["GARDEN CAFE"])
+
+    # ---- recent_orders ----
+
+    def test_recent_orders_is_global_most_recent_groups(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        # Up to 10, newest first.
+        dates = [g["date"] for g in data["recent_orders"]]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+    def test_recent_orders_has_no_status_field(self):
+        # No model field for order status — the helper must NOT invent one.
+        data = self._get(f"week={self.wc2.isoformat()}")
+        for g in data["recent_orders"]:
+            self.assertNotIn("status", g)
+
+    # ---- available_weeks ----
+
+    def test_available_weeks_lists_every_imported_monday_newest_first(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        self.assertEqual(data["available_weeks"], [
+            self.wc3.isoformat(),
+            self.wc2.isoformat(),
+            self.wc1.isoformat(),
+        ])
+
+    # ---- highest / lowest day ----
+
+    def test_highest_and_lowest_day_pick_nonzero_extremes(self):
+        data = self._get(f"week={self.wc2.isoformat()}")
+        # Days with orders: Mon 12, Wed 9, Fri 11. Highest=Mon, Lowest=Wed.
+        self.assertEqual(
+            data["highest_day"]["date"], self.wc2.isoformat())
+        self.assertEqual(
+            Decimal(str(data["highest_day"]["total"])), Decimal("12.00"))
+        self.assertEqual(
+            data["lowest_day"]["date"],
+            (self.wc2 + datetime.timedelta(days=2)).isoformat())
+        self.assertEqual(
+            Decimal(str(data["lowest_day"]["total"])), Decimal("9.00"))
+
+    def test_highest_and_lowest_day_null_for_empty_week(self):
+        empty_week = self.wc3 + datetime.timedelta(days=21)
+        data = self._get(f"week={empty_week.isoformat()}")
+        self.assertIsNone(data["highest_day"])
+        self.assertIsNone(data["lowest_day"])
+
+
+class DashboardExportCsvTests(TestCase):
+    """``GET /api/dashboard/export.csv?week=`` returns that week's
+    external order lines as CSV. SessionAuth + login_required."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.wc = datetime.date(2026, 4, 6)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.excluded = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        o1 = Order.objects.create(
+            customer=self.teals, department=self.dept,
+            order_date=self.wc + datetime.timedelta(days=2))
+        OrderLine.objects.create(
+            order=o1, product_name="Sourdough",
+            unit_price=Decimal("4.50"), qty_ordered=Decimal("10"))
+        o2 = Order.objects.create(
+            customer=self.garden, department=self.dept,
+            order_date=self.wc + datetime.timedelta(days=0))
+        OrderLine.objects.create(
+            order=o2, product_name="Croissant",
+            unit_price=Decimal("1.20"), qty_ordered=Decimal("24"))
+        # Excluded — MUST NOT appear in CSV.
+        o3 = Order.objects.create(
+            customer=self.excluded, department=self.dept,
+            order_date=self.wc + datetime.timedelta(days=1))
+        OrderLine.objects.create(
+            order=o3, product_name="Internal-only",
+            unit_price=Decimal("9.99"), qty_ordered=Decimal("100"))
+
+    def test_requires_authentication(self):
+        r = self.client.get("/api/dashboard/export.csv?week=")
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_returns_csv_content_type_and_filename(self):
+        self.client.force_login(self.user)
+        r = self.client.get(
+            f"/api/dashboard/export.csv?week={self.wc.isoformat()}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"].split(";")[0], "text/csv")
+        self.assertIn(f"orders-{self.wc.isoformat()}.csv",
+                      r["Content-Disposition"])
+
+    def test_csv_header_columns(self):
+        self.client.force_login(self.user)
+        r = self.client.get(
+            f"/api/dashboard/export.csv?week={self.wc.isoformat()}")
+        body = r.content.decode()
+        first = body.splitlines()[0]
+        self.assertEqual(
+            first,
+            "date,customer,channel,product,qty,unit_price,line_value")
+
+    def test_csv_excludes_is_internal_customers(self):
+        self.client.force_login(self.user)
+        r = self.client.get(
+            f"/api/dashboard/export.csv?week={self.wc.isoformat()}")
+        body = r.content.decode()
+        self.assertNotIn("BAKERY INTERNAL USE", body)
+        self.assertNotIn("Internal-only", body)
+
+    def test_csv_rows_match_expected_line_values(self):
+        self.client.force_login(self.user)
+        r = self.client.get(
+            f"/api/dashboard/export.csv?week={self.wc.isoformat()}")
+        body = r.content.decode()
+        lines = body.splitlines()
+        # Header + 2 external lines
+        self.assertEqual(len(lines), 3)
+        # Garden Mon (sorted by date, then customer)
+        self.assertIn("GARDEN CAFE", lines[1])
+        self.assertIn("internal", lines[1])
+        self.assertIn("Croissant", lines[1])
+        self.assertIn("28.80", lines[1])    # 24 × 1.20
+        # Teals Wed
+        self.assertIn("TEALS", lines[2])
+        self.assertIn("wholesale", lines[2])
+        self.assertIn("Sourdough", lines[2])
+        self.assertIn("45.00", lines[2])    # 10 × 4.50
+
+    def test_csv_defaults_to_latest_week_when_param_missing(self):
+        self.client.force_login(self.user)
+        r = self.client.get("/api/dashboard/export.csv?week=")
+        self.assertEqual(r.status_code, 200)
+        # Latest week is self.wc — must contain the two external rows.
+        body = r.content.decode()
+        self.assertIn("GARDEN CAFE", body)
+        self.assertIn("TEALS", body)
 
 
 class SpaDashboardRouteTests(TestCase):

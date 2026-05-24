@@ -1,7 +1,7 @@
 from django.urls import path, re_path
 from django.contrib.auth import views as auth_views
 from . import views
-from .api import dashboard_summary
+from .api import dashboard_export_csv, dashboard_summary
 
 urlpatterns = [
     path("login/", auth_views.LoginView.as_view(template_name="stock/login.html"), name="login"),
@@ -79,6 +79,8 @@ urlpatterns = [
     # client-side sub-route under /dashboard/ falls back to the same
     # index.html (Phase B will use this for routing).
     path("api/dashboard/summary/", dashboard_summary, name="api_dashboard_summary"),
+    path("api/dashboard/export.csv", dashboard_export_csv,
+         name="api_dashboard_export_csv"),
     path("dashboard/", views.spa_dashboard, name="spa_dashboard"),
     re_path(r"^dashboard/.+$", views.spa_dashboard),
 ]
