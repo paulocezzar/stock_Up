@@ -21,8 +21,18 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.humanize",
+    "rest_framework",
     "stock",
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -67,6 +77,16 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# The React dashboard SPA's built bundle. Vite emits `frontend/dist/`
+# with a `dist/assets/` subdir; we mount the whole dir under the
+# `dashboard/` static prefix so Vite's `base: "/static/dashboard/"`
+# resolves to `dist/assets/...` after collectstatic copies it into
+# STATIC_ROOT. The /dashboard view itself reads dist/index.html from
+# disk (not via the static finders) so a missing manifest entry can't
+# blow up the page during local dev before the first build.
+STATICFILES_DIRS = [
+    ("dashboard", BASE_DIR / "frontend" / "dist"),
+]
 STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

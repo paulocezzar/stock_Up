@@ -2,19 +2,25 @@
 
 Three-way classification of customers — already encoded on the
 ``Customer`` model, NOT re-derived from order-sheet provenance at
-request time:
+request time. The partition rule is the single source of truth; both
+the totals and the per-customer breakdowns route through it:
 
-* ``customer_type == 'wholesale'`` — set by ``import_customers`` on
+* EXCLUDED ⇔ ``is_internal == True`` — BAKERY INTERNAL USE + BAKERY
+  WASTAGE (flipped by data migration 0024). Never counted as demand
+  by the Financials page; the bakery's own consumption.
+* WHOLESALE ⇔ ``is_internal == False`` AND
+  ``customer_type == 'wholesale'`` — set by ``import_customers`` on
   every customer whose name appears in the WHOLESALE tab.
-* ``customer_type == 'internal'`` AND ``is_internal == False`` — the
-  Estate outlets (Garden Cafe, Farmshop, CBK, …) that fund the
-  bakery's external "internal channel".
-* ``is_internal == True`` — BAKERY INTERNAL USE + BAKERY WASTAGE
-  (flipped by data migration 0024). EXCLUDED from every Financials
-  total / channel / breakdown — they're the bakery's own consumption,
-  not demand from anyone.
+* INTERNAL ⇔ ``is_internal == False`` AND NOT WHOLESALE — the
+  **complement**, mirroring the spec ("Internal = all other customers
+  EXCEPT Bakery Internal Use and Bakery Wastage"). This is critical:
+  a customer with a missing / typoed / empty ``customer_type`` is in
+  the Orders-page external total but, if INTERNAL were defined as
+  ``customer_type == 'internal'`` rather than NOT WHOLESALE, would
+  vanish from the Financials grand total. (That was the £22.05
+  shortfall on w/c 18 May before this fix.)
 
-Every total in this module is computed from per-line snapshots
+Every total here is computed from per-line snapshots
 (``OrderLine.unit_price * qty_ordered`` summed in SQL via a single
 aggregate) — same convention as ``Order.total_value()`` but pulled
 out to one query per page so the dashboard stays fast at the Render
@@ -78,8 +84,11 @@ def range_totals(dept, start_wc, end_wc):
     ``end_wc`` is the Monday of the LAST week in the range — the
     selector is week-resolution, so the actual day-range is
     ``start_wc .. end_wc + 6 days``. Excludes ``is_internal=True``
-    customers entirely. Returns ``{internal, wholesale, total}`` all
-    as 2dp Decimals.
+    customers entirely. Internal is the **complement** of wholesale
+    within the external scope (see module docstring) so any customer
+    with an off-piste ``customer_type`` value still lands in a channel
+    and the grand total reconciles with the Orders page. Returns
+    ``{internal, wholesale, total}`` all as 2dp Decimals.
     """
     end = end_wc + timedelta(days=6)
     agg = OrderLine.objects.filter(
@@ -92,9 +101,12 @@ def range_totals(dept, start_wc, end_wc):
             filter=Q(order__customer__customer_type=Customer.WHOLESALE),
             output_field=DecimalField(max_digits=14, decimal_places=2),
         ),
+        # Internal = NOT wholesale (within the already-external scope),
+        # NOT the literal ``customer_type='internal'`` filter — see the
+        # module docstring for why this matters.
         internal=Sum(
             F("qty_ordered") * F("unit_price"),
-            filter=Q(order__customer__customer_type=Customer.INTERNAL),
+            filter=~Q(order__customer__customer_type=Customer.WHOLESALE),
             output_field=DecimalField(max_digits=14, decimal_places=2),
         ),
     )
@@ -161,19 +173,26 @@ def per_customer_in_channel(dept, channel, start_wc, end_wc):
     """Per-customer totals within one channel, biggest first.
 
     ``channel`` is one of ``Customer.WHOLESALE`` / ``Customer.INTERNAL``.
-    Always excludes ``is_internal=True`` (a safety net — those rows
-    happen to be ``customer_type='internal'`` today but the safety
-    net keeps the contract clean if that ever drifts). Returns
-    ``[{customer_id, name, total, pct}]`` where ``pct`` is the
-    customer's share of the channel total as a 1-dp Decimal.
+    Always excludes ``is_internal=True`` (BAKERY INTERNAL USE / BAKERY
+    WASTAGE never appear in either channel's breakdown). INTERNAL is
+    the complement of WHOLESALE within the external scope — same
+    partition rule as :func:`range_totals` and :func:`per_week_split`
+    — so every external customer surfaces in exactly one channel's
+    table, even if their ``customer_type`` is missing / typoed.
+    Returns ``[{customer_id, name, total, pct}]`` where ``pct`` is
+    the customer's share of the channel total as a 1-dp Decimal.
     """
     end = end_wc + timedelta(days=6)
-    rows = list(OrderLine.objects.filter(
+    qs = OrderLine.objects.filter(
         order__department=dept,
         order__order_date__range=(start_wc, end),
-        order__customer__customer_type=channel,
         order__customer__is_internal=False,
-    ).values(
+    )
+    if channel == Customer.WHOLESALE:
+        qs = qs.filter(order__customer__customer_type=Customer.WHOLESALE)
+    else:
+        qs = qs.exclude(order__customer__customer_type=Customer.WHOLESALE)
+    rows = list(qs.values(
         "order__customer_id",
         "order__customer__name",
     ).annotate(total=_line_value_expr()))

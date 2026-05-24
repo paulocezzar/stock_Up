@@ -3066,3 +3066,38 @@ def order_delete(request, pk):
     order.delete()
     messages.success(request, f"Deleted order {label}.")
     return redirect("orders")
+
+
+# ---------------------------------------------------------------------------
+# React dashboard SPA shell.
+#
+# /dashboard/ (and any sub-route under it) serves the pre-built Vite
+# bundle's `index.html`. The bundle is committed to git under
+# frontend/dist/ because Render's free-tier build env doesn't ship Node;
+# the build step runs locally before commit (npm run build) and Django
+# just hands the file to the browser. Hashed assets in the HTML resolve
+# to /static/dashboard/assets/... via WhiteNoise + STATICFILES_DIRS.
+# ---------------------------------------------------------------------------
+
+from django.conf import settings as _settings
+from django.http import HttpResponse, HttpResponseNotFound
+
+
+@login_required
+def spa_dashboard(request, *args, **kwargs):
+    """Serve the React dashboard SPA. Catches every URL under /dashboard/
+    so client-side routes (Phase B) deep-link correctly without 404ing.
+    """
+    index_path = _settings.BASE_DIR / "frontend" / "dist" / "index.html"
+    try:
+        html = index_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Build hasn't been run yet. Render a clear actionable message
+        # instead of a stack trace so the dev knows what to do.
+        return HttpResponseNotFound(
+            "<h1>Dashboard SPA not built</h1>"
+            "<p>Run <code>cd frontend &amp;&amp; npm install &amp;&amp; "
+            "npm run build</code> and commit <code>frontend/dist/</code>.</p>",
+            content_type="text/html",
+        )
+    return HttpResponse(html)

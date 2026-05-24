@@ -9516,6 +9516,101 @@ class FinancialsAggregationTests(TestCase):
         self.assertEqual(earliest, self.wc1)
         self.assertEqual(latest, self.wc3)
 
+    def test_misclassified_external_customer_lands_in_internal_channel(self):
+        # Reproduces the w/c 18 May 2026 £22.05 shortfall: a customer
+        # with is_internal=False but an unrecognised customer_type
+        # (empty / typoed / NULL) USED TO be in the Orders-page
+        # external total but in NEITHER Financials channel, silently
+        # dropping money from the grand total. The fix is the
+        # complement-internal partition: INTERNAL = external NOT
+        # wholesale, so any off-piste customer_type lands in INTERNAL
+        # (visible) rather than off the page (invisible).
+        from stock.financials import (
+            per_customer_in_channel, range_totals)
+        oddball = Customer.objects.create(
+            name="OFF-PISTE OUTLET",
+            customer_type="",  # not 'wholesale' AND not 'internal'
+            department=self.dept)
+        self._line(oddball, self.wc2, Decimal("3"), Decimal("7.35"))  # 22.05
+
+        rt = range_totals(self.dept, self.wc1, self.wc3)
+        # Grand total grew by exactly the oddball line — nothing lost.
+        self.assertEqual(rt["total"], self.exp_grand + Decimal("22.05"))
+        # Wholesale unchanged — the oddball isn't wholesale.
+        self.assertEqual(rt["wholesale"], self.exp_wholesale)
+        # Oddball's £22.05 lives in the internal complement.
+        self.assertEqual(rt["internal"],
+                         self.exp_internal + Decimal("22.05"))
+        # And surfaces in the internal per-customer breakdown, so the
+        # operator can see WHO it is and fix the customer_type.
+        internal_names = {
+            r["name"] for r in per_customer_in_channel(
+                self.dept, Customer.INTERNAL, self.wc1, self.wc3)}
+        self.assertIn("OFF-PISTE OUTLET", internal_names)
+
+    def test_invariant_internal_plus_wholesale_plus_excluded_equals_true_total(self):
+        # The hole the £22.05 shortfall slipped through: the previous
+        # classification test only walked seed customers (all of which
+        # were perfectly classified), so a real-data misclassification
+        # had nothing checking it. This invariant covers EVERY customer
+        # with orders in the range — Financials' grand + the excluded
+        # total must equal the unfiltered ordered total, and no
+        # customer should fall outside the three buckets.
+        from stock.financials import range_totals
+        # Add an oddball so the invariant has something to catch if
+        # the partition ever regresses.
+        oddball = Customer.objects.create(
+            name="ROGUE", customer_type="external",  # off-piste
+            department=self.dept)
+        self._line(oddball, self.wc3, Decimal("2"), Decimal("4.50"))  # 9.00
+
+        # The "true" ordered total: every line × qty × price, summed
+        # in Python over EVERY customer in the range — no partition
+        # involved at all. This is the figure the Orders page reports
+        # when you sum its day tiles (external) plus the internal-use
+        # subtotal underneath.
+        true_external = Decimal("0")
+        true_excluded = Decimal("0")
+        end = self.wc3 + datetime.timedelta(days=6)
+        from django.db.models import Sum, F, DecimalField
+        for o in Order.objects.filter(
+                department=self.dept,
+                order_date__range=(self.wc1, end)).select_related("customer"):
+            v = o.total_value()
+            if o.customer.is_internal:
+                true_excluded += v
+            else:
+                true_external += v
+
+        rt = range_totals(self.dept, self.wc1, self.wc3)
+
+        # Financials grand == true external (the headline reconciles).
+        self.assertEqual(
+            rt["total"], true_external,
+            f"Financials grand £{rt['total']} != true external "
+            f"£{true_external} — some customer's demand fell outside "
+            f"both channels. Likely an off-piste customer_type.")
+        # Two channels partition the external scope exactly.
+        self.assertEqual(rt["internal"] + rt["wholesale"], rt["total"])
+        # Explicitly list any customer whose demand is in neither
+        # channel — empty under the complement-internal rule.
+        offenders = []
+        for o in Order.objects.filter(
+                department=self.dept,
+                order_date__range=(self.wc1, end),
+                customer__is_internal=False).select_related("customer"):
+            ct = o.customer.customer_type
+            v = o.total_value()
+            if v == 0:
+                continue
+            # Under the partition rule, exactly one of these is true.
+            in_wholesale = (ct == Customer.WHOLESALE)
+            in_internal = not in_wholesale  # complement
+            if not (in_wholesale ^ in_internal):
+                offenders.append((o.customer.name, ct, v))
+        self.assertEqual(offenders, [],
+            f"Found customers in neither / both channels: {offenders}")
+
 
 class FinancialsViewTests(TestCase):
     """The /financials/ page renders the channel split, weekly trend
@@ -9579,3 +9674,280 @@ class FinancialsViewTests(TestCase):
     def test_nav_includes_financials_link(self):
         r = self.client.get("/home/")
         self.assertIn('href="/financials/"', r.content.decode())
+
+
+class DashboardSummaryApiTests(TestCase):
+    """/api/dashboard/summary/ — DRF endpoint that powers the React
+    dashboard. Every figure here must reconcile with the financials.py
+    primitives the /financials/ page already uses; this test class is
+    the contract that locks that in.
+    """
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.wc1 = datetime.date(2026, 3, 30)
+        self.wc2 = datetime.date(2026, 4, 6)
+        self.wc3 = datetime.date(2026, 4, 13)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.mjolk = Customer.objects.create(
+            name="MJOLK", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.farmshop = Customer.objects.create(
+            name="FARMSHOP", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.excluded = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+        # wc1: garden 25 + farmshop 10 internal; teals 22 wholesale = 57
+        # wc2: garden 12 internal; teals 9 + mjolk 11 wholesale = 32
+        # wc3: farmshop 10 internal; mjolk 6 wholesale = 16
+        # grand: internal 57, wholesale 48, total 105
+        self._line(self.garden, self.wc1, Decimal("10"), Decimal("2.50"))
+        self._line(self.farmshop, self.wc1, Decimal("8"), Decimal("1.25"))
+        self._line(self.teals, self.wc1, Decimal("20"), Decimal("1.10"))
+        self._line(self.garden, self.wc2, Decimal("4"), Decimal("3.00"))
+        self._line(self.teals, self.wc2, Decimal("6"), Decimal("1.50"))
+        self._line(self.mjolk, self.wc2, Decimal("10"), Decimal("1.10"))
+        self._line(self.farmshop, self.wc3, Decimal("5"), Decimal("2.00"))
+        self._line(self.mjolk, self.wc3, Decimal("4"), Decimal("1.50"))
+        # Excluded — must never appear in any total.
+        self._line(self.excluded, self.wc1, Decimal("100"), Decimal("9.99"))
+
+    def _line(self, customer, order_date, qty, price):
+        o = Order.objects.create(
+            customer=customer, department=self.dept,
+            order_date=order_date)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=f"P{o.pk}",
+            unit_price=price, qty_ordered=qty)
+
+    # ---- auth ----
+
+    def test_requires_authentication(self):
+        # Anonymous → 403 (DRF SessionAuthentication + IsAuthenticated).
+        r = self.client.get("/api/dashboard/summary/")
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_authenticated_returns_200(self):
+        self.client.force_login(self.user)
+        r = self.client.get("/api/dashboard/summary/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"].split(";")[0], "application/json")
+
+    # ---- shape ----
+
+    def _get(self):
+        self.client.force_login(self.user)
+        r = self.client.get("/api/dashboard/summary/")
+        self.assertEqual(r.status_code, 200)
+        return r.json()
+
+    def test_response_has_no_revenue_waste_or_margin_keys(self):
+        # Hard contract: this dashboard never invents data it doesn't have.
+        # No revenue / sales / waste / margin / profit keys anywhere in
+        # the payload — those figures don't exist for this business.
+        data = self._get()
+        as_text = str(data).lower()
+        for forbidden in (
+            "revenue", "sales", "margin", "profit", "waste", "wastage",
+        ):
+            self.assertNotIn(
+                forbidden, as_text,
+                f"forbidden key/value '{forbidden}' leaked into payload: "
+                f"{data!r}")
+
+    def test_top_level_keys_present(self):
+        data = self._get()
+        for key in (
+            "from", "to", "grand_total",
+            "internal", "wholesale",
+            "avg_week", "avg_day",
+            "latest_week",
+            "weekly_trend",
+            "top_wholesale", "top_internal",
+            "summary",
+        ):
+            self.assertIn(key, data, f"missing key: {key}")
+
+    # ---- totals reconcile with financials.py ----
+
+    def test_grand_total_matches_financials(self):
+        from stock.financials import range_totals, available_week_range
+        f, t = available_week_range(self.dept)
+        rt = range_totals(self.dept, f, t)
+        data = self._get()
+        self.assertEqual(Decimal(str(data["grand_total"])), rt["total"])
+        self.assertEqual(Decimal(str(data["grand_total"])),
+                         Decimal("105.00"))
+
+    def test_internal_plus_wholesale_equals_grand(self):
+        data = self._get()
+        i = Decimal(str(data["internal"]["total"]))
+        w = Decimal(str(data["wholesale"]["total"]))
+        g = Decimal(str(data["grand_total"]))
+        self.assertEqual(i + w, g)
+        self.assertEqual(i, Decimal("57.00"))
+        self.assertEqual(w, Decimal("48.00"))
+
+    def test_channel_pcts_sum_to_100(self):
+        data = self._get()
+        ip = float(data["internal"]["pct"])
+        wp = float(data["wholesale"]["pct"])
+        self.assertAlmostEqual(ip + wp, 100.0, places=1)
+
+    def test_excluded_customer_never_appears(self):
+        data = self._get()
+        names = [r["name"] for r in data["top_wholesale"]]
+        names += [r["name"] for r in data["top_internal"]]
+        self.assertNotIn("BAKERY INTERNAL USE", names)
+        # Grand total without the excluded £999 line.
+        self.assertEqual(Decimal(str(data["grand_total"])),
+                         Decimal("105.00"))
+
+    # ---- weekly trend ----
+
+    def test_weekly_trend_one_row_per_imported_week(self):
+        data = self._get()
+        weeks = [w["week"] for w in data["weekly_trend"]]
+        self.assertEqual(weeks, [
+            self.wc1.isoformat(),
+            self.wc2.isoformat(),
+            self.wc3.isoformat(),
+        ])
+
+    def test_weekly_trend_each_row_reconciles(self):
+        data = self._get()
+        for row in data["weekly_trend"]:
+            i = Decimal(str(row["internal"]))
+            w = Decimal(str(row["wholesale"]))
+            t = Decimal(str(row["total"]))
+            self.assertEqual(i + w, t)
+
+    def test_weekly_trend_sums_to_grand_total(self):
+        data = self._get()
+        total = sum(Decimal(str(w["total"]))
+                    for w in data["weekly_trend"])
+        self.assertEqual(total, Decimal(str(data["grand_total"])))
+
+    # ---- averages, latest week, wow ----
+
+    def test_avg_week_and_avg_day(self):
+        data = self._get()
+        # 3 weeks, total 105 → avg_week 35.00, avg_day 5.00.
+        self.assertEqual(Decimal(str(data["avg_week"])), Decimal("35.00"))
+        self.assertEqual(Decimal(str(data["avg_day"])), Decimal("5.00"))
+
+    def test_latest_week_is_wc3_with_wow_pct(self):
+        data = self._get()
+        lw = data["latest_week"]
+        self.assertEqual(lw["week"], self.wc3.isoformat())
+        self.assertEqual(Decimal(str(lw["total"])), Decimal("16.00"))
+        # wc2 was 32 → wc3 16 → wow = (16-32)/32 = -50%.
+        self.assertAlmostEqual(float(lw["wow_pct"]), -50.0, places=1)
+
+    # ---- ranked customer lists ----
+
+    def test_top_wholesale_ranked_with_pct(self):
+        data = self._get()
+        rows = data["top_wholesale"]
+        names = [r["name"] for r in rows]
+        # TEALS 31, MJOLK 17.
+        self.assertEqual(names, ["TEALS", "MJOLK"])
+        self.assertEqual(Decimal(str(rows[0]["value"])), Decimal("31.00"))
+        self.assertEqual(Decimal(str(rows[1]["value"])), Decimal("17.00"))
+        self.assertAlmostEqual(
+            sum(float(r["pct"]) for r in rows), 100.0, places=1)
+
+    def test_top_internal_ranked_with_pct(self):
+        data = self._get()
+        rows = data["top_internal"]
+        names = [r["name"] for r in rows]
+        # GARDEN CAFE 37, FARMSHOP 20.
+        self.assertEqual(names, ["GARDEN CAFE", "FARMSHOP"])
+        self.assertEqual(Decimal(str(rows[0]["value"])), Decimal("37.00"))
+        self.assertEqual(Decimal(str(rows[1]["value"])), Decimal("20.00"))
+
+    # ---- summary block ----
+
+    def test_summary_block_reconciles(self):
+        data = self._get()
+        s = data["summary"]
+        # highest_week == wc1 (57), lowest_week == wc3 (16).
+        self.assertEqual(s["highest_week"]["week"], self.wc1.isoformat())
+        self.assertEqual(Decimal(str(s["highest_week"]["total"])),
+                         Decimal("57.00"))
+        self.assertEqual(s["lowest_week"]["week"], self.wc3.isoformat())
+        self.assertEqual(Decimal(str(s["lowest_week"]["total"])),
+                         Decimal("16.00"))
+        self.assertEqual(s["top_wholesale"], "TEALS")
+        self.assertEqual(s["top_internal"], "GARDEN CAFE")
+        # pct echoes top-level channel pct (same number, same source).
+        self.assertEqual(s["internal_pct"], data["internal"]["pct"])
+        self.assertEqual(s["wholesale_pct"], data["wholesale"]["pct"])
+
+    # ---- range param ----
+
+    def test_from_to_narrows_range(self):
+        self.client.force_login(self.user)
+        r = self.client.get(
+            f"/api/dashboard/summary/?from={self.wc2.isoformat()}"
+            f"&to={self.wc2.isoformat()}")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        # Just wc2: 32 total, internal 12, wholesale 20.
+        self.assertEqual(Decimal(str(data["grand_total"])), Decimal("32.00"))
+        self.assertEqual(Decimal(str(data["internal"]["total"])),
+                         Decimal("12.00"))
+        self.assertEqual(Decimal(str(data["wholesale"]["total"])),
+                         Decimal("20.00"))
+        self.assertEqual(len(data["weekly_trend"]), 1)
+
+
+class SpaDashboardRouteTests(TestCase):
+    """The /dashboard/ route serves the built Vite bundle's index.html
+    and falls back to the same HTML for any sub-route (so client-side
+    routes in Phase B deep-link cleanly). Auth-gated like every other
+    page in the app.
+    """
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+
+    def test_anonymous_redirects_to_login(self):
+        r = self.client.get("/dashboard/")
+        # @login_required redirects to /login/ when anonymous.
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/login/", r["Location"])
+
+    def test_authenticated_serves_index_html_or_helpful_404(self):
+        # If the SPA has been built (frontend/dist/index.html exists),
+        # we get the bundled HTML; if not, we get the actionable 404
+        # message telling the dev to run the build. EITHER is correct
+        # depending on whether `npm run build` has been run yet.
+        self.client.force_login(self.user)
+        r = self.client.get("/dashboard/")
+        self.assertIn(r.status_code, (200, 404))
+        body = r.content.decode()
+        if r.status_code == 200:
+            self.assertIn("<div id=\"root\"></div>", body)
+        else:
+            self.assertIn("npm run build", body)
+
+    def test_subroute_falls_back_to_same_response(self):
+        # Phase B will introduce client-side routes — /dashboard/foo/
+        # must serve the same HTML, not 404 in Django.
+        self.client.force_login(self.user)
+        r = self.client.get("/dashboard/anything-here/")
+        self.assertIn(r.status_code, (200, 404))

@@ -1,6 +1,7 @@
-from django.urls import path
+from django.urls import path, re_path
 from django.contrib.auth import views as auth_views
 from . import views
+from .api import dashboard_summary
 
 urlpatterns = [
     path("login/", auth_views.LoginView.as_view(template_name="stock/login.html"), name="login"),
@@ -74,4 +75,10 @@ urlpatterns = [
     path("orders/<int:pk>/", views.order_detail, name="order_detail"),
     path("orders/<int:pk>/edit/", views.order_edit, name="order_edit"),
     path("orders/<int:pk>/delete/", views.order_delete, name="order_delete"),
+    # React dashboard SPA + its DRF backend. Two patterns so any
+    # client-side sub-route under /dashboard/ falls back to the same
+    # index.html (Phase B will use this for routing).
+    path("api/dashboard/summary/", dashboard_summary, name="api_dashboard_summary"),
+    path("dashboard/", views.spa_dashboard, name="spa_dashboard"),
+    re_path(r"^dashboard/.+$", views.spa_dashboard),
 ]
