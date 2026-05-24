@@ -23,11 +23,30 @@ export function pct(value, { signed = false } = {}) {
 
 export function weekLabel(iso) {
   if (!iso) return "—";
-  // Render as "w/c 30 Mar" — matches the Orders / Financials nomenclature.
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
+    timeZone: "UTC",
+  });
+}
+
+export function weekLongLabel(iso) {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function weekdayShort(iso) {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", {
+    weekday: "short",
     timeZone: "UTC",
   });
 }

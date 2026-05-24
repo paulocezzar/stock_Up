@@ -5,7 +5,13 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#07090d",
+        page: "#030712",
+        card: "#0b111a",
+        brand: "#f5a400",
+        internal: "#1473ff",
+        wholesale: "#7c3aed",
+        pos: "#22c55e",
+        neg: "#ef4444",
       },
       fontFamily: {
         display: ['"Space Grotesk"', "system-ui", "sans-serif"],
