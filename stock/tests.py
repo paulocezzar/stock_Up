@@ -8162,10 +8162,10 @@ class HistoricalWorkbookImportTests(TestCase):
         from stock import order_import as oi
         real = oi.import_orders_for_tab
 
-        def fail_on_farmshop(workbook, tab_name, customer, dept):
+        def fail_on_farmshop(workbook, tab_name, customer, dept, **kwargs):
             if tab_name == "FARMSHOP":
                 raise RuntimeError("synthetic per-tab boom")
-            return real(workbook, tab_name, customer, dept)
+            return real(workbook, tab_name, customer, dept, **kwargs)
 
         with patch.object(oi, "import_orders_for_tab", side_effect=fail_on_farmshop):
             summary = oi.import_historical_workbook(self.SHEET)
@@ -8227,37 +8227,40 @@ class ImportBlankPriceTreatmentTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
         self.ecom = Customer.objects.create(name="ECOM", department=self.dept)
-        # The ECOM tab's "TN Biscuits Easter Bag_EA" row carries qty
-        # 50 on Tue but a BLANK Price cell. Seed a current catalogue
-        # entry priced at £2.50 — without the fix the importer would
-        # snapshot the catalogue price and inflate the order by £125.
+        # Deliberately seed the catalogue with the WRONG price for the
+        # ECOM TN Biscuits row so any code path that touched the
+        # SaleProduct catalogue (instead of the sheet) would produce
+        # £99.99/unit and immediately show up. The historical workbook's
+        # Products tab carries this SKU at £2.50, so the recovery chain
+        # MUST land on £2.50 — sheet-authoritative.
         self.biscuits = SaleProduct.objects.create(
             name="TN Biscuits Easter Bag_EA", sage_number="660260238",
-            price=Decimal("2.50"), department=self.dept)
+            price=Decimal("99.99"), department=self.dept)
 
-    def test_blank_price_row_imports_at_zero_not_catalogue_price(self):
+    def test_blank_price_recovered_from_workbook_products_tab_not_catalogue(self):
         from django.core.management import call_command
         call_command("import_orders", self.SHEET, tab=["ECOM"])
-        # The row matched by Sage No, so sale_product is linked. The
-        # snapshot must be £0 from the (blank) sheet cell, not £2.50
-        # from the catalogue.
         line = OrderLine.objects.filter(
             order__customer=self.ecom,
             product_name="TN Biscuits Easter Bag_EA").first()
         self.assertIsNotNone(line, "ECOM biscuits row should have imported")
         self.assertEqual(line.sale_product_id, self.biscuits.pk,
             "still links to current catalogue product (matched by Sage)")
-        self.assertEqual(line.unit_price, Decimal("0.00"),
-            "blank Price cell must snapshot as £0, not catalogue £2.50")
-        self.assertEqual(line.line_value, Decimal("0.00"))
+        # £2.50 from the workbook's own Products tab — NEVER £99.99 from
+        # the live SaleProduct catalogue. The point of the recovery
+        # chain is that it stays sheet-authoritative.
+        self.assertEqual(line.unit_price, Decimal("2.50"),
+            "blank Price cell must be recovered from the workbook's "
+            "Products tab, not the catalogue")
+        self.assertEqual(line.line_value, Decimal("125.00"))
 
     def test_manual_orderline_creation_still_uses_catalogue_fallback(self):
         # The OrderLine.save() snapshot fallback (catalogue → unit_price
         # when caller passes None) is intentionally PRESERVED for the
         # manual order form. This protects the operator UX: creating
         # an order line through /orders/new/ should still record the
-        # current catalogue price even though we removed the fallback
-        # from the import path.
+        # current catalogue price even though the import path
+        # explicitly bypasses that fallback (sheet-authoritative).
         order = Order.objects.create(
             customer=self.ecom, department=self.dept,
             order_date=datetime.date(2026, 5, 1))
@@ -8265,7 +8268,9 @@ class ImportBlankPriceTreatmentTests(TestCase):
             order=order, sale_product=self.biscuits,
             qty_ordered=Decimal("3"))  # no unit_price passed
         line.refresh_from_db()
-        self.assertEqual(line.unit_price, Decimal("2.50"),
+        # Mirrors whatever we seeded for the SaleProduct (£99.99 here,
+        # to make the divergence from the import path unmistakable).
+        self.assertEqual(line.unit_price, Decimal("99.99"),
             "manual creation should still snapshot the catalogue price")
 
 
@@ -8405,22 +8410,28 @@ class WholesaleImportTests(TestCase):
         self.assertEqual(OrderLine.objects.count(), first_lines)
         self.assertEqual(Order.objects.count(), first_orders)
 
-    def test_wholesale_blank_price_imports_as_zero(self):
-        # The wholesale handler shares the blank-price-is-£0 rule
-        # with the per-customer importer. THE OLD PHARMACY's
-        # "Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY" row
-        # has a blank Price cell but real quantities — those lines
-        # must snapshot at £0 even if a current catalogue match exists.
+    def test_wholesale_blank_price_recovered_from_workbook_products_tab(self):
+        # THE OLD PHARMACY's "Sticky Apple & Cinnamon Bun (Loose) -
+        # WHOLESALE ONLY" row has a blank Price cell on the WHOLESALE
+        # tab but lives in the workbook's own Products tab at £1.20.
+        # The wholesale handler must apply the same recovery chain as
+        # the per-customer importer, snapshotting £1.20 from the sheet
+        # — NOT from any SaleProduct catalogue entry.
         Customer.objects.create(
             name="THE OLD PHARMACY", department=self.dept)
+        # Catalogue intentionally at the wrong price so the test would
+        # fail loudly if the catalogue ever leaked into the import
+        # path.
         SaleProduct.objects.create(
             name="Sticky Apple & Cinnamon Bun (Loose) - WHOLESALE ONLY",
-            price=Decimal("1.20"), department=self.dept)
-        from stock.order_import import import_wholesale_tab
+            price=Decimal("99.99"), department=self.dept)
+        from stock.order_import import (
+            import_wholesale_tab, make_price_recovery)
         from openpyxl import load_workbook
         wb = load_workbook(self.SHEET, read_only=True, data_only=True)
         try:
-            import_wholesale_tab(wb)
+            import_wholesale_tab(
+                wb, recover_price=make_price_recovery(wb))
         finally:
             wb.close()
         sticky_lines = OrderLine.objects.filter(
@@ -8428,8 +8439,31 @@ class WholesaleImportTests(TestCase):
             product_name__icontains="Sticky Apple & Cinnamon Bun")
         self.assertGreater(sticky_lines.count(), 0)
         for line in sticky_lines:
-            self.assertEqual(line.unit_price, Decimal("0.00"),
-                "WHOLESALE blank-price row should snapshot at £0")
+            self.assertEqual(line.unit_price, Decimal("1.20"),
+                "WHOLESALE blank-price row should be recovered from "
+                "the workbook Products tab (£1.20), not from the "
+                "catalogue (£99.99) and not £0")
+
+    def test_wholesale_blank_price_falls_to_zero_when_no_recovery(self):
+        # The recovery is opt-in via recover_price. Without it, the
+        # wholesale handler keeps the original blank-is-£0 behaviour —
+        # important so callers that don't want recovery can still rely
+        # on the strict-sheet semantics.
+        Customer.objects.create(
+            name="THE OLD PHARMACY", department=self.dept)
+        from stock.order_import import import_wholesale_tab
+        from openpyxl import load_workbook
+        wb = load_workbook(self.SHEET, read_only=True, data_only=True)
+        try:
+            import_wholesale_tab(wb)  # no recover_price
+        finally:
+            wb.close()
+        sticky_lines = OrderLine.objects.filter(
+            order__customer__name__iexact="THE OLD PHARMACY",
+            product_name__icontains="Sticky Apple & Cinnamon Bun")
+        self.assertGreater(sticky_lines.count(), 0)
+        for line in sticky_lines:
+            self.assertEqual(line.unit_price, Decimal("0.00"))
 
     def test_wholesale_no_longer_in_meta_tabs(self):
         # Future-proofing: if anyone re-adds 'wholesale' to META_TABS
@@ -8476,10 +8510,17 @@ class HistoricalImportReconciliationTests(TestCase):
             (o.total_value() for o in Order.objects.filter(
                 customer=self.ecom, order_date__in=week)),
             Decimal("0"))
+        # Garden Café has no blank-price rows the recovery hits, so
+        # its total is unchanged across all three blank-price regimes.
         self.assertEqual(garden_total, Decimal("649.05"))
-        # Pre-fix this was £766.60 (£125 ghost from the catalogue
-        # fallback). Post-fix it should be £641.60.
-        self.assertEqual(ecom_total, Decimal("641.60"))
+        # ECOM tracks the importer's blank-price treatment:
+        #   * pre-fix #1: £766.60 (catalogue fallback ghost)
+        #   * fix #1 (blank-is-£0): £641.60
+        #   * fix #2 (sheet-authoritative recovery): £1,150.10
+        # the 5 reference-CSV SKUs (Loaf Seeded Rye + 4) plus the
+        # workbook-Products-tab recovery of TN Biscuits Easter Bag
+        # account for the +£508.50 vs the previous fix.
+        self.assertEqual(ecom_total, Decimal("1150.10"))
 
     def test_wholesale_routed_through_handler_in_historical(self):
         from stock.order_import import import_historical_workbook
@@ -8658,11 +8699,12 @@ class ReconcileOrdersCommandTests(TestCase):
         self.dept = Department.objects.create(name="Bakery")
         _seed_all_w_c_30_mar_customers(self.dept)
 
-    def test_w_c_30_mar_reconciles_to_eighteen_six_ten_oh_five(self):
+    def test_w_c_30_mar_reconciles_with_recovered_prices(self):
         from django.core.management import call_command
         from io import StringIO
         from stock.order_import import import_historical_workbook
-        # Populate the DB exactly the way the deploy would.
+        # Populate the DB exactly the way the deploy would (including
+        # the blank-price recovery chain).
         import_historical_workbook(self.SHEET, force=True)
         # Then run the reconciliation report and inspect its output.
         out = StringIO()
@@ -8671,14 +8713,18 @@ class ReconcileOrdersCommandTests(TestCase):
         # The verdict.
         self.assertIn("RECONCILES", body)
         self.assertNotIn("MISMATCH", body)
-        # Grand totals (both per-sheet and imported) line up.
-        self.assertIn("£ 18,610.05", body)
+        # Post-recovery grand total: customer tabs £13,458.10 (was
+        # £12,949.60 — ECOM picked up the 5 reference-CSV SKUs +
+        # workbook-Products Easter Bag) + wholesale £5,674.85 (was
+        # £5,660.45 — sticky bun recovered from workbook Products
+        # tab) = £19,132.95.
+        self.assertIn("£ 19,132.95", body)
         # Section headings present (per-customer table + wholesale).
         self.assertIn("CUSTOMER TABS", body)
         self.assertIn("WHOLESALE BREAKDOWN", body)
-        # Customer-tabs subtotal and wholesale subtotal.
-        self.assertIn("£ 12,949.60", body)
-        self.assertIn("£  5,660.45", body)
+        # Per-section subtotals.
+        self.assertIn("£ 13,458.10", body)
+        self.assertIn("£  5,674.85", body)
         # Every per-row entry says OK, none flagged.
         self.assertNotIn("NO CUSTOMER ROW", body)
         # Difference line.
@@ -8952,3 +8998,150 @@ class ReconcileIncludesInternalCustomersTests(TestCase):
         # Customer and still listed elsewhere if it had orders.
         # The crucial RECONCILES verdict must still hold.
         self.assertIn("RECONCILES", body)
+
+
+class BlankPriceRecoveryChainTests(TestCase):
+    """Unit-level tests for the price-recovery chain itself, isolated
+    from the full importer plumbing. The lookup order is:
+    workbook Products tab → reference CSV → £0."""
+
+    def _wb_with_products(self, products):
+        """Build an in-memory workbook with a single ``Products`` sheet
+        carrying the given ``(name, price, sage)`` rows. The recovery
+        helpers don't need any of the customer order tabs to be
+        present — they only ever touch the Products sheet."""
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Products"
+        ws.append(["Product", "Price", "Sage No."])
+        for name, price, sage in products:
+            ws.append([name, price, sage])
+        return wb
+
+    def test_recovers_from_workbook_products_tab_by_sage(self):
+        from stock.order_import import make_price_recovery
+        wb = self._wb_with_products([
+            ("Loaf Seeded Rye_650g", Decimal("3.30"), "660130120"),
+        ])
+        recover = make_price_recovery(wb, reference_path=None)
+        # Sage win — even with a slightly mangled name.
+        self.assertEqual(recover("660130120", "different name"),
+                         Decimal("3.30"))
+
+    def test_recovers_from_workbook_products_tab_by_name_when_sage_blank(self):
+        from stock.order_import import make_price_recovery
+        wb = self._wb_with_products([
+            ("Mystery Loaf", Decimal("4.40"), None),
+        ])
+        recover = make_price_recovery(wb, reference_path=None)
+        # No Sage on the row → name match is the fallback.
+        self.assertEqual(recover("", "MYSTERY LOAF"),  # case-insensitive
+                         Decimal("4.40"))
+
+    def test_falls_through_to_reference_csv_when_workbook_has_no_price(self):
+        # Workbook has the row but with a BLANK Price cell (the whole
+        # point of the reference CSV: older sheets had prices that
+        # newer ones lost). The CSV should be consulted next.
+        import os, tempfile
+        from stock.order_import import make_price_recovery
+        wb = self._wb_with_products([
+            # Workbook lists the SKU but with no price.
+            ("Loaf Seeded Rye_650g", None, "660130120"),
+        ])
+        # Write a tiny CSV to a temp dir so the test owns the lookup.
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = os.path.join(tmp, "refs.csv")
+            with open(csv_path, "w", encoding="utf-8") as fh:
+                fh.write("sage,price\n660130120,3.30\n")
+            recover = make_price_recovery(wb, reference_path=csv_path)
+        self.assertEqual(recover("660130120", "Loaf Seeded Rye_650g"),
+                         Decimal("3.30"))
+
+    def test_falls_back_to_zero_when_nothing_found(self):
+        from stock.order_import import make_price_recovery
+        wb = self._wb_with_products([])
+        recover = make_price_recovery(wb, reference_path=None)
+        self.assertEqual(recover("999999", "Anything"),
+                         Decimal("0"))
+
+    def test_workbook_products_tab_wins_over_reference_csv(self):
+        # If the same SKU appears in both, the workbook is
+        # authoritative (the headline rule). The CSV only fills gaps
+        # the workbook itself doesn't fill.
+        import os, tempfile
+        from stock.order_import import make_price_recovery
+        wb = self._wb_with_products([
+            ("X", Decimal("9.99"), "555"),
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = os.path.join(tmp, "refs.csv")
+            with open(csv_path, "w", encoding="utf-8") as fh:
+                fh.write("sage,price\n555,1.00\n")
+            recover = make_price_recovery(wb, reference_path=csv_path)
+        self.assertEqual(recover("555", "X"), Decimal("9.99"))
+
+    def test_csv_loader_tolerates_missing_file_and_comments(self):
+        from stock.order_import import load_reference_prices
+        import os, tempfile
+        # Missing path → empty dict, no exception.
+        self.assertEqual(load_reference_prices("/nope/missing.csv"), {})
+        # `#`-prefixed rows are treated as comments.
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = os.path.join(tmp, "refs.csv")
+            with open(csv_path, "w", encoding="utf-8") as fh:
+                fh.write("sage,price\n# header note\n123,4.50\n")
+            self.assertEqual(load_reference_prices(csv_path),
+                             {"123": Decimal("4.50")})
+
+
+class BlankPriceRecoveryIntegrationTests(TestCase):
+    """End-to-end: real historical workbook + the committed reference
+    CSV produce the expected recovered totals on the ECOM tab."""
+
+    SHEET = "data/historical/order_sheet_2026_03_30.xlsm"
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.ecom = Customer.objects.create(
+            name="ECOM", department=self.dept)
+
+    def test_ecom_recovers_to_eleven_fifty_ten(self):
+        # The recovered ECOM total is the sum of:
+        #   priced cells on the tab (already non-blank): 641.60
+        #   workbook-Products tab recovery (TN Biscuits @ £2.50):
+        #     50 × 2.50 = 125.00
+        #   reference-CSV recovery (5 SKUs):
+        #     Loaf Seeded Rye 34×3.30=112.20
+        #     Wholewheat Sourdough 34×2.30=78.20
+        #     TN Cake Carrot Walnut 11×5.50=60.50
+        #     Cake Somerset Apple 18×5.50=99.00
+        #     Choc Brownie Bag 12×2.80=33.60
+        # Total: 1,150.10.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["ECOM"])
+        week = [datetime.date(2026, 3, 30) + datetime.timedelta(days=i)
+                for i in range(7)]
+        total = sum(
+            (o.total_value() for o in Order.objects.filter(
+                customer=self.ecom, order_date__in=week)),
+            Decimal("0"))
+        self.assertEqual(total, Decimal("1150.10"))
+
+    def test_recovered_price_is_snapshotted_on_the_line(self):
+        # The recovered price must land in OrderLine.unit_price (the
+        # historical snapshot), not just be a transient computation.
+        from django.core.management import call_command
+        call_command("import_orders", self.SHEET, tab=["ECOM"])
+        # A reference-CSV row.
+        line = OrderLine.objects.filter(
+            order__customer=self.ecom,
+            product_name="Loaf Seeded Rye_650g").first()
+        self.assertIsNotNone(line)
+        self.assertEqual(line.unit_price, Decimal("3.30"))
+        # A workbook-Products-tab row.
+        easter = OrderLine.objects.filter(
+            order__customer=self.ecom,
+            product_name="TN Biscuits Easter Bag_EA").first()
+        self.assertIsNotNone(easter)
+        self.assertEqual(easter.unit_price, Decimal("2.50"))

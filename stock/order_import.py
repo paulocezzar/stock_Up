@@ -181,6 +181,167 @@ def _build_product_lookups(dept):
     return by_sage, by_name
 
 
+# ---- price recovery for blank cells on customer / WHOLESALE tabs ----
+#
+# Headline rule: the SHEET is authoritative for prices. A blank cell
+# means "look it up elsewhere on the sheet" (the workbook's own
+# Products tab — the master price list), NOT "fall back to the live
+# SaleProduct catalogue" (which can drift). Only when even the master
+# list lacks a price do we consult an optional committed reference
+# CSV — that captures prices from older sheets that newer sheets have
+# dropped, without anyone having to hand-edit every week file.
+#
+# Lookup chain, in order:
+#   1. the tab's own Price cell (the row's ``price`` field) — if set
+#   2. THIS workbook's Products tab by Sage No. (then by name)
+#   3. ``data/reference_prices.csv`` by Sage No.
+#   4. £0 (truly unpriced — same as the old blank-is-£0 behaviour)
+#
+# Anything stamped this way is snapshotted onto the OrderLine as
+# ``unit_price`` — historical, not live.
+
+DEFAULT_REFERENCE_PRICES_CSV = "data/reference_prices.csv"
+
+PRODUCTS_TAB = "Products"
+PRODUCTS_HEADER_ALIASES = {
+    "name": ("product", "product name"),
+    "price": ("price",),
+    "sage": ("sage no.", "sage no", "sage number"),
+}
+
+
+def _find_products_columns(header_row):
+    """Map the Products-tab header to (name, price, sage) column indices.
+
+    Returns a dict with each key present iff the matching header cell
+    was found; ``name`` is required for the lookup to be useful at all,
+    the others are optional but heavily desired."""
+    out = {"name": None, "price": None, "sage": None}
+    for i, cell in enumerate(header_row or ()):
+        label = (str(cell) if cell is not None else "").strip().lower()
+        if not label:
+            continue
+        for key, choices in PRODUCTS_HEADER_ALIASES.items():
+            if out[key] is None and label in choices:
+                out[key] = i
+    return out
+
+
+def read_workbook_product_prices(wb):
+    """Index the workbook's ``Products`` tab into ``(by_sage, by_name)``
+    price dicts. Each value is a Decimal — ONLY rows where the Products
+    tab actually carries a price are indexed, so the lookup chain falls
+    through to the reference CSV (or £0) when a row is present but its
+    price is blank in this week's master list."""
+    by_sage, by_name = {}, {}
+    if PRODUCTS_TAB not in wb.sheetnames:
+        return by_sage, by_name
+    ws = wb[PRODUCTS_TAB]
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows, None)
+    cols = _find_products_columns(header)
+    if cols["name"] is None:
+        return by_sage, by_name
+    for row in rows:
+        if not row:
+            continue
+        name = _as_text(row[cols["name"]] if cols["name"] < len(row) else None)
+        if not name:
+            continue
+        price = None
+        if cols["price"] is not None and cols["price"] < len(row):
+            price = _parse_price(row[cols["price"]])
+        if price is None:
+            # Don't index priceless rows — that's the whole point of the
+            # reference CSV fallback (older sheets had a price here that
+            # newer ones lost).
+            continue
+        sage = ""
+        if cols["sage"] is not None and cols["sage"] < len(row):
+            sage = _as_text(row[cols["sage"]])
+        sage_key = sage.strip().lower()
+        if sage_key and sage_key != "0":
+            by_sage.setdefault(sage_key, price)
+        by_name.setdefault(name.strip().lower(), price)
+    return by_sage, by_name
+
+
+def load_reference_prices(path=DEFAULT_REFERENCE_PRICES_CSV):
+    """Load a committed ``sage,price`` CSV into a ``{sage_str: Decimal}``
+    dict. Missing file → empty dict (totally optional source). Malformed
+    rows are skipped silently so a typo in the CSV never aborts a deploy
+    — the headline rule is still "sheet authoritative", this is just a
+    convenience overlay for prices that vanished from newer Products
+    tabs."""
+    import csv
+    import os
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for raw in reader:
+            sage = (raw.get("sage") or raw.get("Sage")
+                    or raw.get("SAGE") or "").strip()
+            # Allow `#`-prefixed comment lines so the CSV stays
+            # self-documenting; csv.DictReader treats them as a data
+            # row whose first field happens to start with `#`.
+            if not sage or sage == "0" or sage.startswith("#"):
+                continue
+            price_str = (raw.get("price") or raw.get("Price")
+                         or raw.get("PRICE") or "").strip()
+            price = _parse_price(price_str)
+            if price is None:
+                continue
+            out.setdefault(sage.lower(), price)
+    return out
+
+
+def make_price_recovery(wb, *, reference_path=DEFAULT_REFERENCE_PRICES_CSV):
+    """Build the closure used by the per-tab importers to fill in
+    a blank Price cell. Returns a callable ``recover(sage, name)
+    → Decimal`` that walks the lookup chain documented at the top of
+    this section. Cheap to call inside the hot loop — both dicts are
+    pre-built and the CSV is loaded once."""
+    wb_by_sage, wb_by_name = read_workbook_product_prices(wb)
+    ref_by_sage = load_reference_prices(reference_path)
+
+    def recover(sage, name):
+        sage_key = (sage or "").strip().lower()
+        name_key = (name or "").strip().lower()
+        # 2a. this workbook's Products tab, by Sage No. then name.
+        if sage_key and sage_key != "0":
+            p = wb_by_sage.get(sage_key)
+            if p is not None:
+                return p
+        if name_key:
+            p = wb_by_name.get(name_key)
+            if p is not None:
+                return p
+        # 3. committed reference CSV (sage only — it's a curated overlay
+        # of prices that vanished from newer sheets).
+        if sage_key and sage_key != "0":
+            p = ref_by_sage.get(sage_key)
+            if p is not None:
+                return p
+        # 4. truly unpriced.
+        return Decimal("0")
+
+    return recover
+
+
+def _resolve_unit_price(sheet_price, sage, name, *, recover_price=None):
+    """Apply the price-recovery chain. ``sheet_price`` is the row's own
+    Price cell (Decimal or None). When set, the sheet's own cell wins.
+    When blank, ``recover_price`` (if supplied) is consulted; without
+    it the legacy blank-is-£0 behaviour is preserved."""
+    if sheet_price is not None:
+        return sheet_price
+    if recover_price is None:
+        return Decimal("0")
+    return recover_price(sage, name)
+
+
 def _match_product(row, by_sage, by_name):
     """Resolve a sheet row to a SaleProduct.
 
@@ -204,7 +365,8 @@ def _match_product(row, by_sage, by_name):
 
 
 @transaction.atomic
-def import_orders_for_tab(workbook, tab_name, customer, dept):
+def import_orders_for_tab(workbook, tab_name, customer, dept,
+                          *, recover_price=None):
     """Import every product × day cell on ``tab_name`` for ``customer``.
 
     Replaces (idempotently) every existing order for ``customer`` on
@@ -212,6 +374,12 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
     then re-created from the workbook. Orders left with no lines
     after the rebuild (e.g. a product row whose week is entirely
     blank) are deleted so the database mirrors the sheet exactly.
+
+    ``recover_price`` is an optional ``(sage, name) → Decimal`` callable
+    (typically built via :func:`make_price_recovery`). When supplied,
+    rows whose Price cell is blank get the recovered price snapshotted
+    onto the line; without it, blank cells continue to snapshot as £0
+    (the legacy behaviour).
 
     Returns ``{dates, lines_imported, products_matched,
     products_unmatched, failures}``:
@@ -261,15 +429,15 @@ def import_orders_for_tab(workbook, tab_name, customer, dept):
         # which protects the total from later catalogue edits.
         sheet_name = (row.get("name") or "").strip()
         sheet_price = row.get("price")  # Decimal or None
-        # Sheet is authoritative for imports: a BLANK Price cell means
-        # £0, NOT "fall back to the linked SaleProduct's current price".
-        # The fallback in OrderLine.save() is kept for the manual order
-        # form (where the operator picks a product and we snapshot the
-        # catalogue's current price). For sheet rows we always pass
-        # something explicit so save()'s `unit_price is None` branch
-        # never fires — even a row whose Price cell is empty contributes
-        # £0 to the order total, matching the sheet exactly.
-        unit_price = sheet_price if sheet_price is not None else Decimal("0")
+        # Sheet authoritative: the tab's own Price cell wins when set.
+        # When blank, the recovery chain (this workbook's Products tab
+        # → reference CSV → £0) fills it in via ``recover_price`` —
+        # NEVER the live SaleProduct catalogue. ``OrderLine.save()``'s
+        # `unit_price is None` fallback therefore never fires here,
+        # though it stays in place for the manual /orders/new/ form.
+        unit_price = _resolve_unit_price(
+            sheet_price, row.get("sage"), sheet_name,
+            recover_price=recover_price)
         if sp is None:
             products_unmatched.append((row.get("sage") or "",
                                        sheet_name))
@@ -339,7 +507,10 @@ WHOLESALE_TAB = "WHOLESALE"
 #   v2 — blank Price cells snapshot as £0 (not catalogue fallback);
 #        WHOLESALE routed through dedicated handler so each wholesale
 #        customer gets first-class Orders.
-HISTORICAL_IMPORT_VERSION = 2
+#   v3 — blank Price cells recovered from THIS workbook's Products
+#        tab, then from data/reference_prices.csv, before falling
+#        back to £0 (sheet-authoritative price recovery).
+HISTORICAL_IMPORT_VERSION = 3
 
 # WHOLESALE layout: column 0 is the wholesale customer name (repeated
 # on every product row of that customer's block), then SKU at 1,
@@ -435,7 +606,7 @@ def _build_product_lookups_for_dept_or_bakery(dept):
 
 
 @transaction.atomic
-def import_wholesale_tab(workbook):
+def import_wholesale_tab(workbook, *, recover_price=None):
     """Import the WHOLESALE tab, splitting it into per-wholesale-customer
     Orders that look first-class in the customer list / grid.
 
@@ -449,8 +620,10 @@ def import_wholesale_tab(workbook):
     Idempotent on every (wholesale customer × date) the tab touches:
     existing OrderLines for those days are wiped and rebuilt from the
     sheet, so a re-run converges and never leaves orphans. Blank
-    Price cells snapshot as £0 (sheet authoritative, identical rule to
-    :func:`import_orders_for_tab`).
+    Price cells use the same recovery chain as
+    :func:`import_orders_for_tab` when ``recover_price`` is supplied
+    (workbook Products tab → reference CSV → £0); without it, blank
+    cells stay at £0.
 
     Returns:
         {
@@ -549,7 +722,9 @@ def import_wholesale_tab(workbook):
             sp = _match_product(row, by_sage, by_name)
             sheet_name = (row.get("name") or "").strip()
             sheet_price = row.get("price")
-            unit_price = sheet_price if sheet_price is not None else Decimal("0")
+            unit_price = _resolve_unit_price(
+                sheet_price, row.get("sage"), sheet_name,
+                recover_price=recover_price)
             if sp is None:
                 products_unmatched.append((row.get("sage") or "", sheet_name))
 
@@ -717,12 +892,17 @@ def import_historical_workbook(file_or_path, *, force=False):
         failures = []
         wholesale_customer_unmatched = []
         bakery_fallback = Department.objects.filter(name="Bakery").first()
+        # One recovery closure for the whole workbook — its two indices
+        # are built once from the Products tab + reference CSV, then
+        # consulted by every per-tab call for blank-price rows.
+        recover_price = make_price_recovery(wb)
         for tab in wb.sheetnames:
             if tab.strip().lower() in META_TABS:
                 continue
             try:
                 if tab == WHOLESALE_TAB:
-                    result = import_wholesale_tab(wb)
+                    result = import_wholesale_tab(
+                        wb, recover_price=recover_price)
                     # Bubble up unmatched wholesale names so the
                     # caller can report them once at the top level.
                     wholesale_customer_unmatched.extend(
@@ -740,7 +920,9 @@ def import_historical_workbook(file_or_path, *, force=False):
                             (tab, "customer has no department and no Bakery "
                                   "fallback exists"))
                         continue
-                    result = import_orders_for_tab(wb, tab, customer, dept)
+                    result = import_orders_for_tab(
+                        wb, tab, customer, dept,
+                        recover_price=recover_price)
             except Exception as e:  # noqa: BLE001 — keep going past a bad tab
                 failures.append((tab, f"{type(e).__name__}: {e}"))
                 continue
@@ -808,10 +990,14 @@ def import_orders(file_or_path, *, tabs=None):
         results = OrderedDict()
         failures = []
         wholesale_customer_unmatched = []
+        # Same recovery closure the historical importer uses, scoped
+        # to this workbook + the committed reference CSV.
+        recover_price = make_price_recovery(wb)
         for tab in tabs:
             try:
                 if tab == WHOLESALE_TAB:
-                    results[tab] = import_wholesale_tab(wb)
+                    results[tab] = import_wholesale_tab(
+                        wb, recover_price=recover_price)
                     wholesale_customer_unmatched.extend(
                         results[tab].get("customer_unmatched", []))
                     continue
@@ -828,7 +1014,9 @@ def import_orders(file_or_path, *, tabs=None):
                         (tab, "customer has no department and no Bakery "
                               "fallback exists"))
                     continue
-                results[tab] = import_orders_for_tab(wb, tab, customer, dept)
+                results[tab] = import_orders_for_tab(
+                    wb, tab, customer, dept,
+                    recover_price=recover_price)
             except Exception as e:  # noqa: BLE001 — keep going past a bad tab
                 failures.append((tab, f"{type(e).__name__}: {e}"))
                 continue

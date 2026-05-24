@@ -25,22 +25,24 @@ from stock.order_import import (
     META_TABS, WHOLESALE_TAB,
     iter_product_rows, iter_wholesale_rows,
     read_tab_dates, read_wholesale_dates,
+    make_price_recovery, _resolve_unit_price,
 )
 
 
-def _sheet_total_for_tab(ws):
+def _sheet_total_for_tab(ws, *, recover_price=None):
     """Sum qty × price across all 7 days for a normal customer tab.
 
-    Mirrors the importer's blank-price rule: a blank Price cell
-    contributes £0. Returns ``(total, n_priced_rows)`` so the caller
-    can tell "empty week" from "everything priced at zero".
+    Uses the same blank-price recovery chain as the importer
+    (workbook Products tab → reference CSV → £0) when a recovery
+    closure is passed, so the report's SHEET total reflects exactly
+    what the importer would write. Returns ``(total, n_priced_rows)``.
     """
     total = Decimal("0")
     n_rows = 0
     for row in iter_product_rows(ws):
-        price = row.get("price")
-        if price is None:
-            price = Decimal("0")
+        price = _resolve_unit_price(
+            row.get("price"), row.get("sage"), row.get("name"),
+            recover_price=recover_price)
         row_had_qty = False
         for q in row["qtys"]:
             if q is None:
@@ -52,20 +54,19 @@ def _sheet_total_for_tab(ws):
     return total, n_rows
 
 
-def _wholesale_per_customer_totals(ws):
+def _wholesale_per_customer_totals(ws, *, recover_price=None):
     """For every wholesale customer in the WHOLESALE tab, return
     ``OrderedDict[name → sheet_total]`` preserving first-seen casing.
 
-    Same blank-price rule. Customers whose week is entirely blank are
-    omitted from the dict — the importer wouldn't create Orders for
-    them either.
+    Same recovery chain as :func:`_sheet_total_for_tab`. Customers
+    whose week is entirely blank are omitted from the dict.
     """
     totals = OrderedDict()
     for row in iter_wholesale_rows(ws):
         name = row["customer"].strip()
-        price = row.get("price")
-        if price is None:
-            price = Decimal("0")
+        price = _resolve_unit_price(
+            row.get("price"), row.get("sage"), row.get("name"),
+            recover_price=recover_price)
         for q in row["qtys"]:
             if q is None:
                 continue
@@ -134,6 +135,11 @@ class Command(BaseCommand):
                     f"{path}: could not derive a week from any tab")
             week_start = week_dates[0]
 
+            # Use the same recovery chain the importer uses so the
+            # report's SHEET totals reflect what was actually written
+            # to the DB — not raw blank-is-£0 cell readings.
+            recover_price = make_price_recovery(wb)
+
             # ---- customer tabs ----
             customer_rows = []
             empty_tabs = []
@@ -148,7 +154,8 @@ class Command(BaseCommand):
                     continue  # handled separately below
                 ws = wb[tab]
                 try:
-                    sheet_total, n_rows = _sheet_total_for_tab(ws)
+                    sheet_total, n_rows = _sheet_total_for_tab(
+                        ws, recover_price=recover_price)
                 except Exception as e:  # noqa: BLE001
                     customer_rows.append({
                         "name": tab, "sheet": None, "imported": None,
@@ -181,7 +188,8 @@ class Command(BaseCommand):
             ws_total_imported = Decimal("0")
             if wholesale_present:
                 ws = wb[WHOLESALE_TAB]
-                per_cust = _wholesale_per_customer_totals(ws)
+                per_cust = _wholesale_per_customer_totals(
+                    ws, recover_price=recover_price)
                 for name, sheet_total in per_cust.items():
                     ws_total_sheet += sheet_total
                     cust = Customer.objects.filter(name__iexact=name).first()
