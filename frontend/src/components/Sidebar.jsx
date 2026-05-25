@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {
   LayoutDashboard,
   ScrollText,
@@ -54,8 +55,15 @@ const HEADER_STYLE = { flex: "0 0 auto" };
 const NAV_STYLE    = { flex: "1 1 auto", overflowY: "auto", minHeight: 0 };
 const FOOTER_STYLE = { flex: "0 0 auto", marginTop: "auto" };
 
+// Rendered via createPortal into document.body so the aside is a
+// direct child of <body> at the DOM level. With position:fixed +
+// top:0, this guarantees the rail anchors to the viewport regardless
+// of any React-managed wrapper above (a transformed/filtered/contained
+// ancestor would otherwise become the containing block per CSS spec
+// and produce exactly the "sidebar at bottom-left" symptom we hit).
 export default function Sidebar() {
-  return (
+  if (typeof document === "undefined") return null;  // SSR safety; harmless here
+  return createPortal(
     <aside style={ASIDE_STYLE}>
       <div style={HEADER_STYLE} className="px-5 py-5 border-b border-slate-800">
         <div className="font-display text-xl font-bold tracking-tight text-slate-100">
@@ -102,6 +110,7 @@ export default function Sidebar() {
           <LogOut size={13} strokeWidth={1.75} />
         </a>
       </div>
-    </aside>
+    </aside>,
+    document.body,
   );
 }
