@@ -1,9 +1,18 @@
+import {
+  TrendingUp,
+  TrendingDown,
+  PieChart as PieIcon,
+  Crown,
+  Sun,
+} from "lucide-react";
 import { gbp, pct } from "../lib/format.js";
 
 // Insights derived from the live payload only. No invented prose, no
-// fabricated "We forecast…" lines. When the data can't support an
-// insight (e.g. no prev week) the line is dropped silently rather
-// than rendering a placeholder.
+// fabricated "We forecast…" lines. Each insight renders as
+// icon + bold headline + grey subline, colour-coded by type
+// (green/red for WoW direction, blue/purple for channel, brand-amber
+// for "top of", slate for context). When the data can't support an
+// insight (no prev week, empty channel) the row is dropped silently.
 function buildInsights({
   total_ordered,
   wow,
@@ -15,63 +24,96 @@ function buildInsights({
   lowest_day,
 }) {
   const out = [];
-  // WoW headline — only when prev exists AND we have a real pct.
+
   if (wow && wow.pct !== null && wow.pct !== undefined) {
-    const dir = Number(wow.pct) >= 0 ? "up" : "down";
-    const colour = Number(wow.pct) >= 0 ? "text-pos" : "text-neg";
-    out.push(
-      <li key="wow">
-        Ordered total {gbp(total_ordered)} —{" "}
-        <span className={`tabular ${colour}`}>{pct(wow.pct, { signed: true })}</span>{" "}
-        {dir} on previous imported week ({gbp(wow.total)}).
-      </li>,
-    );
+    const up = Number(wow.pct) >= 0;
+    out.push({
+      key: "wow",
+      icon: up ? TrendingUp : TrendingDown,
+      iconClass: up ? "text-pos bg-pos/10" : "text-neg bg-neg/10",
+      headline: (
+        <>
+          Ordered {gbp(total_ordered)} ·{" "}
+          <span className={up ? "text-pos" : "text-neg"}>
+            {pct(wow.pct, { signed: true })}
+          </span>{" "}
+          vs last week
+        </>
+      ),
+      sub: <>Previous imported week: {gbp(wow.total)}.</>,
+    });
   }
-  // Channel share — both sides are always present in the payload.
+
   if (internal && wholesale) {
-    const lead =
-      Number(internal.total) >= Number(wholesale.total) ? "internal" : "wholesale";
-    const leadColour = lead === "internal" ? "text-internal" : "text-wholesale";
+    const lead = Number(internal.total) >= Number(wholesale.total)
+      ? "internal" : "wholesale";
     const leadName = lead === "internal" ? "Internal" : "Wholesale";
     const leadPct = lead === "internal" ? internal.pct : wholesale.pct;
-    out.push(
-      <li key="channel">
-        <span className={leadColour}>{leadName}</span> leads this week at{" "}
-        <span className="tabular">{pct(leadPct)}</span> of ordered demand.
-      </li>,
-    );
+    const followName = lead === "internal" ? "Wholesale" : "Internal";
+    const followPct = lead === "internal" ? wholesale.pct : internal.pct;
+    out.push({
+      key: "channel",
+      icon: PieIcon,
+      iconClass: lead === "internal"
+        ? "text-internal bg-internal/10"
+        : "text-wholesale bg-wholesale/10",
+      headline: (
+        <>
+          <span className={lead === "internal" ? "text-internal" : "text-wholesale"}>
+            {leadName}
+          </span>{" "}
+          leads at {pct(leadPct)}
+        </>
+      ),
+      sub: <>{followName} share: {pct(followPct)}.</>,
+    });
   }
-  // Top wholesale customer — drop the bullet if the channel is empty.
+
   const topW = (top_wholesale || [])[0];
   if (topW) {
-    out.push(
-      <li key="topw">
-        Top wholesale customer: <span className="text-slate-100">{topW.name}</span> at{" "}
-        <span className="tabular">{gbp(topW.value)}</span>{" "}
-        ({pct(topW.pct)} of channel).
-      </li>,
-    );
+    out.push({
+      key: "topw",
+      icon: Crown,
+      iconClass: "text-wholesale bg-wholesale/10",
+      headline: (
+        <>
+          Top wholesale: <span className="text-slate-100">{topW.name}</span>
+        </>
+      ),
+      sub: <>{gbp(topW.value)} · {pct(topW.pct)} of channel.</>,
+    });
   }
-  // Top internal customer.
+
   const topI = (top_internal || [])[0];
   if (topI) {
-    out.push(
-      <li key="topi">
-        Top internal customer: <span className="text-slate-100">{topI.name}</span> at{" "}
-        <span className="tabular">{gbp(topI.value)}</span>{" "}
-        ({pct(topI.pct)} of channel).
-      </li>,
-    );
+    out.push({
+      key: "topi",
+      icon: Crown,
+      iconClass: "text-internal bg-internal/10",
+      headline: (
+        <>
+          Top internal: <span className="text-slate-100">{topI.name}</span>
+        </>
+      ),
+      sub: <>{gbp(topI.value)} · {pct(topI.pct)} of channel.</>,
+    });
   }
-  // Best / worst day — only when there are non-zero days.
+
   if (highest_day && lowest_day) {
-    out.push(
-      <li key="days">
-        Strongest day: {highest_day.date} ({gbp(highest_day.total)}); quietest:{" "}
-        {lowest_day.date} ({gbp(lowest_day.total)}).
-      </li>,
-    );
+    out.push({
+      key: "days",
+      icon: Sun,
+      iconClass: "text-brand bg-brand/10",
+      headline: (
+        <>
+          Strongest day: <span className="text-slate-100">{highest_day.date}</span>{" "}
+          ({gbp(highest_day.total)})
+        </>
+      ),
+      sub: <>Quietest: {lowest_day.date} ({gbp(lowest_day.total)}).</>,
+    });
   }
+
   return out;
 }
 
@@ -88,8 +130,20 @@ export default function InsightsPanel(props) {
         </div>
       </div>
       {insights.length > 0 ? (
-        <ul className="space-y-2 text-sm text-slate-300 leading-relaxed list-disc list-inside marker:text-slate-600">
-          {insights}
+        <ul className="space-y-2.5">
+          {insights.map(({ key, icon: Icon, iconClass, headline, sub }) => (
+            <li key={key} className="flex items-start gap-3">
+              <span className={`shrink-0 h-7 w-7 rounded-md flex items-center justify-center ${iconClass}`}>
+                <Icon size={14} strokeWidth={1.75} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-slate-100 font-display leading-tight">
+                  {headline}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">{sub}</div>
+              </div>
+            </li>
+          ))}
         </ul>
       ) : (
         <div className="font-mono text-xs text-slate-500">

@@ -29,6 +29,8 @@ free-tier's 30s budget.
 from datetime import date, timedelta
 from decimal import Decimal
 
+from collections import defaultdict
+
 from django.db.models import Count, DecimalField, F, Max, Min, Q, Sum
 
 from .models import Customer, Order, OrderLine
@@ -346,6 +348,50 @@ def week_top_customers(dept, week_start, channel, n=5):
     """
     rows = per_customer_in_channel(dept, channel, week_start, week_start)
     return rows[:n]
+
+
+def week_product_day_matrix(dept, week_start, top_n=12):
+    """Top ``top_n`` products by ordered qty for one week, with per-day
+    Mon..Sun quantities for each.
+
+    External customers only (``is_internal=False``) — same scope as the
+    rest of the dashboard. Groups by ``OrderLine.product_name`` (the
+    SNAPSHOT, not the catalogue SaleProduct) so a discontinued or
+    renamed product still shows its true weekly demand. Days with no
+    orders for a product surface as ``Decimal("0")`` rather than being
+    dropped — the matrix is always 7 columns so the dashboard renders a
+    rectangular grid without per-row branching.
+
+    Returns ``[{product, total_qty, daily}]`` ordered biggest-first by
+    ``total_qty``. ``daily`` is a list of 7 Decimals aligned to
+    Mon..Sun. Empty week → ``[]``.
+    """
+    end = week_start + timedelta(days=6)
+    rows = (OrderLine.objects.filter(
+        order__department=dept,
+        order__order_date__range=(week_start, end),
+        order__customer__is_internal=False,
+    ).values("product_name", "order__order_date").annotate(
+        qty=Sum("qty_ordered")))
+
+    by_product = defaultdict(lambda: [Decimal("0")] * 7)
+    totals = defaultdict(lambda: Decimal("0"))
+    for r in rows:
+        pname = r["product_name"]
+        offset = (r["order__order_date"] - week_start).days
+        if not (0 <= offset < 7):
+            # Date snapped outside the requested week — guard against a
+            # bad timestamp rather than letting it index off the end.
+            continue
+        qty = r["qty"] or Decimal("0")
+        by_product[pname][offset] += qty
+        totals[pname] += qty
+
+    top = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    return [
+        {"product": name, "total_qty": totals[name], "daily": by_product[name]}
+        for name, _ in top
+    ]
 
 
 def recent_order_groups(dept, n=10):

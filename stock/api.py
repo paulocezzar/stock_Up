@@ -37,7 +37,8 @@ from .financials import (
     available_week_range, available_weeks,
     per_customer_in_channel, per_week_split, range_totals,
     recent_order_groups, week_channel_split, week_daily_totals,
-    week_orders_count, week_over_week, week_top_customers,
+    week_orders_count, week_over_week, week_product_day_matrix,
+    week_top_customers,
 )
 from .models import Customer, Order, OrderLine
 from .views import current_department
@@ -124,6 +125,7 @@ def _empty_week_payload(week_wc):
         "recent_orders": [],
         "highest_day": None,
         "lowest_day": None,
+        "product_day_matrix": [],
     }
 
 
@@ -274,6 +276,16 @@ def _build_week_payload(dept, week_wc, weeks):
         highest_day = {"date": hi["date"].isoformat(), "total": str(hi["total"])}
         lowest_day = {"date": lo["date"].isoformat(), "total": str(lo["total"])}
 
+    matrix = week_product_day_matrix(dept, week_wc, top_n=12)
+    matrix_payload = [
+        {
+            "product": r["product"],
+            "total_qty": str(r["total_qty"]),
+            "daily": [str(q) for q in r["daily"]],
+        }
+        for r in matrix
+    ]
+
     return {
         "week_start": week_wc.isoformat(),
         "prev_week_start": wow["prev_week_start"].isoformat()
@@ -293,6 +305,7 @@ def _build_week_payload(dept, week_wc, weeks):
         "recent_orders": recent_payload,
         "highest_day": highest_day,
         "lowest_day": lowest_day,
+        "product_day_matrix": matrix_payload,
     }
 
 

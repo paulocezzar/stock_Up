@@ -1,6 +1,7 @@
 import {
   Download,
   ArrowLeftRight,
+  ChevronRight,
   FileSpreadsheet,
   CloudSun,
   AlertTriangle,
@@ -51,16 +52,21 @@ export default function QuickActions({
 
 function ActiveAction({ as = "button", href, onClick, disabled, icon: Icon, label, sub }) {
   const className =
-    "flex items-start gap-3 rounded-md border border-slate-800 bg-page hover:border-brand/40 hover:bg-brand/5 transition px-3 py-3 text-left disabled:opacity-40 disabled:hover:border-slate-800 disabled:hover:bg-page disabled:cursor-not-allowed";
+    "group flex items-center gap-3 rounded-md border border-slate-800 bg-page hover:border-brand/40 hover:bg-brand/5 transition px-3 py-3 text-left disabled:opacity-40 disabled:hover:border-slate-800 disabled:hover:bg-page disabled:cursor-not-allowed";
   const inner = (
     <>
-      <Icon size={16} strokeWidth={1.5} className="text-brand mt-0.5" />
-      <div className="min-w-0">
-        <div className="text-sm text-slate-100 font-display">{label}</div>
+      <Icon size={16} strokeWidth={1.5} className="text-brand shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-slate-100 font-display leading-tight">{label}</div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5 truncate">
           {sub}
         </div>
       </div>
+      <ChevronRight
+        size={14}
+        strokeWidth={1.75}
+        className="text-slate-600 group-hover:text-brand transition shrink-0"
+      />
     </>
   );
   if (as === "a") {

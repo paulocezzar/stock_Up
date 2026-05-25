@@ -14,7 +14,7 @@ import DailyTrendChart from "./components/DailyTrendChart.jsx";
 import ChannelSplitDonut from "./components/ChannelSplitDonut.jsx";
 import InsightsPanel from "./components/InsightsPanel.jsx";
 import TopCustomersTable from "./components/TopCustomersTable.jsx";
-import ProductionHeatmap from "./components/ProductionHeatmap.jsx";
+import ProductDayMatrix from "./components/ProductDayMatrix.jsx";
 import QuickActions from "./components/QuickActions.jsx";
 import RecentOrders from "./components/RecentOrders.jsx";
 import WeeklySummary from "./components/WeeklySummary.jsx";
@@ -36,8 +36,6 @@ export default function App() {
       .then((d) => {
         if (cancelled) return;
         setData(d);
-        // First load: lock the selector to the week the server picked
-        // so the URL of the dropdown matches what's shown.
         if (selected === null) setSelected(d.week_start);
       })
       .catch((e) => !cancelled && setError(e.message || String(e)));
@@ -64,6 +62,7 @@ export default function App() {
           </div>
         )}
         {data && <Body data={data} onCompare={onCompare} />}
+        {data && <Footer weekStart={data.week_start} />}
       </main>
     </div>
   );
@@ -143,20 +142,33 @@ function Body({ data, onCompare }) {
           onCompare={onCompare}
         />
       </div>
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <RecentOrders rows={data.recent_orders} />
-        </div>
-        <ProductionHeatmap />
+      <div className="mt-4">
+        <ProductDayMatrix rows={data.product_day_matrix} />
+      </div>
+      <div className="mt-4">
+        <RecentOrders rows={data.recent_orders} />
       </div>
     </>
   );
 }
 
+function Footer({ weekStart }) {
+  return (
+    <footer className="mt-8 pt-4 border-t border-slate-800 font-mono text-[10px] uppercase tracking-widest text-slate-600">
+      All figures for w/c {weekLongLabel(weekStart)} · ordered value, excl. VAT.
+    </footer>
+  );
+}
+
 function Kpis({ data }) {
   // Real WoW pct, never fabricated. When prev_week is missing the
-  // delta is omitted (the card collapses the delta row).
+  // delta is omitted (the card collapses the delta row). The "Total
+  // Ordered" card carries the sparkline because it's derived directly
+  // from daily_trend; other cards have no daily series to plot
+  // honestly (Wholesale/Internal %, Total Orders, Waste %, Avg Daily)
+  // so they keep the icon glyph instead.
   const wowPct = data.wow?.pct;
+  const daily = (data.daily_trend || []).map((r) => Number(r.total));
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <MetricCard
@@ -167,24 +179,29 @@ function Kpis({ data }) {
           ? "No prior week"
           : `vs ${gbp(data.wow.total)}`}
         icon={PoundSterling}
+        sparkline={daily}
+        hint="Sum of qty × unit_price across all external order lines this week."
       />
       <MetricCard
         label="Wholesale %"
         value={pct(data.wholesale?.pct)}
         subline={gbp(data.wholesale?.total)}
         icon={Building2}
+        hint="Wholesale-channel share of external ordered value."
       />
       <MetricCard
         label="Internal %"
         value={pct(data.internal?.pct)}
         subline={gbp(data.internal?.total)}
         icon={Percent}
+        hint="Internal-channel share (all external customers NOT wholesale)."
       />
       <MetricCard
         label="Total Orders"
         value={data.total_orders ?? "—"}
         subline="Order lines this week"
         icon={ShoppingCart}
+        hint="Count of external order lines (not distinct orders)."
       />
       <MetricCard
         label="Waste %"
@@ -192,12 +209,14 @@ function Kpis({ data }) {
         subline="Needs waste capture (Chunk 4)"
         tone="neutral"
         icon={Trash2}
+        hint="No waste data tracked yet — placeholder, not a real metric."
       />
       <MetricCard
         label="Avg Daily Ordered"
         value={gbp(data.avg_day)}
         subline="Total ÷ 7"
         icon={CalendarDays}
+        hint="Total ordered divided by 7 (every weekday, not just active days)."
       />
     </div>
   );

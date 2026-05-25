@@ -1,13 +1,13 @@
 import { gbp } from "../lib/format.js";
 
-// Recent order groups (one row per customer-day). Channel badge is
-// blue/purple per the design tokens; the bakery's own consumption
-// surfaces as "excluded" and is dimmed so it stays visible without
-// inflating the revenue read.
+// Recent order groups (one row per customer-day). Channel badge is a
+// FILLED pill in the design tokens — blue for internal, purple for
+// wholesale, slate for the bakery's own consumption (which is still
+// surfaced so it stays visible without inflating the revenue read).
 const CHANNEL_STYLE = {
-  internal:  { label: "Internal",  bg: "bg-internal/15",  text: "text-internal" },
-  wholesale: { label: "Wholesale", bg: "bg-wholesale/15", text: "text-wholesale" },
-  excluded:  { label: "Excluded",  bg: "bg-slate-800/60", text: "text-slate-500" },
+  internal:  { label: "Internal",  className: "bg-internal text-white" },
+  wholesale: { label: "Wholesale", className: "bg-wholesale text-white" },
+  excluded:  { label: "Excluded",  className: "bg-slate-700 text-slate-300" },
 };
 
 export default function RecentOrders({ rows }) {
@@ -44,7 +44,7 @@ export default function RecentOrders({ rows }) {
                   <td className="py-2 pr-2 tabular text-slate-300">{r.date}</td>
                   <td className="py-2 px-2 text-slate-200">{r.customer}</td>
                   <td className="py-2 px-2">
-                    <span className={`px-2 py-0.5 rounded font-mono text-[10px] uppercase tracking-widest ${c.bg} ${c.text}`}>
+                    <span className={`inline-block px-2 py-0.5 rounded-full font-mono text-[10px] uppercase tracking-widest ${c.className}`}>
                       {c.label}
                     </span>
                   </td>

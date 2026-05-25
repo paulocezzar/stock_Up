@@ -9871,6 +9871,108 @@ class FinancialsWeekHelperTests(TestCase):
         self.assertEqual(g["ordered_total"], Decimal("11.00"))
 
 
+class WeekProductDayMatrixTests(TestCase):
+    """``week_product_day_matrix`` returns the top N products by ordered
+    qty for one week, each with Mon..Sun daily qtys. External-only
+    (``is_internal=False``) and groups by the OrderLine SNAPSHOT
+    ``product_name``, not the catalogue SaleProduct."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.wc = datetime.date(2026, 4, 6)
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.excluded = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL, is_internal=True,
+            department=self.dept)
+
+    def _line(self, customer, day_offset, product_name, qty):
+        """Add one OrderLine on ``self.wc + day_offset`` for ``customer``
+        with the given snapshotted product name + qty (price irrelevant
+        for the matrix). Reuses an existing Order if one exists for the
+        same customer/date so multiple products on one day land on the
+        same Order — matches the import flow."""
+        d = self.wc + datetime.timedelta(days=day_offset)
+        o, _ = Order.objects.get_or_create(
+            customer=customer, department=self.dept, order_date=d)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=product_name,
+            unit_price=Decimal("1.00"), qty_ordered=Decimal(str(qty)))
+
+    def test_empty_week_returns_empty_list(self):
+        from stock.financials import week_product_day_matrix
+        self.assertEqual(week_product_day_matrix(self.dept, self.wc), [])
+
+    def test_daily_qtys_align_mon_to_sun(self):
+        # Same product across three different weekdays — the daily list
+        # must place each qty at its weekday offset (0=Mon..6=Sun).
+        from stock.financials import week_product_day_matrix
+        self._line(self.garden, 0, "Croissant", 3)   # Mon
+        self._line(self.teals,  2, "Croissant", 5)   # Wed
+        self._line(self.garden, 6, "Croissant", 2)   # Sun
+        rows = week_product_day_matrix(self.dept, self.wc)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["product"], "Croissant")
+        self.assertEqual(rows[0]["total_qty"], Decimal("10"))
+        self.assertEqual(rows[0]["daily"], [
+            Decimal("3"), Decimal("0"), Decimal("5"),
+            Decimal("0"), Decimal("0"), Decimal("0"), Decimal("2")])
+
+    def test_aggregates_same_product_across_customers_and_orders(self):
+        # Same product, same day, two customers — the matrix sums them
+        # into one cell (the grid is "demand", not "per customer").
+        from stock.financials import week_product_day_matrix
+        self._line(self.garden, 1, "Baguette", 4)
+        self._line(self.teals,  1, "Baguette", 7)
+        rows = week_product_day_matrix(self.dept, self.wc)
+        self.assertEqual(rows[0]["daily"][1], Decimal("11"))
+        self.assertEqual(rows[0]["total_qty"], Decimal("11"))
+
+    def test_excludes_is_internal_customer_orders(self):
+        # BAKERY INTERNAL USE never contributes to demand. Even a big
+        # internal-use line for a product must NOT inflate the matrix.
+        from stock.financials import week_product_day_matrix
+        self._line(self.garden,    0, "Loaf", 2)
+        self._line(self.excluded,  0, "Loaf", 500)
+        rows = week_product_day_matrix(self.dept, self.wc)
+        self.assertEqual(rows[0]["total_qty"], Decimal("2"))
+        self.assertEqual(rows[0]["daily"][0], Decimal("2"))
+
+    def test_top_n_returns_only_n_biggest_by_total_qty(self):
+        # Seed 5 products with descending totals; top_n=3 keeps the
+        # three largest in descending order.
+        from stock.financials import week_product_day_matrix
+        for i, qty in enumerate([10, 8, 6, 4, 2]):
+            self._line(self.garden, 0, f"Prod{i}", qty)
+        rows = week_product_day_matrix(self.dept, self.wc, top_n=3)
+        self.assertEqual([r["product"] for r in rows],
+                         ["Prod0", "Prod1", "Prod2"])
+        self.assertEqual([r["total_qty"] for r in rows],
+                         [Decimal("10"), Decimal("8"), Decimal("6")])
+
+    def test_groups_by_snapshotted_product_name_not_sale_product_id(self):
+        # An OrderLine's product_name is the financial snapshot — even
+        # when the linked SaleProduct gets renamed or deleted, the
+        # matrix groups on the historical name.
+        from stock.financials import week_product_day_matrix
+        sp = SaleProduct.objects.create(
+            name="Brand New Name", price=Decimal("1.00"), department=self.dept)
+        o = Order.objects.create(
+            customer=self.garden, department=self.dept, order_date=self.wc)
+        # Snapshot name diverges from the live catalogue name.
+        OrderLine.objects.create(
+            order=o, sale_product=sp,
+            product_name="Old Snapshotted Name",
+            unit_price=Decimal("1.00"), qty_ordered=Decimal("3"))
+        rows = week_product_day_matrix(self.dept, self.wc)
+        self.assertEqual(rows[0]["product"], "Old Snapshotted Name")
+
+
 class FinancialsViewTests(TestCase):
     """The /financials/ page renders the channel split, weekly trend
     and per-customer breakdowns. Smoke-level checks: status code +
@@ -10452,6 +10554,30 @@ class DashboardWeekModeApiTests(TestCase):
         data = self._get(f"week={empty_week.isoformat()}")
         self.assertIsNone(data["highest_day"])
         self.assertIsNone(data["lowest_day"])
+
+    def test_product_day_matrix_returns_top_products_with_seven_day_qtys(self):
+        # The setUp seeds five lines on wc2 each with product_name="P{pk}"
+        # (one product per order). The matrix returns each one with a
+        # 7-long daily list aligned Mon..Sun. The BAKERY INTERNAL USE
+        # row (qty=100) must NOT appear — external-only.
+        data = self._get(f"week={self.wc2.isoformat()}")
+        self.assertIn("product_day_matrix", data)
+        matrix = data["product_day_matrix"]
+        for row in matrix:
+            self.assertIn("product", row)
+            self.assertIn("total_qty", row)
+            self.assertEqual(len(row["daily"]), 7)
+        # Largest total this week is the mjolk Fri line, qty=10
+        # ("P{pk}"). It must lead the matrix.
+        self.assertEqual(Decimal(matrix[0]["total_qty"]), Decimal("10"))
+        # No internal-use product (qty=100) ever leaks into the matrix.
+        self.assertNotIn(Decimal("100"),
+                         [Decimal(r["total_qty"]) for r in matrix])
+
+    def test_product_day_matrix_present_and_empty_for_blank_week(self):
+        empty_week = self.wc3 + datetime.timedelta(days=21)
+        data = self._get(f"week={empty_week.isoformat()}")
+        self.assertEqual(data["product_day_matrix"], [])
 
 
 class DashboardExportCsvTests(TestCase):
