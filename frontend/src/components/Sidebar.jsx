@@ -27,8 +27,28 @@ const NAV = [
 ];
 
 export default function Sidebar() {
+  // Inline-style fallback for the layout-critical bits so the rail
+  // anchors top-left regardless of Tailwind purge / cascade order /
+  // any future global CSS that might override position utilities.
+  // Cosmetic styling (colours, padding, hover) stays in Tailwind.
+  const fixedStyle = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: "16rem",       // matches w-64
+    height: "100vh",
+    zIndex: 30,
+    display: "flex",
+    flexDirection: "column",
+    background: "#050912",
+  };
+
   return (
-    <aside className="fixed inset-y-0 left-0 w-64 flex flex-col border-r border-slate-800 bg-rail z-20">
+    <aside
+      style={fixedStyle}
+      className="border-r border-slate-800"
+    >
       <div className="px-5 py-5 border-b border-slate-800">
         <div className="font-display text-xl font-bold tracking-tight text-slate-100">
           STOCK.UP

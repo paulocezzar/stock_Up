@@ -28,10 +28,10 @@ export default function MetricCard({
     <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[12px] text-slate-300 truncate">{label}</span>
+          <div className="flex items-start gap-1.5">
+            <span className="text-[12px] text-slate-300 leading-snug">{label}</span>
             {hint && (
-              <span title={hint} className="text-slate-500 cursor-help">
+              <span title={hint} className="text-slate-500 cursor-help shrink-0 mt-0.5">
                 <Info size={11} strokeWidth={2} />
               </span>
             )}
@@ -55,10 +55,12 @@ export default function MetricCard({
         </div>
         <div className="shrink-0">
           {sparkline && sparkline.length > 1 ? (
-            <Sparkline values={sparkline} />
+            <div className="h-9 px-2 rounded-lg bg-slate-900/60 border border-slate-800/60 flex items-center">
+              <Sparkline values={sparkline} />
+            </div>
           ) : (
             Icon && (
-              <div className="h-9 w-9 rounded-lg bg-slate-900/80 flex items-center justify-center">
+              <div className="h-9 w-9 rounded-lg bg-slate-900 border border-slate-800/60 flex items-center justify-center">
                 <Icon size={16} strokeWidth={1.75} className="text-slate-400" />
               </div>
             )

@@ -83,16 +83,16 @@ function Header({ data, selected, onSelect, onCompare }) {
   return (
     <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
       <div>
-        <div className="flex items-center gap-2">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-100">
+        <div className="flex items-center gap-2.5">
+          <h1 className="font-display text-3xl font-bold tracking-tight text-slate-100">
             Overview
           </h1>
-          <span className="relative inline-flex h-2 w-2" title="Live data">
+          <span className="relative inline-flex h-2.5 w-2.5" title="Live data">
             <span className="absolute inline-flex h-full w-full rounded-full bg-pos opacity-75 animate-ping" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-pos" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-pos" />
           </span>
         </div>
-        <p className="font-mono text-[11px] uppercase tracking-widest text-slate-500 mt-1">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-1.5">
           {data
             ? `Performance overview for w/c ${weekLongLabel(data.week_start)}`
             : "Performance overview"}
@@ -158,10 +158,9 @@ function Body({ data, onCompare }) {
         />
       </div>
 
-      {/* Row 3: Top Wholesale | Product × Day | Quick Actions | Weekly Summary */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-4 gap-4">
+      {/* Row 3: Top Wholesale | Quick Actions | Weekly Summary — Product × Day moved out so all 7 days have room */}
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <TopCustomersTable rows={data.top_wholesale} />
-        <ProductDayMatrix rows={data.product_day_matrix} />
         <QuickActions
           exportHref={exportCsvUrl(data.week_start)}
           prevWeek={data.prev_week_start}
@@ -177,7 +176,12 @@ function Body({ data, onCompare }) {
         />
       </div>
 
-      {/* Row 4: Recent Orders — full width (no real panel to fill the 1fr; design rule says don't invent one) */}
+      {/* Row 4: Product × Day — full width so Mon..Sun + Total all fit comfortably */}
+      <div className="mt-4">
+        <ProductDayMatrix rows={data.product_day_matrix} />
+      </div>
+
+      {/* Row 5: Recent Orders — full width */}
       <div className="mt-4">
         <RecentOrders rows={data.recent_orders} />
       </div>

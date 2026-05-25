@@ -48,7 +48,7 @@ export default function TopCustomersTable({ rows }) {
                   <td className="py-2 pr-2 text-right font-mono tabular text-slate-500">
                     {i + 1}
                   </td>
-                  <td className="py-2 px-2 text-slate-200 truncate max-w-[180px]">
+                  <td className="py-2 px-2 text-slate-200">
                     {r.name}
                   </td>
                   <td className="py-2 px-2 min-w-[110px]">

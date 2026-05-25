@@ -30,7 +30,7 @@ function buildInsights({
     out.push({
       key: "wow",
       icon: up ? TrendingUp : TrendingDown,
-      iconClass: up ? "text-pos bg-pos/10" : "text-neg bg-neg/10",
+      iconClass: up ? "text-pos bg-pos/20" : "text-neg bg-neg/20",
       headline: (
         <>
           Ordered {gbp(total_ordered)} ·{" "}
@@ -55,8 +55,8 @@ function buildInsights({
       key: "channel",
       icon: PieIcon,
       iconClass: lead === "internal"
-        ? "text-internal bg-internal/10"
-        : "text-wholesale bg-wholesale/10",
+        ? "text-internal bg-internal/20"
+        : "text-wholesale bg-wholesale/20",
       headline: (
         <>
           <span className={lead === "internal" ? "text-internal" : "text-wholesale"}>
@@ -74,7 +74,7 @@ function buildInsights({
     out.push({
       key: "topw",
       icon: Crown,
-      iconClass: "text-wholesale bg-wholesale/10",
+      iconClass: "text-wholesale bg-wholesale/20",
       headline: (
         <>
           Top wholesale: <span className="text-slate-100">{topW.name}</span>
@@ -89,7 +89,7 @@ function buildInsights({
     out.push({
       key: "topi",
       icon: Crown,
-      iconClass: "text-internal bg-internal/10",
+      iconClass: "text-internal bg-internal/20",
       headline: (
         <>
           Top internal: <span className="text-slate-100">{topI.name}</span>
@@ -103,7 +103,7 @@ function buildInsights({
     out.push({
       key: "days",
       icon: Sun,
-      iconClass: "text-brand bg-brand/10",
+      iconClass: "text-brand bg-brand/20",
       headline: (
         <>
           Strongest day: <span className="text-slate-100">{highest_day.date}</span>{" "}
