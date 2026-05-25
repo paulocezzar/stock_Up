@@ -10593,3 +10593,73 @@ class SpaDashboardRouteTests(TestCase):
         self.client.force_login(self.user)
         r = self.client.get("/dashboard/anything-here/")
         self.assertIn(r.status_code, (200, 404))
+
+
+class LiveVsLatestHistoricalSnapshotTests(SimpleTestCase):
+    """Belt-and-braces against the live-vs-snapshot drift class.
+
+    On every deploy, build.sh runs ``import_orders --tab "GARDEN CAFE"
+    --tab "WHOLESALE" data/order_sheet.xlsm`` — that importer REPLACES
+    OrderLines per (customer, date). If ``data/order_sheet.xlsm`` is
+    stale relative to the most recent historical snapshot for the same
+    week, the deploy silently rewrites prod with the older values.
+    That's what happened on w/c 18 May (see commit 792d9d4).
+
+    This test fails loudly when the two workbooks diverge for a week
+    they both cover. Reads them with the same helpers the importer
+    uses, so it tests exactly what build.sh would see — not a byte
+    diff that over-triggers on formatting.
+    """
+
+    LIVE = "data/order_sheet.xlsm"
+    HIST_DIR = "data/historical"
+
+    def _latest_snapshot(self):
+        import glob, os, re
+        files = sorted(glob.glob(f"{self.HIST_DIR}/order_sheet_*.xlsm"))
+        self.assertTrue(files, f"no historical snapshots in {self.HIST_DIR}")
+        path = files[-1]
+        m = re.search(r"order_sheet_(\d{4})_(\d{2})_(\d{2})\.xlsm$", path)
+        self.assertIsNotNone(m, f"unparseable snapshot filename: {path}")
+        return path, datetime.date(int(m[1]), int(m[2]), int(m[3]))
+
+    def _read_tab(self, wb, tab, *, wholesale):
+        """Reduce a tab to ``{(date_iso, customer, product, sage): (qty, price)}``
+        — the smallest comparable shape the importer would write."""
+        from .order_import import (iter_product_rows, iter_wholesale_rows,
+                                   read_tab_dates, read_wholesale_dates)
+        ws = wb[tab]
+        dates = read_wholesale_dates(ws) if wholesale else read_tab_dates(ws)
+        iterator = iter_wholesale_rows(ws) if wholesale else iter_product_rows(ws)
+        out = {}
+        for row in iterator:
+            cust = row.get("customer", "") if wholesale else ""
+            for d, q in zip(dates, row["qtys"]):
+                if q is None:  # blank cell -> no line written
+                    continue
+                key = (d.isoformat(), cust, row["name"], row.get("sage") or "")
+                out[key] = (str(q), str(row["price"]) if row["price"] is not None else None)
+        return dates, out
+
+    def test_live_workbook_matches_latest_historical_snapshot(self):
+        from openpyxl import load_workbook
+        snap_path, snap_wc = self._latest_snapshot()
+        live_wb = load_workbook(self.LIVE, read_only=True, data_only=True)
+        snap_wb = load_workbook(snap_path, read_only=True, data_only=True)
+        try:
+            for tab, wholesale in [("GARDEN CAFE", False), ("WHOLESALE", True)]:
+                live_dates, live_rows = self._read_tab(live_wb, tab, wholesale=wholesale)
+                snap_dates, snap_rows = self._read_tab(snap_wb, tab, wholesale=wholesale)
+                if live_dates[0] != snap_wc:
+                    self.skipTest(
+                        f"live workbook covers w/c {live_dates[0]}, not the "
+                        f"latest snapshot's w/c {snap_wc} — take a fresh "
+                        f"snapshot to re-engage this test")
+                self.assertEqual(
+                    live_rows, snap_rows,
+                    f"{tab}: data/order_sheet.xlsm DIVERGES from "
+                    f"{snap_path} for w/c {snap_wc}. The next deploy will "
+                    f"trample prod with the live values. See commit 792d9d4.")
+        finally:
+            live_wb.close()
+            snap_wb.close()

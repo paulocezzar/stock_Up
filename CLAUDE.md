@@ -26,6 +26,7 @@
 - Blank prices on order tabs are filled: tab cell → that week's Products tab → data/reference_prices.csv (2 Mar prices) → £0. Sheet/reference-authoritative; NEVER use the live SaleProduct catalogue for historical lines.
 - Week-commencing (Monday) is always DERIVED from the order date, never stored.
 - Historical imports are version-gated (HISTORICAL_IMPORT_VERSION); bump it to force re-import of existing weeks after an import-logic fix.
+- Live ↔ snapshot rule: build.sh runs `import_orders --tab "GARDEN CAFE" --tab "WHOLESALE" data/order_sheet.xlsm` on every deploy, REPLACING lines per (customer, date). So whenever a historical snapshot is corrected for the current week, `data/order_sheet.xlsm` MUST be updated in the SAME commit — otherwise the next deploy re-stales prod with the live workbook's older values (this is exactly what bit w/c 18 May 2026, fix in commit 792d9d4). Enforced by `LiveVsLatestHistoricalSnapshotTests`.
 
 ## Code style & process
 - Prefer smaller, well-structured files following best-practice principles.
