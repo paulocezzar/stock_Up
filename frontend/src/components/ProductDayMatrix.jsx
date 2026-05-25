@@ -28,12 +28,12 @@ function cellStyle(qty, rowMax) {
 export default function ProductDayMatrix({ rows }) {
   const data = rows || [];
   return (
-    <div className="rounded-xl border border-slate-800 bg-card p-4">
+    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <div className="font-display text-sm font-semibold text-slate-100">
+          <h3 className="font-display text-base font-semibold text-slate-100">
             Ordered by Product × Day
-          </div>
+          </h3>
           <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
             Ordered quantity · this week · external customers
           </div>

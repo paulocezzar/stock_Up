@@ -6,6 +6,7 @@ export default {
     extend: {
       colors: {
         page: "#030712",
+        rail: "#050912",
         card: "#0b111a",
         brand: "#f5a400",
         internal: "#1473ff",

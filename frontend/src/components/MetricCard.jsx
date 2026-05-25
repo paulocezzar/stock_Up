@@ -1,19 +1,15 @@
-import { Info } from "lucide-react";
-import { pct as fmtPct } from "../lib/format.js";
+import { ArrowUpRight, ArrowDownRight, Info } from "lucide-react";
 
-// One headline KPI: label + big value + optional delta line. Optional
-// inline amber sparkline (top-right) for cards backed by real daily
-// data — `sparkline` must be a numeric array; omit it on cards whose
-// metric isn't a time series we can plot honestly. The "i" glyph signals
-// "hover for context" via the standard title attribute.
-//
-// `tone="neutral"` greys the value for placeholders ("Not tracked").
-// Omitting `delta` collapses the delta row — no fake "—%".
+// One headline KPI. Label + info "i" top-left, big DM Mono value, delta
+// row (real WoW only — omit when no prior week), icon OR amber
+// sparkline on the right (sparkline only when a real daily series
+// backs the metric). `tone="neutral"` greys the value for explicit
+// "Not tracked" placeholders.
 export default function MetricCard({
   label,
   value,
-  subline,
   delta,
+  deltaSubline,
   icon: Icon,
   tone = "default",
   sparkline,
@@ -21,76 +17,86 @@ export default function MetricCard({
 }) {
   const valueClass =
     tone === "neutral"
-      ? "tabular text-xl font-semibold text-slate-500"
-      : "tabular text-xl font-semibold text-slate-100";
-  const deltaColor =
-    delta === null || delta === undefined
-      ? "text-slate-500"
-      : Number(delta) >= 0
-      ? "text-pos"
-      : "text-neg";
+      ? "font-mono text-2xl font-semibold text-slate-500 leading-none mt-3"
+      : "font-mono text-2xl font-semibold text-slate-100 leading-none mt-3";
+  const hasDelta = delta !== undefined && delta !== null;
+  const up = hasDelta && Number(delta) >= 0;
+  const ArrowIcon = up ? ArrowUpRight : ArrowDownRight;
+  const deltaColor = !hasDelta ? "text-slate-500" : up ? "text-pos" : "text-neg";
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-card px-3 pt-3 pb-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500 truncate">
-            {label}
-          </span>
-          {hint && (
-            <Info
-              size={10}
-              strokeWidth={1.75}
-              className="text-slate-600 shrink-0"
-              aria-label={hint}
-            >
-              <title>{hint}</title>
-            </Info>
+    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[12px] text-slate-300 truncate">{label}</span>
+            {hint && (
+              <span title={hint} className="text-slate-500 cursor-help">
+                <Info size={11} strokeWidth={2} />
+              </span>
+            )}
+          </div>
+          <div className={valueClass}>{value}</div>
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] min-h-[14px]">
+            {hasDelta ? (
+              <>
+                <ArrowIcon size={12} strokeWidth={2.25} className={deltaColor} />
+                <span className={`font-mono tabular ${deltaColor}`}>
+                  {up ? "+" : ""}{Number(delta).toFixed(1)}%
+                </span>
+                <span className="text-slate-500 truncate">
+                  {deltaSubline || "vs last week"}
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-500 truncate">{deltaSubline || ""}</span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0">
+          {sparkline && sparkline.length > 1 ? (
+            <Sparkline values={sparkline} />
+          ) : (
+            Icon && (
+              <div className="h-9 w-9 rounded-lg bg-slate-900/80 flex items-center justify-center">
+                <Icon size={16} strokeWidth={1.75} className="text-slate-400" />
+              </div>
+            )
           )}
         </div>
-        {sparkline && sparkline.length > 1 ? (
-          <Sparkline values={sparkline} />
-        ) : (
-          Icon && <Icon size={13} strokeWidth={1.5} className="text-slate-600 shrink-0" />
-        )}
       </div>
-      <div className={`mt-1.5 ${valueClass}`}>{value}</div>
-      {(subline || (delta !== undefined && delta !== null)) && (
-        <div className="mt-0.5 flex items-baseline gap-2 text-[11px]">
-          {delta !== undefined && delta !== null && (
-            <span className={`tabular ${deltaColor}`}>
-              {fmtPct(delta, { signed: true })}
-            </span>
-          )}
-          {subline && (
-            <span className="text-slate-500 truncate">{subline}</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-// Tiny SVG sparkline. 60×18 viewport; values normalized to that box.
-// Single-hue amber, matches the brand colour. No axes, no labels —
-// purely a glyph indicating the shape of this week's daily series.
+// Tiny SVG sparkline. 64×28; brand-amber stroke + soft fill. Values
+// normalized to box height. Single-hue — no green/red colouring.
 function Sparkline({ values }) {
-  const W = 60, H = 18;
+  const W = 64, H = 28;
   const nums = values.map((v) => Number(v) || 0);
   const max = Math.max(...nums);
   const min = Math.min(...nums);
   const range = Math.max(1e-9, max - min);
   const step = nums.length > 1 ? W / (nums.length - 1) : W;
-  const points = nums
-    .map((v, i) => `${(i * step).toFixed(1)},${(H - ((v - min) / range) * H).toFixed(1)}`)
-    .join(" ");
+  const pts = nums.map(
+    (v, i) => `${(i * step).toFixed(1)},${(H - 2 - ((v - min) / range) * (H - 4)).toFixed(1)}`,
+  );
+  const linePoints = pts.join(" ");
+  const fillPath = `M0,${H} L${pts.join(" L")} L${W},${H} Z`;
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0">
+      <defs>
+        <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#f5a400" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#f5a400" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={fillPath} fill="url(#spark-fill)" />
       <polyline
-        points={points}
+        points={linePoints}
         fill="none"
         stroke="#f5a400"
-        strokeWidth="1.25"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

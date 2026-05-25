@@ -7,12 +7,10 @@ import {
 } from "recharts";
 import { gbp, pct } from "../lib/format.js";
 
-// Two-slice donut: Internal (blue) vs Wholesale (purple). Values come
-// straight from the channel-split payload — no client recomputation.
-// Thicker ring + larger centre stat than the default Recharts donut;
-// horizontal mini-bars below the donut show the same numbers
-// in a comparator shape (£ + %) so the eye can read share without
-// counting pie slices.
+// Two-slice donut: Internal (blue) vs Wholesale (purple). All values
+// come straight from the channel-split payload — no recomputation.
+// Thick ring + centre stat; below, real horizontal mini-bars driven by
+// the API's `pct` so the eye can read share without counting slices.
 export default function ChannelSplitDonut({ internal, wholesale }) {
   const data = [
     { name: "Internal",  value: Number(internal?.total)  || 0, color: "#1473ff" },
@@ -21,16 +19,26 @@ export default function ChannelSplitDonut({ internal, wholesale }) {
   const total = data.reduce((s, d) => s + d.value, 0);
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-card p-4">
-      <div className="mb-3">
-        <div className="font-display text-sm font-semibold text-slate-100">
-          Channel Split
+    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h3 className="font-display text-base font-semibold text-slate-100">
+            Channel Split
+          </h3>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
+            Internal vs Wholesale · ordered
+          </div>
         </div>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
-          External ordered · Internal vs Wholesale
+        <div className="text-right">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            Total
+          </div>
+          <div className="font-mono tabular text-sm font-semibold text-slate-100">
+            {gbp(total)}
+          </div>
         </div>
       </div>
-      <div className="h-52 relative">
+      <div className="h-44 relative">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -39,8 +47,8 @@ export default function ChannelSplitDonut({ internal, wholesale }) {
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius={60}
-              outerRadius={96}
+              innerRadius={68}
+              outerRadius={100}
               paddingAngle={2}
               stroke="#0b111a"
               strokeWidth={3}
@@ -61,15 +69,15 @@ export default function ChannelSplitDonut({ internal, wholesale }) {
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <div className="tabular text-2xl font-semibold text-slate-100">
+          <div className="font-mono tabular text-xl font-semibold text-slate-100">
             {gbp(total)}
           </div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
-            Total ordered
+          <div className="font-mono text-[9px] uppercase tracking-widest text-slate-500 mt-0.5">
+            Total Ordered
           </div>
         </div>
       </div>
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-3">
         <ChannelBar color="#1473ff" name="Internal"
                     total={internal?.total} share={internal?.pct} />
         <ChannelBar color="#7c3aed" name="Wholesale"
@@ -88,9 +96,9 @@ function ChannelBar({ color, name, total, share }) {
           <span className="h-2 w-2 rounded-sm" style={{ background: color }} />
           <span className="text-slate-300">{name}</span>
         </span>
-        <span className="font-mono text-slate-500">
+        <span className="font-mono">
           <span className="tabular text-slate-100">{gbp(total)}</span>
-          <span className="ml-2 tabular">{pct(share)}</span>
+          <span className="ml-2 tabular text-slate-500">{pct(share)}</span>
         </span>
       </div>
       <div className="h-1.5 rounded-full bg-slate-900 overflow-hidden">

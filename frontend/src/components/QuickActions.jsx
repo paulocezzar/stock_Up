@@ -8,25 +8,26 @@ import {
   Lock,
 } from "lucide-react";
 
-// Action grid. Only the wired actions are interactive; the rest render
-// visibly disabled with a "coming" tag so the operator knows the
-// surface but can't click into a dead path.
+// Action stack. Active rows get a chevron + two-line label + brand
+// hover; disabled rows keep the lock glyph + "Coming" tag so the
+// operator can SEE the surface without clicking into a dead path.
+// Single-column at this card width so labels don't wrap awkwardly.
 export default function QuickActions({
   exportHref,
   prevWeek,
   onCompare,
 }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-card p-4">
+    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
       <div className="mb-3">
-        <div className="font-display text-sm font-semibold text-slate-100">
+        <h3 className="font-display text-base font-semibold text-slate-100">
           Quick Actions
-        </div>
+        </h3>
         <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
           Operator shortcuts
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="space-y-2">
         <ActiveAction
           as="a"
           href={exportHref}
@@ -52,10 +53,12 @@ export default function QuickActions({
 
 function ActiveAction({ as = "button", href, onClick, disabled, icon: Icon, label, sub }) {
   const className =
-    "group flex items-center gap-3 rounded-md border border-slate-800 bg-page hover:border-brand/40 hover:bg-brand/5 transition px-3 py-3 text-left disabled:opacity-40 disabled:hover:border-slate-800 disabled:hover:bg-page disabled:cursor-not-allowed";
+    "group w-full flex items-center gap-3 rounded-lg border border-slate-800 bg-page/60 hover:border-brand/40 hover:bg-brand/5 transition px-3 py-2.5 text-left disabled:opacity-40 disabled:hover:border-slate-800 disabled:hover:bg-page/60 disabled:cursor-not-allowed";
   const inner = (
     <>
-      <Icon size={16} strokeWidth={1.5} className="text-brand shrink-0" />
+      <span className="h-8 w-8 rounded-md bg-brand/15 text-brand flex items-center justify-center shrink-0">
+        <Icon size={14} strokeWidth={1.75} />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="text-sm text-slate-100 font-display leading-tight">{label}</div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5 truncate">
@@ -70,11 +73,7 @@ function ActiveAction({ as = "button", href, onClick, disabled, icon: Icon, labe
     </>
   );
   if (as === "a") {
-    return (
-      <a href={href} className={className}>
-        {inner}
-      </a>
-    );
+    return <a href={href} className={className}>{inner}</a>;
   }
   return (
     <button type="button" onClick={onClick} disabled={disabled} className={className}>
@@ -85,12 +84,14 @@ function ActiveAction({ as = "button", href, onClick, disabled, icon: Icon, labe
 
 function DisabledAction({ icon: Icon, label }) {
   return (
-    <div className="flex items-start gap-3 rounded-md border border-slate-800/60 bg-page/60 px-3 py-3">
-      <Icon size={16} strokeWidth={1.5} className="text-slate-600 mt-0.5" />
+    <div className="flex items-center gap-3 rounded-lg border border-slate-800/60 bg-page/40 px-3 py-2.5">
+      <span className="h-8 w-8 rounded-md bg-slate-800/60 text-slate-600 flex items-center justify-center shrink-0">
+        <Icon size={14} strokeWidth={1.75} />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-slate-500 font-display">{label}</div>
+        <div className="text-sm text-slate-500 font-display leading-tight">{label}</div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-slate-600 mt-0.5 flex items-center gap-1">
-          <Lock size={9} strokeWidth={1.5} />
+          <Lock size={9} strokeWidth={1.75} />
           Coming
         </div>
       </div>

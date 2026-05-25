@@ -120,44 +120,49 @@ function buildInsights({
 export default function InsightsPanel(props) {
   const insights = buildInsights(props);
   return (
-    <div className="rounded-xl border border-slate-800 bg-card p-4">
+    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20 backdrop-blur-sm">
       <div className="mb-3">
-        <div className="font-display text-sm font-semibold text-slate-100">
+        <h3 className="font-display text-base font-semibold text-slate-100">
           Insights
-        </div>
+        </h3>
         <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-0.5">
           Computed from this week's data
         </div>
       </div>
       {insights.length > 0 ? (
-        <ul className="space-y-2.5">
+        <ul className="divide-y divide-slate-800">
           {insights.map(({ key, icon: Icon, iconClass, headline, sub }) => (
-            <li key={key} className="flex items-start gap-3">
-              <span className={`shrink-0 h-7 w-7 rounded-md flex items-center justify-center ${iconClass}`}>
-                <Icon size={14} strokeWidth={1.75} />
+            <li key={key} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+              <span className={`shrink-0 h-9 w-9 rounded-lg flex items-center justify-center ${iconClass}`}>
+                <Icon size={16} strokeWidth={2} />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm text-slate-100 font-display leading-tight">
+                <div className="text-sm text-slate-100 font-display leading-snug">
                   {headline}
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">{sub}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{sub}</div>
               </div>
             </li>
           ))}
+          <li className="flex items-start gap-3 py-3 last:pb-0">
+            <span className="shrink-0 h-9 w-9 rounded-lg bg-slate-800/60 text-slate-600 flex items-center justify-center">
+              <Sun size={16} strokeWidth={2} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-slate-500 font-display leading-snug">
+                Forecast · coming soon
+              </div>
+              <div className="text-[11px] text-slate-600 mt-0.5">
+                Needs production history (Chunk 4) for honest projections.
+              </div>
+            </div>
+          </li>
         </ul>
       ) : (
         <div className="font-mono text-xs text-slate-500">
           No data for this week.
         </div>
       )}
-      <div className="mt-4 pt-3 border-t border-slate-800">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
-          Forecast · Coming soon
-        </div>
-        <div className="text-xs text-slate-600 mt-1">
-          Needs production history (Chunk 4) before forecasts can be honest.
-        </div>
-      </div>
     </div>
   );
 }
