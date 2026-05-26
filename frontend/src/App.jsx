@@ -18,6 +18,8 @@ import ChannelSplitDonut from "./components/ChannelSplitDonut.jsx";
 import InsightsPanel from "./components/InsightsPanel.jsx";
 import TopCustomersTable from "./components/TopCustomersTable.jsx";
 import ProductDayMatrix from "./components/ProductDayMatrix.jsx";
+import ProductionLoadPlaceholder from "./components/ProductionLoadPlaceholder.jsx";
+import ChannelBreakdownPlaceholder from "./components/ChannelBreakdownPlaceholder.jsx";
 import QuickActions from "./components/QuickActions.jsx";
 import RecentOrders from "./components/RecentOrders.jsx";
 import WeeklySummary from "./components/WeeklySummary.jsx";
@@ -139,51 +141,62 @@ function Header({ data, selected, onSelect, onCompare }) {
 function Body({ data, onCompare }) {
   return (
     <>
-      {/* Row 1: KPIs — six equal cards */}
+      {/* Row 1: KPIs — six equal cards, full width */}
       <Kpis data={data} />
 
-      {/* Row 2: Daily Trend (2fr) | Channel Split | Insights */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr] gap-4">
-        <DailyTrendChart rows={data.daily_trend} hasPrev={Boolean(data.prev_week_start)} />
-        <ChannelSplitDonut internal={data.internal} wholesale={data.wholesale} />
-        <InsightsPanel
-          total_ordered={data.total_ordered}
-          wow={data.wow}
-          internal={data.internal}
-          wholesale={data.wholesale}
-          top_wholesale={data.top_wholesale}
-          top_internal={data.top_internal}
-          highest_day={data.highest_day}
-          lowest_day={data.lowest_day}
-        />
+      {/* Below KPIs: LEFT/CENTER region | RIGHT RAIL (fixed 320px).
+          The right rail stacks Insights → Quick Actions → Weekly
+          Summary. The left/center region runs its own internal rows
+          A (chart + donut), B (3-up customers + 2 placeholders), C
+          (Recent Orders). */}
+      <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
+        <div className="space-y-4 min-w-0">
+          {/* Row A: Daily Trend (2fr) | Channel Split (1fr) */}
+          <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+            <DailyTrendChart rows={data.daily_trend} hasPrev={Boolean(data.prev_week_start)} />
+            <ChannelSplitDonut internal={data.internal} wholesale={data.wholesale} />
+          </div>
+          {/* Row B: 3-up — Top Wholesale | Production Load (placeholder) | Channel Breakdown (placeholder) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <TopCustomersTable rows={data.top_wholesale} />
+            <ProductionLoadPlaceholder />
+            <ChannelBreakdownPlaceholder />
+          </div>
+          {/* Row C: Recent Orders, full width of left/center */}
+          <div>
+            <RecentOrders rows={data.recent_orders} />
+          </div>
+        </div>
+        <aside className="space-y-4">
+          <InsightsPanel
+            total_ordered={data.total_ordered}
+            wow={data.wow}
+            internal={data.internal}
+            wholesale={data.wholesale}
+            top_wholesale={data.top_wholesale}
+            top_internal={data.top_internal}
+            highest_day={data.highest_day}
+            lowest_day={data.lowest_day}
+          />
+          <QuickActions
+            exportHref={exportCsvUrl(data.week_start)}
+            prevWeek={data.prev_week_start}
+            onCompare={onCompare}
+          />
+          <WeeklySummary
+            highest_day={data.highest_day}
+            lowest_day={data.lowest_day}
+            top_wholesale={data.top_wholesale}
+            top_internal={data.top_internal}
+            internal={data.internal}
+            wholesale={data.wholesale}
+          />
+        </aside>
       </div>
 
-      {/* Row 3: Top Wholesale | Quick Actions | Weekly Summary — Product × Day moved out so all 7 days have room */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TopCustomersTable rows={data.top_wholesale} />
-        <QuickActions
-          exportHref={exportCsvUrl(data.week_start)}
-          prevWeek={data.prev_week_start}
-          onCompare={onCompare}
-        />
-        <WeeklySummary
-          highest_day={data.highest_day}
-          lowest_day={data.lowest_day}
-          top_wholesale={data.top_wholesale}
-          top_internal={data.top_internal}
-          internal={data.internal}
-          wholesale={data.wholesale}
-        />
-      </div>
-
-      {/* Row 4: Product × Day — full width so Mon..Sun + Total all fit comfortably */}
+      {/* Below everything: Product × Day, full width (real data) */}
       <div className="mt-4">
         <ProductDayMatrix rows={data.product_day_matrix} />
-      </div>
-
-      {/* Row 5: Recent Orders — full width */}
-      <div className="mt-4">
-        <RecentOrders rows={data.recent_orders} />
       </div>
     </>
   );
