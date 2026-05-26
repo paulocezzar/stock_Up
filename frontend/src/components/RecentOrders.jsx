@@ -40,11 +40,12 @@ export default function RecentOrders({ rows }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left font-mono text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-800">
-              <th className="py-2 pr-2">Date</th>
-              <th className="py-2 px-2">Customer</th>
-              <th className="py-2 px-2">Channel</th>
-              <th className="py-2 px-2 text-right">Lines</th>
-              <th className="py-2 pl-2 text-right">Ordered</th>
+              <th className="py-2.5 pr-2">Date</th>
+              <th className="py-2.5 px-2">Customer</th>
+              <th className="py-2.5 px-2">Channel</th>
+              <th className="py-2.5 px-2 text-right">Lines</th>
+              <th className="py-2.5 px-2 text-right">Ordered</th>
+              <th className="py-2.5 pl-2 w-6" aria-hidden="true"></th>
             </tr>
           </thead>
           <tbody>
@@ -52,19 +53,22 @@ export default function RecentOrders({ rows }) {
               const c = CHANNEL_STYLE[r.channel] || CHANNEL_STYLE.excluded;
               return (
                 <tr key={`${r.date}-${r.customer}-${i}`}
-                    className="border-b border-slate-900 last:border-0">
-                  <td className="py-2 pr-2 font-mono tabular text-slate-300">{r.date}</td>
-                  <td className="py-2 px-2 text-slate-200">{r.customer}</td>
-                  <td className="py-2 px-2">
+                    className="border-b border-slate-900 last:border-0 hover:bg-slate-900/40 transition">
+                  <td className="py-2.5 pr-2 font-mono tabular text-slate-300">{r.date}</td>
+                  <td className="py-2.5 px-2 text-slate-200">{r.customer}</td>
+                  <td className="py-2.5 px-2">
                     <span className={`inline-block px-2 py-0.5 rounded-full font-mono text-[10px] uppercase tracking-widest ${c.className}`}>
                       {c.label}
                     </span>
                   </td>
-                  <td className="py-2 px-2 text-right font-mono tabular text-slate-400">
+                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-400">
                     {r.line_count}
                   </td>
-                  <td className="py-2 pl-2 text-right font-mono tabular text-slate-100">
+                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-100 whitespace-nowrap">
                     {gbp(r.ordered_total)}
+                  </td>
+                  <td className="py-2.5 pl-2 text-right">
+                    <ChevronRight size={13} strokeWidth={1.75} className="inline text-slate-600" />
                   </td>
                 </tr>
               );

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   PoundSterling,
-  Percent,
-  ShoppingCart,
-  Trash2,
-  CalendarDays,
-  Building2,
+  PieChart as PieIcon,
+  ShoppingBag,
+  Leaf,
   ArrowLeftRight,
   Filter,
   Lock,
@@ -90,28 +88,32 @@ function Header({ data, selected, onSelect, onCompare }) {
             Overview
           </h1>
           <span className="relative inline-flex h-2.5 w-2.5" title="Live data">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-pos opacity-75 animate-ping" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-pos" />
+            <span className="absolute inline-flex h-full w-full rounded-full bg-brand opacity-75 animate-ping" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-brand" />
           </span>
         </div>
         <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mt-1.5">
           {data
             ? `Performance overview for w/c ${weekLongLabel(data.week_start)}`
             : "Performance overview"}
-          {data?.prev_week_start && (
-            <span className="ml-2 text-slate-600">
-              vs w/c {weekLongLabel(data.prev_week_start)}
-            </span>
-          )}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {data && (
           <WeekPicker
             value={selected || data.week_start}
             options={data.available_weeks}
             onChange={onSelect}
           />
+        )}
+        {data?.prev_week_start && (
+          <span
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-800 bg-card/60 text-xs font-mono text-slate-400"
+            title="Previous imported week, used as the comparison baseline"
+          >
+            <span className="text-slate-600 uppercase tracking-widest text-[10px]">vs</span>
+            w/c {weekLongLabel(data.prev_week_start)}
+          </span>
         )}
         <button
           type="button"
@@ -212,11 +214,12 @@ function Footer({ weekStart }) {
 }
 
 function Kpis({ data }) {
-  // Real WoW pct, never fabricated. The Total Ordered and Avg Daily
-  // cards carry a sparkline — both are derived from daily_trend. The
-  // other four metrics have no honest daily series (channel %, total
-  // line count, waste, average is also from daily but kept icon for
-  // visual rhythm), so they keep the icon glyph.
+  // Real WoW % only on Total Ordered + Avg Daily Ordered. Avg Daily
+  // shares the same WoW because avg-per-day scales linearly with the
+  // week's total — both reduce to wow.pct. Channel-share cards
+  // (Wholesale %, Internal %) and Total Orders / Waste % have no
+  // honest WoW data exposed by the API, so they omit the delta (the
+  // line collapses to just the static subline).
   const wowPct = data.wow?.pct;
   const daily = (data.daily_trend || []).map((r) => Number(r.total));
   return (
@@ -224,11 +227,10 @@ function Kpis({ data }) {
       <MetricCard
         label="Total Ordered"
         value={gbp(data.total_ordered)}
-        delta={wowPct === undefined ? undefined : wowPct}
-        deltaSubline={wowPct === null || wowPct === undefined
-          ? "No prior week"
-          : "vs last week"}
+        delta={wowPct ?? undefined}
+        deltaSubline={wowPct === null || wowPct === undefined ? "No prior week" : undefined}
         icon={PoundSterling}
+        accent="brand"
         sparkline={daily}
         hint="Sum of qty × unit_price across all external order lines this week."
       />
@@ -236,21 +238,26 @@ function Kpis({ data }) {
         label="Wholesale %"
         value={pct(data.wholesale?.pct)}
         deltaSubline={gbp(data.wholesale?.total)}
-        icon={Building2}
+        icon={PieIcon}
+        accent="wholesale"
+        deltaSuffix="pp"
         hint="Wholesale-channel share of external ordered value."
       />
       <MetricCard
         label="Internal %"
         value={pct(data.internal?.pct)}
         deltaSubline={gbp(data.internal?.total)}
-        icon={Percent}
+        icon={PieIcon}
+        accent="internal"
+        deltaSuffix="pp"
         hint="Internal-channel share (all external customers NOT wholesale)."
       />
       <MetricCard
         label="Total Orders"
         value={data.total_orders ?? "—"}
         deltaSubline="Order lines this week"
-        icon={ShoppingCart}
+        icon={ShoppingBag}
+        accent="internal"
         hint="Count of external order lines (not distinct orders)."
       />
       <MetricCard
@@ -258,16 +265,19 @@ function Kpis({ data }) {
         value="Not tracked"
         deltaSubline="Needs setup (Chunk 4)"
         tone="neutral"
-        icon={Trash2}
+        icon={Leaf}
+        accent="pos"
         hint="No waste data tracked yet — placeholder, not a real metric."
       />
       <MetricCard
         label="Avg Daily Ordered"
         value={gbp(data.avg_day)}
-        deltaSubline="Total ÷ 7"
-        icon={CalendarDays}
+        delta={wowPct ?? undefined}
+        deltaSubline={wowPct === null || wowPct === undefined ? "Total ÷ 7" : undefined}
+        icon={PoundSterling}
+        accent="brand"
         sparkline={daily}
-        hint="Total ordered divided by 7 (every weekday, not just active days)."
+        hint="Total ÷ 7 — moves with Total Ordered's WoW (linear scaling)."
       />
     </div>
   );
