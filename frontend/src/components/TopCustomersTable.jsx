@@ -1,12 +1,18 @@
 import { ChevronRight } from "lucide-react";
-import { gbp, pct } from "../lib/format.js";
+import { gbp } from "../lib/format.js";
 
 // Top wholesale customers for the selected week. Rank column + a
 // horizontal share-bar per row visualises each customer's slice of
 // the channel (using the API's `pct` — real data, not a fabricated
-// time series). The grid intentionally OMITS a per-row daily
-// sparkline: the API doesn't expose per-customer daily totals and
-// inventing one would violate honest-data rules.
+// time series). No per-row daily sparkline: API doesn't expose
+// per-customer daily totals; inventing one violates honest-data.
+//
+// Fixed table layout with an explicit <colgroup> so the £ column
+// always gets enough room for the longest realistic value
+// (~£1,xxx.xx) and the customer name truncates with ellipsis on a
+// single line — never wraps, never clips the right edge of the card.
+// Numeric Share % is dropped — the bar carries the comparison; the
+// number is redundant in a narrow card.
 export default function TopCustomersTable({ rows }) {
   const data = rows || [];
   const maxPct = Math.max(...data.map((r) => Number(r.pct) || 0), 0);
@@ -30,10 +36,16 @@ export default function TopCustomersTable({ rows }) {
           No wholesale customers in this week.
         </div>
       ) : (
-        <table className="w-full text-sm">
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col style={{ width: "28px" }} />
+            <col />
+            <col style={{ width: "72px" }} />
+            <col style={{ width: "92px" }} />
+          </colgroup>
           <thead>
             <tr className="text-left font-mono text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-800">
-              <th className="py-2 pr-2 w-8 text-right">#</th>
+              <th className="py-2 pr-2 text-right">#</th>
               <th className="py-2 px-2">Customer</th>
               <th className="py-2 px-2">Share</th>
               <th className="py-2 pl-2 text-right">Ordered</th>
@@ -48,23 +60,21 @@ export default function TopCustomersTable({ rows }) {
                   <td className="py-2 pr-2 text-right font-mono tabular text-slate-500">
                     {i + 1}
                   </td>
-                  <td className="py-2 px-2 text-slate-200">
+                  <td
+                    className="py-2 px-2 text-slate-200 truncate"
+                    title={r.name}
+                  >
                     {r.name}
                   </td>
-                  <td className="py-2 px-2 min-w-[110px]">
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 flex-1 rounded-full bg-slate-900 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-wholesale"
-                          style={{ width }}
-                        />
-                      </div>
-                      <span className="font-mono tabular text-[11px] text-slate-400 w-10 text-right">
-                        {pct(r.pct)}
-                      </span>
+                  <td className="py-2 px-2">
+                    <div className="h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-wholesale"
+                        style={{ width }}
+                      />
                     </div>
                   </td>
-                  <td className="py-2 pl-2 text-right font-mono tabular text-slate-100">
+                  <td className="py-2 pl-2 text-right font-mono tabular text-slate-100 whitespace-nowrap">
                     {gbp(r.value)}
                   </td>
                 </tr>
