@@ -10789,3 +10789,342 @@ class LiveVsLatestHistoricalSnapshotTests(SimpleTestCase):
         finally:
             live_wb.close()
             snap_wb.close()
+
+
+class BusinessPerformanceHelpersTests(TestCase):
+    """period_comparison + concentration_metrics + customer_dynamics +
+    range_product_revenue + range_week_stats — the multi-week helpers
+    that power /business-performance-dashboard/. Contract:
+
+    * deltas are None when prior period extends before earliest imported
+    * concentration band thresholds: <50% healthy, 50–70% watch, >70% concentrated
+    * customer state classifies on first-order date + ±10% growth band
+    * dormant customers surface in a SEPARATE list (never in `rows`)
+    * Pareto sorts by VALUE desc; cumulative % is monotone non-decreasing
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        # 4 consecutive Mondays — prior=[wc1,wc2], current=[wc3,wc4]
+        self.wc1 = datetime.date(2026, 3, 30)
+        self.wc2 = datetime.date(2026, 4, 6)
+        self.wc3 = datetime.date(2026, 4, 13)
+        self.wc4 = datetime.date(2026, 4, 20)
+        # 4 wholesale customers spanning the four states + 1 dormant +
+        # 1 internal customer + 1 excluded (£999 noise).
+        self.A = Customer.objects.create(
+            name="A", customer_type=Customer.WHOLESALE, department=self.dept)
+        self.B = Customer.objects.create(
+            name="B", customer_type=Customer.WHOLESALE, department=self.dept)
+        self.C = Customer.objects.create(
+            name="C", customer_type=Customer.WHOLESALE, department=self.dept)
+        self.D = Customer.objects.create(
+            name="D", customer_type=Customer.WHOLESALE, department=self.dept)
+        self.F = Customer.objects.create(
+            name="F", customer_type=Customer.WHOLESALE, department=self.dept)
+        self.E = Customer.objects.create(
+            name="E", customer_type=Customer.INTERNAL, department=self.dept)
+        self.X = Customer.objects.create(
+            name="BAKERY INTERNAL USE",
+            customer_type=Customer.INTERNAL,
+            is_internal=True, department=self.dept)
+
+        # Prior period (wc1, wc2). All prices £1.00 so qty == value for
+        # easy mental arithmetic.
+        self._line(self.A, self.wc1, Decimal("50"), Decimal("1.00"), "Sourdough")
+        self._line(self.A, self.wc2, Decimal("50"), Decimal("1.00"), "Sourdough")
+        self._line(self.B, self.wc1, Decimal("100"), Decimal("1.00"), "Sourdough")
+        self._line(self.C, self.wc1, Decimal("100"), Decimal("1.00"), "Sourdough")
+        self._line(self.F, self.wc1, Decimal("100"), Decimal("1.00"), "Sourdough")
+        self._line(self.E, self.wc2, Decimal("50"), Decimal("1.00"), "Sourdough")
+        # Excluded — £999 must NEVER show up in any total.
+        self._line(self.X, self.wc1, Decimal("999"), Decimal("1.00"), "Sourdough")
+
+        # Current period (wc3, wc4).
+        # A: 100 → 70 (-30% → declining)
+        self._line(self.A, self.wc3, Decimal("70"), Decimal("1.00"), "Sourdough")
+        # B: 100 → 105 (+5% → stable)
+        self._line(self.B, self.wc3, Decimal("105"), Decimal("1.00"), "Sourdough")
+        # C: 100 → 130 (+30% → growing). Two products so Pareto has variety.
+        self._line(self.C, self.wc3, Decimal("65"), Decimal("1.00"), "Sourdough")
+        self._line(self.C, self.wc4, Decimal("65"), Decimal("1.00"), "Cake")
+        # D: 0 → 50 (NEW — first-ever order in current period)
+        self._line(self.D, self.wc3, Decimal("50"), Decimal("1.00"), "Bread")
+        # F: 100 → 0 (dormant)
+        # E (internal): 50 → 50
+        self._line(self.E, self.wc3, Decimal("50"), Decimal("1.00"), "Sourdough")
+
+        # Pre-computed expectations:
+        # Wholesale prior = 50+50 + 100 + 100 + 100 = 400
+        # Wholesale current = 70 + 105 + 130 + 50 = 355
+        # Wholesale delta % = (355-400)/400 * 100 = -11.25 → -11.3 (1dp)
+        # Internal prior = 50, current = 50
+
+    def _line(self, customer, order_date, qty, price, product_name):
+        o = Order.objects.create(
+            customer=customer, department=self.dept,
+            order_date=order_date)
+        OrderLine.objects.create(
+            order=o, sale_product=None, product_name=product_name,
+            unit_price=price, qty_ordered=qty)
+
+    # ---- period_comparison ----
+
+    def test_period_comparison_current_and_prior_totals_correct(self):
+        from stock.financials import period_comparison
+        c = period_comparison(self.dept, self.wc3, self.wc4)
+        self.assertEqual(c["current"]["wholesale"], Decimal("355.00"))
+        self.assertEqual(c["current"]["internal"], Decimal("50.00"))
+        self.assertEqual(c["prior"]["wholesale"], Decimal("400.00"))
+        self.assertEqual(c["prior"]["internal"], Decimal("50.00"))
+        self.assertFalse(c["prior_truncated"])
+        self.assertEqual(c["n_weeks"], 2)
+        self.assertEqual(c["prior_from"], self.wc1)
+        self.assertEqual(c["prior_to"], self.wc2)
+
+    def test_period_comparison_delta_total_matches_hand_math(self):
+        from stock.financials import period_comparison
+        c = period_comparison(self.dept, self.wc3, self.wc4)
+        # Total: prior 450, current 405; delta = (405-450)/450 = -10.0%
+        self.assertEqual(c["delta"]["total_pct"], Decimal("-10.0"))
+
+    def test_period_comparison_share_pp_is_percentage_points_not_relative(self):
+        from stock.financials import period_comparison
+        c = period_comparison(self.dept, self.wc3, self.wc4)
+        # Prior wholesale share = 400/450 = 88.9%; current = 355/405 = 87.7%
+        # Δ = 87.7 - 88.9 = -1.2pp (not relative %)
+        self.assertEqual(c["delta"]["wholesale_share_pp"], Decimal("-1.2"))
+
+    def test_period_comparison_prior_truncated_when_period_starts_at_earliest(self):
+        from stock.financials import period_comparison
+        # Current = wc1..wc2; prior would be wc-1..wc0 which is before
+        # earliest imported. Must return prior=None, prior_truncated=True.
+        c = period_comparison(self.dept, self.wc1, self.wc2)
+        self.assertTrue(c["prior_truncated"])
+        self.assertIsNone(c["prior"])
+        self.assertIsNone(c["delta"])
+        self.assertEqual(c["current"]["wholesale"], Decimal("400.00"))
+
+    # ---- concentration_metrics ----
+
+    def test_concentration_top_1_3_5_match_per_customer_in_channel(self):
+        from stock.financials import concentration_metrics
+        m = concentration_metrics(self.dept, Customer.WHOLESALE,
+                                  self.wc3, self.wc4)
+        # Current wholesale: C=130, B=105, A=70, D=50; total 355
+        # Shares: 36.6%, 29.6%, 19.7%, 14.1%
+        self.assertEqual(m["top_1_name"], "C")
+        self.assertEqual(m["top_1_pct"], Decimal("36.6"))
+        # top_3 = 36.6 + 29.6 + 19.7 = 85.9
+        self.assertEqual(m["top_3_pct"], Decimal("85.9"))
+        # top_5 = same as all-4 here = 100.0
+        self.assertEqual(m["top_5_pct"], Decimal("100.0"))
+        self.assertEqual(m["n_customers"], 4)
+
+    def test_concentration_band_concentrated_when_top_5_over_70(self):
+        from stock.financials import concentration_metrics
+        m = concentration_metrics(self.dept, Customer.WHOLESALE,
+                                  self.wc3, self.wc4)
+        self.assertEqual(m["band"], "concentrated")
+
+    def test_concentration_empty_channel_returns_healthy_zero(self):
+        from stock.financials import concentration_metrics
+        # Internal channel: only one customer (E) — top_5 share = 100%,
+        # so this is "concentrated" with 1 customer. Pick a channel with
+        # zero data instead: wholesale on a week with no orders.
+        far_week = self.wc4 + datetime.timedelta(days=28)
+        m = concentration_metrics(self.dept, Customer.WHOLESALE,
+                                  far_week, far_week)
+        self.assertEqual(m["band"], "healthy")
+        self.assertEqual(m["top_1_pct"], Decimal("0.0"))
+        self.assertEqual(m["n_customers"], 0)
+        self.assertIsNone(m["top_1_name"])
+
+    # ---- customer_dynamics ----
+
+    def test_customer_dynamics_classifies_growing_declining_stable(self):
+        from stock.financials import customer_dynamics
+        d = customer_dynamics(self.dept, Customer.WHOLESALE,
+                              self.wc3, self.wc4)
+        by_name = {r["name"]: r for r in d["rows"]}
+        self.assertEqual(by_name["A"]["state"], "declining")  # -30%
+        self.assertEqual(by_name["B"]["state"], "stable")     # +5%
+        self.assertEqual(by_name["C"]["state"], "growing")    # +30%
+
+    def test_customer_dynamics_new_customer_first_order_in_period(self):
+        from stock.financials import customer_dynamics
+        d = customer_dynamics(self.dept, Customer.WHOLESALE,
+                              self.wc3, self.wc4)
+        by_name = {r["name"]: r for r in d["rows"]}
+        self.assertEqual(by_name["D"]["state"], "new")
+        # Δ is None for new (no honest comparison).
+        self.assertIsNone(by_name["D"]["delta_pct"])
+
+    def test_customer_dynamics_dormant_in_separate_list_not_in_rows(self):
+        from stock.financials import customer_dynamics
+        d = customer_dynamics(self.dept, Customer.WHOLESALE,
+                              self.wc3, self.wc4)
+        row_names = {r["name"] for r in d["rows"]}
+        dormant_names = {r["name"] for r in d["dormant"]}
+        self.assertNotIn("F", row_names)
+        self.assertIn("F", dormant_names)
+        # The dormant entry remembers their prior total so the watchlist
+        # can show "was £100".
+        f_dormant = next(r for r in d["dormant"] if r["name"] == "F")
+        self.assertEqual(f_dormant["prior"], Decimal("100.00"))
+
+    def test_customer_dynamics_no_prior_marks_returning_as_growing(self):
+        from stock.financials import customer_dynamics
+        # Period starts at wc1 — prior window extends before earliest.
+        d = customer_dynamics(self.dept, Customer.WHOLESALE,
+                              self.wc1, self.wc2)
+        self.assertFalse(d["has_prior"])
+        # Every active customer in the prior-anchored period either has
+        # first_order in [wc1, wc2] (→ new) or before (→ growing-returning).
+        states = {r["state"] for r in d["rows"]}
+        self.assertTrue(states.issubset({"new", "growing"}))
+
+    def test_customer_dynamics_summary_counts_match_rows(self):
+        from stock.financials import customer_dynamics
+        d = customer_dynamics(self.dept, Customer.WHOLESALE,
+                              self.wc3, self.wc4)
+        states_from_rows = [r["state"] for r in d["rows"]]
+        for state, n in d["summary"].items():
+            if state == "dormant":
+                self.assertEqual(n, len(d["dormant"]))
+            else:
+                self.assertEqual(n, states_from_rows.count(state),
+                                 f"summary[{state}] != rows count")
+
+    # ---- range_product_revenue ----
+
+    def test_range_product_revenue_sorted_by_value_descending(self):
+        from stock.financials import range_product_revenue
+        m = range_product_revenue(self.dept, self.wc3, self.wc4)
+        names = [r["product"] for r in m["rows"]]
+        # Current period (external only):
+        #   Sourdough: A(70) + B(105) + C(65) + E(50) = 290
+        #   Cake: C(65) = 65
+        #   Bread: D(50) = 50
+        # Total = 405. Sorted by value: Sourdough, Cake, Bread.
+        self.assertEqual(names, ["Sourdough", "Cake", "Bread"])
+
+    def test_range_product_revenue_cumulative_pct_monotone_and_reaches_100(self):
+        from stock.financials import range_product_revenue
+        m = range_product_revenue(self.dept, self.wc3, self.wc4)
+        cums = [r["cumulative_pct"] for r in m["rows"]]
+        # Monotone non-decreasing
+        self.assertEqual(sorted(cums), cums)
+        # Final cumulative crosses 99.9 (rounding tolerance)
+        self.assertGreaterEqual(cums[-1], Decimal("99.9"))
+
+    def test_range_product_revenue_n_to_80pct(self):
+        from stock.financials import range_product_revenue
+        m = range_product_revenue(self.dept, self.wc3, self.wc4)
+        # Sourdough alone is 290/405 = 71.6% — under 80.
+        # Sourdough + Cake = 355/405 = 87.7% — crosses 80.
+        # So n_to_80pct = 2.
+        self.assertEqual(m["n_to_80pct"], 2)
+
+    def test_range_product_revenue_excludes_internal_customers(self):
+        from stock.financials import range_product_revenue
+        # The £999 BAKERY INTERNAL USE Sourdough order is OUTSIDE the
+        # current period (wc1, not wc3-wc4) so this test verifies the
+        # IN-period excluded check by adding a £500 internal-use line
+        # in the current period.
+        self._line(self.X, self.wc3, Decimal("500"), Decimal("1.00"), "Sourdough")
+        m = range_product_revenue(self.dept, self.wc3, self.wc4)
+        sourdough = next(r for r in m["rows"] if r["product"] == "Sourdough")
+        # If the £500 leaked in, Sourdough would be 790. Must stay 290.
+        self.assertEqual(sourdough["value"], Decimal("290.00"))
+
+    # ---- range_week_stats ----
+
+    def test_range_week_stats_best_and_worst_picked_from_actual_weeks(self):
+        from stock.financials import range_week_stats
+        # Over wc1..wc4:
+        #   wc1: A50 + B100 + C100 + F100 + X(excluded) = 350 (external)
+        #   wc2: A50 + E50 = 100
+        #   wc3: A70 + B105 + C65 + D50 + E50 = 340
+        #   wc4: C65 = 65
+        s = range_week_stats(self.dept, self.wc1, self.wc4)
+        self.assertEqual(s["best_week"]["week"], self.wc1)
+        self.assertEqual(s["best_week"]["total"], Decimal("350.00"))
+        self.assertEqual(s["worst_week"]["week"], self.wc4)
+        self.assertEqual(s["worst_week"]["total"], Decimal("65.00"))
+        self.assertEqual(s["spread"], Decimal("285.00"))
+
+    def test_range_week_stats_empty_period_all_nones(self):
+        from stock.financials import range_week_stats
+        far = self.wc4 + datetime.timedelta(days=28)
+        s = range_week_stats(self.dept, far, far)
+        self.assertIsNone(s["best_week"])
+        self.assertIsNone(s["worst_week"])
+        self.assertIsNone(s["variability_pct"])
+
+
+class BusinessPerformanceEndpointTests(TestCase):
+    """Smoke test for ``/api/business-performance/summary/`` — verifies
+    auth gate, payload shape, default period, and the from/to clamping
+    rules. Detailed math is covered by BusinessPerformanceHelpersTests;
+    here we just verify the endpoint composes them correctly."""
+
+    URL = "/api/business-performance/summary/"
+
+    def setUp(self):
+        U = get_user_model()
+        self.dept = Department.objects.create(name="Bakery")
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.wc1 = datetime.date(2026, 3, 30)
+        self.wc2 = datetime.date(2026, 4, 6)
+        self.wc3 = datetime.date(2026, 4, 13)
+        self.teals = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE,
+            department=self.dept)
+        self.garden = Customer.objects.create(
+            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
+            department=self.dept)
+        for wc in (self.wc1, self.wc2, self.wc3):
+            o = Order.objects.create(
+                customer=self.teals, department=self.dept, order_date=wc)
+            OrderLine.objects.create(
+                order=o, sale_product=None, product_name="Sourdough",
+                unit_price=Decimal("1.00"), qty_ordered=Decimal("10"))
+            o2 = Order.objects.create(
+                customer=self.garden, department=self.dept, order_date=wc)
+            OrderLine.objects.create(
+                order=o2, sale_product=None, product_name="Cake",
+                unit_price=Decimal("1.00"), qty_ordered=Decimal("5"))
+
+    def test_requires_authentication(self):
+        r = self.client.get(self.URL)
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_authenticated_returns_expected_top_level_keys(self):
+        self.client.force_login(self.user)
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        expected = {"period", "available_weeks", "totals", "weekly_trend",
+                    "best_worst", "concentration", "customers", "products"}
+        self.assertTrue(expected.issubset(body.keys()),
+                        f"Missing keys: {expected - body.keys()}")
+
+    def test_default_period_clamps_to_imported_weeks(self):
+        self.client.force_login(self.user)
+        body = self.client.get(self.URL).json()
+        # Only 3 weeks imported (wc1..wc3) — period must clamp to that
+        # range rather than claim 8 weeks of which 5 are empty.
+        self.assertEqual(body["period"]["from"], self.wc1.isoformat())
+        self.assertEqual(body["period"]["to"], self.wc3.isoformat())
+        self.assertEqual(body["period"]["earliest_imported"], self.wc1.isoformat())
+        self.assertEqual(body["period"]["latest_imported"], self.wc3.isoformat())
+
+    def test_concentration_returned_for_both_channels(self):
+        self.client.force_login(self.user)
+        body = self.client.get(self.URL).json()
+        self.assertIn("wholesale", body["concentration"])
+        self.assertIn("internal", body["concentration"])
+        self.assertIn("wholesale", body["customers"])
+        self.assertIn("internal", body["customers"])

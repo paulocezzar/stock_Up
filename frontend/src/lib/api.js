@@ -31,3 +31,17 @@ export function exportCsvUrl(week) {
     ? `/api/dashboard/export.csv?week=${encodeURIComponent(week)}`
     : "/api/dashboard/export.csv";
 }
+
+// Multi-week Business Performance payload. Both from/to are optional;
+// the server defaults to "last 8 imported weeks" and clamps any out-
+// of-range value to the available_weeks span. Both are Monday-snapped
+// (any day inside a week resolves to that week's Monday).
+export function fetchBusinessPerformance({ from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return getJson(
+    `/api/business-performance/summary/${qs ? `?${qs}` : ""}`,
+  );
+}

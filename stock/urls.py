@@ -1,7 +1,10 @@
 from django.urls import path, re_path
 from django.contrib.auth import views as auth_views
 from . import views
-from .api import dashboard_export_csv, dashboard_summary
+from .api import (
+    business_performance_summary,
+    dashboard_export_csv, dashboard_summary,
+)
 
 urlpatterns = [
     path("login/", auth_views.LoginView.as_view(template_name="stock/login.html"), name="login"),
@@ -81,6 +84,11 @@ urlpatterns = [
     path("api/dashboard/summary/", dashboard_summary, name="api_dashboard_summary"),
     path("api/dashboard/export.csv", dashboard_export_csv,
          name="api_dashboard_export_csv"),
+    path("api/business-performance/summary/", business_performance_summary,
+         name="api_business_performance_summary"),
     path("dashboard/", views.spa_dashboard, name="spa_dashboard"),
+    path("business-performance-dashboard/", views.spa_dashboard,
+         name="business_performance_dashboard"),
     re_path(r"^dashboard/.+$", views.spa_dashboard),
+    re_path(r"^business-performance-dashboard/.+$", views.spa_dashboard),
 ]

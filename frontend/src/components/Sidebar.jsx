@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   ScrollText,
   LineChart,
+  BarChart3,
   Package,
   ChefHat,
   Boxes,
@@ -17,7 +18,8 @@ import {
 // Dashboard (client router lands later; for now /dashboard is the only
 // SPA route).
 const NAV = [
-  { label: "Dashboard",  icon: LayoutDashboard, href: "/dashboard/",   active: true },
+  { label: "Dashboard",  icon: LayoutDashboard, href: "/dashboard/" },
+  { label: "Business Performance", icon: BarChart3, href: "/business-performance-dashboard/" },
   { label: "Orders",     icon: ScrollText,      href: "/orders/" },
   { label: "Financials", icon: LineChart,       href: "/financials/" },
   { label: "Products",   icon: Package,         href: "/products/" },
@@ -63,6 +65,7 @@ const FOOTER_STYLE = { flex: "0 0 auto", marginTop: "auto" };
 // and produce exactly the "sidebar at bottom-left" symptom we hit).
 export default function Sidebar() {
   if (typeof document === "undefined") return null;  // SSR safety; harmless here
+  const path = window.location.pathname;
   return createPortal(
     <aside style={ASIDE_STYLE}>
       <div style={HEADER_STYLE} className="px-5 py-5 border-b border-slate-800">
@@ -74,7 +77,9 @@ export default function Sidebar() {
         </div>
       </div>
       <nav style={NAV_STYLE} className="px-3 py-3 space-y-1">
-        {NAV.map(({ label, icon: Icon, href, active }) => (
+        {NAV.map(({ label, icon: Icon, href }) => {
+          const active = path === href || path.startsWith(href);
+          return (
           <a
             key={label}
             href={href}
@@ -94,7 +99,7 @@ export default function Sidebar() {
             <Icon size={16} strokeWidth={1.75} />
             <span className="flex-1">{label}</span>
           </a>
-        ))}
+        );})}
       </nav>
       <div style={FOOTER_STYLE} className="border-t border-slate-800 p-3 space-y-2">
         <div className="flex items-center justify-between px-3 py-2 rounded-lg text-sm text-slate-300">

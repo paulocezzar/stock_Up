@@ -35,10 +35,12 @@ from rest_framework.response import Response
 
 from .financials import (
     available_week_range, available_weeks,
-    per_customer_in_channel, per_week_split, range_totals,
-    recent_order_groups, week_channel_split, week_daily_totals,
-    week_orders_count, week_over_week, week_product_day_matrix,
-    week_top_customers,
+    concentration_metrics, customer_dynamics,
+    per_customer_in_channel, per_week_split,
+    period_comparison, range_product_revenue, range_totals,
+    range_week_stats, recent_order_groups, week_channel_split,
+    week_daily_totals, week_orders_count, week_over_week,
+    week_product_day_matrix, week_top_customers,
 )
 from .models import Customer, Order, OrderLine
 from .views import current_department
@@ -410,3 +412,343 @@ def dashboard_export_csv(request):
             str(line_value),
         ])
     return response
+
+
+# ---------------------------------------------------------------------------
+# Business Performance — multi-week commercial-finance view.
+#
+# Separate endpoint from dashboard_summary so the existing /dashboard/
+# contract stays stable. Uses the Business Performance helpers in
+# stock/financials.py; the endpoint just composes their outputs into
+# one JSON payload + handles defaults / param snapping.
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_PERIOD_WEEKS = 8
+
+
+def _empty_bp_payload(from_wc, to_wc):
+    """Zero-shape Business Performance payload — every key present so
+    the SPA can render its skeletons without conditional chains."""
+    zero = Decimal("0.00")
+    z_totals = {
+        "total": str(zero),
+        "wholesale": str(zero),
+        "internal": str(zero),
+        "wholesale_pct": "0.0",
+        "internal_pct": "0.0",
+        "avg_week": str(zero),
+        "avg_day": str(zero),
+        "distinct_orders": 0,
+        "active_customers": 0,
+    }
+    z_concentration = {
+        "top_1_name": None,
+        "top_1_pct": "0.0",
+        "top_3_pct": "0.0",
+        "top_5_pct": "0.0",
+        "band": "healthy",
+        "n_customers": 0,
+    }
+    z_customers = {
+        "rows": [],
+        "dormant": [],
+        "summary": {"new": 0, "growing": 0, "declining": 0,
+                    "stable": 0, "dormant": 0},
+        "has_prior": False,
+        "prior_from": None,
+        "prior_to": None,
+    }
+    return {
+        "period": {
+            "from": from_wc.isoformat(),
+            "to": to_wc.isoformat(),
+            "n_weeks": 1,
+            "prior_from": None,
+            "prior_to": None,
+            "prior_truncated": True,
+            "earliest_imported": None,
+            "latest_imported": None,
+        },
+        "available_weeks": [],
+        "totals": {
+            "current": z_totals,
+            "prior": None,
+            "delta": None,
+        },
+        "weekly_trend": [],
+        "best_worst": {
+            "best_week": None, "worst_week": None,
+            "spread": str(zero), "mean": str(zero),
+            "variability_pct": None, "n_active_weeks": 0,
+        },
+        "concentration": {
+            "wholesale": z_concentration,
+            "internal": z_concentration,
+        },
+        "customers": {
+            "wholesale": z_customers,
+            "internal": z_customers,
+        },
+        "products": {
+            "rows": [],
+            "total_value": str(zero),
+            "n_products": 0,
+            "n_to_80pct": 0,
+            "top_5_share_pct": "0.0",
+            "top_10_share_pct": "0.0",
+        },
+    }
+
+
+def _bp_totals_payload(dept, totals_block, start_wc, end_wc):
+    """Render a ``range_totals``-shaped dict into the API payload shape,
+    enriched with avg_week / avg_day / distinct_orders / active_customers
+    — the figures the page header needs that aren't in range_totals."""
+    if totals_block is None:
+        return None
+    total = totals_block["total"] or Decimal("0")
+    wholesale = totals_block["wholesale"] or Decimal("0")
+    internal = totals_block["internal"] or Decimal("0")
+
+    n_weeks = ((end_wc - start_wc).days // 7) + 1
+    avg_week = (total / Decimal(n_weeks)) if n_weeks else Decimal("0")
+    avg_day = (total / Decimal(n_weeks * 7)) if n_weeks else Decimal("0")
+
+    end = end_wc + timedelta(days=6)
+    base_qs = Order.objects.filter(
+        department=dept,
+        order_date__range=(start_wc, end),
+        customer__is_internal=False,
+    )
+    distinct_orders = base_qs.count()
+    active_customers = base_qs.values("customer_id").distinct().count()
+
+    def _share(part):
+        if not total:
+            return "0.0"
+        return str((part / total * Decimal("100")).quantize(Decimal("0.1")))
+
+    return {
+        "total": str(_q2(total)),
+        "wholesale": str(_q2(wholesale)),
+        "internal": str(_q2(internal)),
+        "wholesale_pct": _share(wholesale),
+        "internal_pct": _share(internal),
+        "avg_week": str(_q2(avg_week)),
+        "avg_day": str(_q2(avg_day)),
+        "distinct_orders": distinct_orders,
+        "active_customers": active_customers,
+    }
+
+
+def _bp_concentration_payload(metrics):
+    return {
+        "top_1_name": metrics["top_1_name"],
+        "top_1_pct": str(metrics["top_1_pct"]),
+        "top_3_pct": str(metrics["top_3_pct"]),
+        "top_5_pct": str(metrics["top_5_pct"]),
+        "band": metrics["band"],
+        "n_customers": metrics["n_customers"],
+    }
+
+
+def _bp_customers_payload(dynamics):
+    return {
+        "rows": [
+            {
+                "customer_id": r["customer_id"],
+                "name": r["name"],
+                "current": str(_q2(r["current"])),
+                "share_pct": str(r["share_pct"]),
+                "prior": str(r["prior"]),
+                "delta_pct": (None if r["delta_pct"] is None
+                              else str(r["delta_pct"])),
+                "state": r["state"],
+            }
+            for r in dynamics["rows"]
+        ],
+        "dormant": [
+            {
+                "customer_id": d["customer_id"],
+                "name": d["name"],
+                "prior": str(d["prior"]),
+            }
+            for d in dynamics["dormant"]
+        ],
+        "summary": dynamics["summary"],
+        "has_prior": dynamics["has_prior"],
+        "prior_from": (dynamics["prior_from"].isoformat()
+                       if dynamics["has_prior"] else None),
+        "prior_to": (dynamics["prior_to"].isoformat()
+                     if dynamics["has_prior"] else None),
+    }
+
+
+def _bp_products_payload(matrix):
+    return {
+        "rows": [
+            {
+                "product": r["product"],
+                "qty": str(r["qty"]),
+                "value": str(r["value"]),
+                "share_pct": str(r["share_pct"]),
+                "cumulative_pct": str(r["cumulative_pct"]),
+            }
+            for r in matrix["rows"]
+        ],
+        "total_value": str(matrix["total_value"]),
+        "n_products": matrix["n_products"],
+        "n_to_80pct": matrix["n_to_80pct"],
+        "top_5_share_pct": str(matrix["top_5_share_pct"]),
+        "top_10_share_pct": str(matrix["top_10_share_pct"]),
+    }
+
+
+def _bp_best_worst_payload(stats):
+    def _wk(slot):
+        if slot is None:
+            return None
+        return {"week": slot["week"].isoformat(),
+                "total": str(slot["total"])}
+    return {
+        "best_week": _wk(stats["best_week"]),
+        "worst_week": _wk(stats["worst_week"]),
+        "spread": str(stats["spread"]),
+        "mean": str(stats["mean"]),
+        "variability_pct": (None if stats["variability_pct"] is None
+                            else str(stats["variability_pct"])),
+        "n_active_weeks": stats["n_active_weeks"],
+    }
+
+
+def _bp_delta_payload(comparison):
+    """Serialise period_comparison's ``delta`` block. Includes avg-week
+    delta derived from total delta (linear with n_weeks fixed)."""
+    delta = comparison["delta"]
+    if delta is None:
+        return None
+    return {
+        "total_pct": (None if delta["total_pct"] is None
+                      else str(delta["total_pct"])),
+        "wholesale_pct": (None if delta["wholesale_pct"] is None
+                          else str(delta["wholesale_pct"])),
+        "internal_pct": (None if delta["internal_pct"] is None
+                         else str(delta["internal_pct"])),
+        "wholesale_share_pp": str(delta["wholesale_share_pp"]),
+        "internal_share_pp": str(delta["internal_share_pp"]),
+        # avg_week scales linearly with total over a fixed n_weeks so
+        # its WoW % is identical to total_pct — exposed as a separate
+        # field so the frontend can label it without re-deriving.
+        "avg_week_pct": (None if delta["total_pct"] is None
+                         else str(delta["total_pct"])),
+    }
+
+
+@api_view(["GET"])
+def business_performance_summary(request):
+    """``GET /api/business-performance/summary/`` → multi-week commercial-
+    finance JSON payload.
+
+    Query string:
+
+    * ``?from=YYYY-MM-DD`` — start Monday (snaps to Monday-of-week).
+      Defaults to ``latest_imported - 7 weeks`` (i.e. the last 8 weeks
+      ending at the most recent imported week).
+    * ``?to=YYYY-MM-DD`` — end Monday. Defaults to ``latest_imported``.
+    * If ``from`` is before the earliest imported week it snaps up to
+      it. If ``to`` is after the latest imported week it snaps down.
+    * If ``from > to`` they swap.
+
+    Returns ``{period, available_weeks, totals, weekly_trend, best_worst,
+    concentration, customers, products}``. Concentration + customers are
+    returned for BOTH wholesale and internal channels so the page can
+    toggle without refetching. See ``_empty_bp_payload`` for the
+    zero-shape contract.
+    """
+    dept = current_department(request)
+    if dept is None:
+        wc = _monday_of(date.today())
+        return Response(_empty_bp_payload(wc, wc))
+
+    weeks = available_weeks(dept)  # newest-first list of Mondays
+    if not weeks:
+        wc = _monday_of(date.today())
+        return Response(_empty_bp_payload(wc, wc))
+
+    earliest = weeks[-1]
+    latest = weeks[0]
+
+    default_to = latest
+    default_from = latest - timedelta(weeks=_DEFAULT_PERIOD_WEEKS - 1)
+    if default_from < earliest:
+        default_from = earliest
+
+    from_wc = _snap(request.GET.get("from"), default_from)
+    to_wc = _snap(request.GET.get("to"), default_to)
+    if to_wc < from_wc:
+        from_wc, to_wc = to_wc, from_wc
+    # Clamp to imported range so the period never claims to cover
+    # weeks the database doesn't have.
+    if from_wc < earliest:
+        from_wc = earliest
+    if to_wc > latest:
+        to_wc = latest
+
+    comparison = period_comparison(dept, from_wc, to_wc)
+    weekly = per_week_split(dept, from_wc, to_wc)
+    stats = range_week_stats(dept, from_wc, to_wc)
+    wholesale_conc = concentration_metrics(
+        dept, Customer.WHOLESALE, from_wc, to_wc)
+    internal_conc = concentration_metrics(
+        dept, Customer.INTERNAL, from_wc, to_wc)
+    wholesale_dyn = customer_dynamics(
+        dept, Customer.WHOLESALE, from_wc, to_wc)
+    internal_dyn = customer_dynamics(
+        dept, Customer.INTERNAL, from_wc, to_wc)
+    products = range_product_revenue(dept, from_wc, to_wc)
+
+    payload = {
+        "period": {
+            "from": from_wc.isoformat(),
+            "to": to_wc.isoformat(),
+            "n_weeks": comparison["n_weeks"],
+            "prior_from": (comparison["prior_from"].isoformat()
+                           if comparison["prior_from"] else None),
+            "prior_to": (comparison["prior_to"].isoformat()
+                         if comparison["prior_to"] else None),
+            "prior_truncated": comparison["prior_truncated"],
+            "earliest_imported": earliest.isoformat(),
+            "latest_imported": latest.isoformat(),
+        },
+        "available_weeks": [w.isoformat() for w in weeks],
+        "totals": {
+            "current": _bp_totals_payload(
+                dept, comparison["current"], from_wc, to_wc),
+            "prior": (None if comparison["prior_truncated"]
+                      else _bp_totals_payload(
+                          dept, comparison["prior"],
+                          comparison["prior_from"], comparison["prior_to"])),
+            "delta": _bp_delta_payload(comparison),
+        },
+        "weekly_trend": [
+            {
+                "week": r["wc"].isoformat(),
+                "internal": str(r["internal"]),
+                "wholesale": str(r["wholesale"]),
+                "total": str(r["total"]),
+            }
+            for r in weekly
+        ],
+        "best_worst": _bp_best_worst_payload(stats),
+        "concentration": {
+            "wholesale": _bp_concentration_payload(wholesale_conc),
+            "internal": _bp_concentration_payload(internal_conc),
+        },
+        "customers": {
+            "wholesale": _bp_customers_payload(wholesale_dyn),
+            "internal": _bp_customers_payload(internal_dyn),
+        },
+        "products": _bp_products_payload(products),
+    }
+    return Response(payload)
