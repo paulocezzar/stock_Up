@@ -7722,6 +7722,114 @@ def _seed_garden_cafe_products(dept):
     return out
 
 
+class IngredientCostingTests(TestCase):
+    """Ingredient-only margin costing from SaleProduct -> Recipe -> Products."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.supplier = Supplier.objects.create(name="Mill")
+        self.customer = Customer.objects.create(
+            name="Garden Cafe", department=self.dept)
+        self.flour = Product.objects.create(
+            code="NPD-I001", name="Flour", department=self.dept,
+            unit="g", minimum=0)
+        self.water = Product.objects.create(
+            code="NPD-I002", name="Water", department=self.dept,
+            unit="g", minimum=0)
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.supplier,
+            pack_weight=Decimal("1000"), pack_price=Decimal("2.00"))
+        SupplierPrice.objects.create(
+            product=self.water, supplier=self.supplier,
+            pack_weight=Decimal("1000"), pack_price=Decimal("0.50"))
+        self.recipe = Recipe.objects.create(
+            code="NPD-R100", name="Loaf", department=self.dept,
+            finished_weight_g=Decimal("1000"),
+            deposit_weight_g=Decimal("1000"))
+        RecipeLine.objects.create(
+            recipe=self.recipe, ingredient=self.flour,
+            weight_g=Decimal("600"), ordering=0)
+        RecipeLine.objects.create(
+            recipe=self.recipe, ingredient=self.water,
+            weight_g=Decimal("400"), ordering=1)
+        self.loose = SaleProduct.objects.create(
+            name="Loaf Loose", price=Decimal("4.00"), department=self.dept,
+            link_recipe=self.recipe, link_quantity=Decimal("1"),
+            link_unit=SaleProduct.COUNT)
+
+    def test_recipe_batch_ingredient_cost_uses_latest_cheapest_prices(self):
+        from stock.costing import recipe_batch_ingredient_cost
+        result = recipe_batch_ingredient_cost(self.recipe)
+        # Flour 600g @ GBP2/kg = GBP1.20; water 400g @ GBP0.50/kg = GBP0.20.
+        self.assertEqual(result["cost"], Decimal("1.40"))
+        self.assertEqual(result["blockers"], [])
+
+    def test_sale_product_count_cost_multiplies_recipe_batch(self):
+        from stock.costing import sale_product_ingredient_cost
+        pack = SaleProduct.objects.create(
+            name="Pack/6", price=Decimal("22.00"), department=self.dept,
+            link_product=self.loose, link_quantity=Decimal("6"),
+            link_unit=SaleProduct.COUNT)
+        result = sale_product_ingredient_cost(pack)
+        self.assertEqual(result["cost"], Decimal("8.40"))
+        self.assertEqual(result["blockers"], [])
+
+    def test_sale_product_weight_cost_scales_by_finished_weight(self):
+        from stock.costing import sale_product_ingredient_cost
+        slab = SaleProduct.objects.create(
+            name="Loaf 2.5kg", price=Decimal("9.00"), department=self.dept,
+            link_recipe=self.recipe, link_quantity=Decimal("2.5"),
+            link_unit=SaleProduct.WEIGHT_KG)
+        result = sale_product_ingredient_cost(slab)
+        self.assertEqual(result["cost"], Decimal("3.50"))
+
+    def test_order_line_cost_blocks_missing_supplier_price(self):
+        from stock.costing import order_line_ingredient_cost
+        self.flour.prices.all().delete()
+        order = Order.objects.create(
+            customer=self.customer, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        line = OrderLine.objects.create(
+            order=order, sale_product=self.loose,
+            qty_ordered=Decimal("2"))
+        result = order_line_ingredient_cost(line)
+        self.assertEqual(result["cost"], Decimal("0"))
+        self.assertEqual(result["blockers"][0]["code"],
+                         "missing_supplier_price")
+
+    def test_range_margin_summary_reports_coverage_and_profit(self):
+        from stock.costing import range_margin_summary
+        order = Order.objects.create(
+            customer=self.customer, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, sale_product=self.loose,
+            qty_ordered=Decimal("2"))
+        summary = range_margin_summary(
+            self.dept, datetime.date(2026, 5, 18),
+            datetime.date(2026, 5, 18))
+        self.assertEqual(summary["revenue"], Decimal("8.00"))
+        self.assertEqual(summary["estimated_ingredient_cost"],
+                         Decimal("2.80"))
+        self.assertEqual(summary["gross_profit"], Decimal("5.20"))
+        self.assertEqual(summary["gross_margin_pct"], Decimal("65.0"))
+        self.assertEqual(summary["coverage_pct"], Decimal("100.0"))
+
+    def test_range_margin_summary_blocks_unlinked_order_line(self):
+        from stock.costing import range_margin_summary
+        order = Order.objects.create(
+            customer=self.customer, department=self.dept,
+            order_date=datetime.date(2026, 5, 18))
+        OrderLine.objects.create(
+            order=order, product_name="Historical", unit_price=Decimal("3.00"),
+            qty_ordered=Decimal("1"))
+        summary = range_margin_summary(
+            self.dept, datetime.date(2026, 5, 18),
+            datetime.date(2026, 5, 18))
+        self.assertEqual(summary["coverage_pct"], Decimal("0.0"))
+        self.assertEqual(summary["blocker_counts"]["missing_sale_product"], 1)
+
+
 class OrderImportTests(TestCase):
     """End-to-end import of the GARDEN CAFE tab from the real workbook."""
 
@@ -11107,9 +11215,19 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         expected = {"period", "available_weeks", "totals", "weekly_trend",
-                    "best_worst", "concentration", "customers", "products"}
+                    "best_worst", "concentration", "customers", "products",
+                    "margin"}
         self.assertTrue(expected.issubset(body.keys()),
                         f"Missing keys: {expected - body.keys()}")
+
+    def test_margin_payload_is_ingredient_only_and_reports_coverage(self):
+        self.client.force_login(self.user)
+        body = self.client.get(self.URL).json()
+        margin = body["margin"]
+        self.assertEqual(margin["basis"], "ingredient_only")
+        self.assertEqual(margin["coverage_pct"], "0.0")
+        self.assertEqual(
+            margin["blocker_counts"]["missing_sale_product"], 6)
 
     def test_default_period_clamps_to_imported_weeks(self):
         self.client.force_login(self.user)
