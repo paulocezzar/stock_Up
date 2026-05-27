@@ -23,7 +23,7 @@ def _q1(value):
     return (value or ZERO).quantize(Decimal("0.1"))
 
 
-def ingredient_unit_cost(product):
+def ingredient_unit_cost(product, cache=None):
     """Return cost per recipe quantity unit for a raw ingredient Product.
 
     Recipes store ingredient quantities in the same base magnitude used by the
@@ -31,33 +31,48 @@ def ingredient_unit_cost(product):
     honestly costed from a ``weight_g`` recipe quantity, so they return a
     blocker.
     """
+    if cache is not None and product.pk in cache:
+        return cache[product.pk]
+
     if product.unit not in ("g", "ml"):
-        return None, {
+        result = (None, {
             "code": "unsupported_unit",
             "product_id": product.pk,
             "product": product.name,
             "unit": product.unit,
-        }
+        })
+        if cache is not None:
+            cache[product.pk] = result
+        return result
 
     price = product.cheapest_price
     if price is None or not price.pack_weight:
-        return None, {
+        result = (None, {
             "code": "missing_supplier_price",
             "product_id": product.pk,
             "product": product.name,
             "unit": product.unit,
-        }
+        })
+        if cache is not None:
+            cache[product.pk] = result
+        return result
 
-    return price.pack_price / price.pack_weight, None
+    result = (price.pack_price / price.pack_weight, None)
+    if cache is not None:
+        cache[product.pk] = result
+    return result
 
 
-def recipe_batch_ingredient_cost(recipe):
+def recipe_batch_ingredient_cost(recipe, cache=None, ingredient_cache=None):
     """Cost one full finished batch of ``recipe`` from raw ingredients."""
+    if cache is not None and recipe.pk in cache:
+        return cache[recipe.pk]
+
     total = ZERO
     blockers = []
     for row in recipe.exploded_ingredients():
         ingredient = row["ingredient"]
-        unit_cost, blocker = ingredient_unit_cost(ingredient)
+        unit_cost, blocker = ingredient_unit_cost(ingredient, ingredient_cache)
         if blocker:
             blockers.append(blocker)
             continue
@@ -72,19 +87,26 @@ def recipe_batch_ingredient_cost(recipe):
             "count": packaging_count,
         })
 
-    return {
+    result = {
         "recipe": recipe,
         "cost": _q2(total),
         "blockers": blockers,
     }
+    if cache is not None:
+        cache[recipe.pk] = result
+    return result
 
 
-def sale_product_ingredient_cost(sale_product):
+def sale_product_ingredient_cost(
+        sale_product, cache=None, recipe_cache=None, ingredient_cache=None):
     """Ingredient cost for one sold unit/pack represented by SaleProduct."""
+    if cache is not None and sale_product.pk in cache:
+        return cache[sale_product.pk]
+
     try:
         recipe, total_quantity, unit = sale_product.resolved_recipe_consumption()
     except SaleProductCycleError as exc:
-        return {
+        result = {
             "cost": ZERO,
             "recipe": None,
             "blockers": [{
@@ -94,9 +116,12 @@ def sale_product_ingredient_cost(sale_product):
                 "detail": str(exc),
             }],
         }
+        if cache is not None:
+            cache[sale_product.pk] = result
+        return result
 
     if recipe is None:
-        return {
+        result = {
             "cost": ZERO,
             "recipe": None,
             "blockers": [{
@@ -105,14 +130,18 @@ def sale_product_ingredient_cost(sale_product):
                 "sale_product": sale_product.name,
             }],
         }
+        if cache is not None:
+            cache[sale_product.pk] = result
+        return result
 
-    batch = recipe_batch_ingredient_cost(recipe)
+    batch = recipe_batch_ingredient_cost(
+        recipe, cache=recipe_cache, ingredient_cache=ingredient_cache)
     finished_weight = recipe.finished_weight_g or recipe.deposit_weight_g
     if unit == sale_product.COUNT:
         multiplier = total_quantity
     elif unit == sale_product.WEIGHT_KG:
         if not finished_weight:
-            return {
+            result = {
                 "cost": ZERO,
                 "recipe": recipe,
                 "blockers": [{
@@ -121,10 +150,13 @@ def sale_product_ingredient_cost(sale_product):
                     "recipe": recipe.name,
                 }],
             }
+            if cache is not None:
+                cache[sale_product.pk] = result
+            return result
         multiplier = (total_quantity * Decimal("1000")) / finished_weight
     elif unit == sale_product.WEIGHT_G:
         if not finished_weight:
-            return {
+            result = {
                 "cost": ZERO,
                 "recipe": recipe,
                 "blockers": [{
@@ -133,9 +165,12 @@ def sale_product_ingredient_cost(sale_product):
                     "recipe": recipe.name,
                 }],
             }
+            if cache is not None:
+                cache[sale_product.pk] = result
+            return result
         multiplier = total_quantity / finished_weight
     else:
-        return {
+        result = {
             "cost": ZERO,
             "recipe": recipe,
             "blockers": [{
@@ -145,15 +180,23 @@ def sale_product_ingredient_cost(sale_product):
                 "unit": unit,
             }],
         }
+        if cache is not None:
+            cache[sale_product.pk] = result
+        return result
 
-    return {
+    result = {
         "cost": _q2(batch["cost"] * multiplier),
         "recipe": recipe,
         "blockers": batch["blockers"],
     }
+    if cache is not None:
+        cache[sale_product.pk] = result
+    return result
 
 
-def order_line_ingredient_cost(line):
+def order_line_ingredient_cost(
+        line, sale_product_cache=None, recipe_cache=None,
+        ingredient_cache=None):
     """Ingredient cost estimate for one OrderLine."""
     revenue = line.line_value or ZERO
     if line.sale_product_id is None:
@@ -167,7 +210,12 @@ def order_line_ingredient_cost(line):
             }],
         }
 
-    one = sale_product_ingredient_cost(line.sale_product)
+    one = sale_product_ingredient_cost(
+        line.sale_product,
+        cache=sale_product_cache,
+        recipe_cache=recipe_cache,
+        ingredient_cache=ingredient_cache,
+    )
     qty = line.qty_ordered or ZERO
     if one["blockers"]:
         return {
@@ -212,10 +260,18 @@ def range_margin_summary(dept, start_wc, end_wc):
     costed_lines = 0
     blockers = {}
     blocker_counts = {}
+    sale_product_cache = {}
+    recipe_cache = {}
+    ingredient_cache = {}
 
     for line in lines:
         line_count += 1
-        result = order_line_ingredient_cost(line)
+        result = order_line_ingredient_cost(
+            line,
+            sale_product_cache=sale_product_cache,
+            recipe_cache=recipe_cache,
+            ingredient_cache=ingredient_cache,
+        )
         revenue += result["revenue"]
         if result["blockers"]:
             for blocker in result["blockers"]:
