@@ -11,7 +11,6 @@ import {
   PieChart as PieIcon,
   ShieldAlert,
   Sparkles,
-  TrendingUp,
   Users,
 } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
@@ -22,10 +21,10 @@ import { fetchBusinessPerformance } from "./lib/api.js";
 import { gbp, pct, weekLongLabel } from "./lib/format.js";
 
 const PERIOD_OPTIONS = [
+  { key: "current", label: "Current", weeks: 1 },
   { key: "4w", label: "4w", weeks: 4 },
   { key: "8w", label: "8w", weeks: 8 },
   { key: "12w", label: "12w", weeks: 12 },
-  { key: "26w", label: "26w", weeks: 26 },
   { key: "all", label: "All", weeks: null },
 ];
 
@@ -45,7 +44,7 @@ function computeFromTo(periodKey, earliest, latest) {
 export default function BusinessPerformanceDashboard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [periodKey, setPeriodKey] = useState("8w");
+  const [periodKey, setPeriodKey] = useState("current");
   const [channel, setChannel] = useState("wholesale");
   const [request, setRequest] = useState({});
 
@@ -53,10 +52,25 @@ export default function BusinessPerformanceDashboard() {
     let cancelled = false;
     setError(null);
     fetchBusinessPerformance(request)
-      .then((d) => { if (!cancelled) setData(d); })
+      .then((d) => {
+        if (cancelled) return;
+        if (
+          periodKey === "current" &&
+          !request.from &&
+          !request.to &&
+          d?.period?.latest_imported
+        ) {
+          setRequest({
+            from: d.period.latest_imported,
+            to: d.period.latest_imported,
+          });
+          return;
+        }
+        setData(d);
+      })
       .catch((e) => !cancelled && setError(e.message || String(e)));
     return () => { cancelled = true; };
-  }, [request]);
+  }, [periodKey, request]);
 
   const selectPeriod = useCallback((key) => {
     if (key === periodKey) return;
@@ -70,7 +84,7 @@ export default function BusinessPerformanceDashboard() {
   }, [data, periodKey]);
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
       <main className="ml-64 min-h-screen">
         <div className="mx-auto max-w-[1760px] px-8 py-7">
@@ -83,13 +97,13 @@ export default function BusinessPerformanceDashboard() {
           />
 
           {error && (
-            <div className="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
               Failed to load business performance: {error}
             </div>
           )}
 
           {!data && !error && (
-            <div className="rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">
+            <div className="rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
               Loading business performance...
             </div>
           )}
@@ -104,38 +118,25 @@ export default function BusinessPerformanceDashboard() {
 function Header({ data, periodKey, onPeriod, channel, onChannel }) {
   const period = data?.period;
   return (
-    <header className="mb-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="max-w-3xl">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Commercial Performance
-          </div>
-          <h1 className="mt-2 font-display text-4xl font-semibold tracking-normal text-slate-950">
-            Business Performance
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Revenue, customer concentration, channel mix, and product performance
-            across the selected trading period.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
-              {period
-                ? `w/c ${weekLongLabel(period.from)} to w/c ${weekLongLabel(period.to)}`
-                : "Waiting for imported weeks"}
+    <header className="mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            {period
+              ? `w/c ${weekLongLabel(period.from)} to w/c ${weekLongLabel(period.to)}`
+              : "Waiting for imported weeks"}
+          </span>
+          {period && (
+            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {period.n_weeks} week{period.n_weeks === 1 ? "" : "s"}
             </span>
-            {period && (
-              <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
-                {period.n_weeks} week{period.n_weeks === 1 ? "" : "s"}
-              </span>
-            )}
-            {period?.prior_truncated && (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">
-                <AlertTriangle size={12} strokeWidth={2} />
-                Prior comparison limited
-              </span>
-            )}
-          </div>
+          )}
+          {period?.prior_truncated && (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <AlertTriangle size={12} strokeWidth={2} />
+              Prior comparison limited
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -143,7 +144,7 @@ function Header({ data, periodKey, onPeriod, channel, onChannel }) {
           <ChannelToggle value={channel} onSelect={onChannel} />
           <button
             type="button"
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white"
             title="Export workflow can be wired to the business-performance endpoint when available."
           >
             <Download size={15} strokeWidth={1.8} />
@@ -157,7 +158,7 @@ function Header({ data, periodKey, onPeriod, channel, onChannel }) {
 
 function PeriodPicker({ value, onSelect }) {
   return (
-    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       {PERIOD_OPTIONS.map((o) => {
         const active = o.key === value;
         return (
@@ -168,8 +169,8 @@ function PeriodPicker({ value, onSelect }) {
             className={
               "h-8 rounded-md px-3 text-sm font-medium transition " +
               (active
-                ? "bg-slate-950 text-white shadow-sm"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900")
+                ? "bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white")
             }
           >
             {o.label}
@@ -182,7 +183,7 @@ function PeriodPicker({ value, onSelect }) {
 
 function ChannelToggle({ value, onSelect }) {
   return (
-    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       {[
         { key: "wholesale", label: "Wholesale" },
         { key: "internal", label: "Internal" },
@@ -196,8 +197,8 @@ function ChannelToggle({ value, onSelect }) {
             className={
               "h-8 rounded-md px-3 text-sm font-medium transition " +
               (active
-                ? "bg-amber-100 text-amber-900"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900")
+                ? "bg-amber-100 text-amber-900 dark:bg-amber-400/15 dark:text-amber-200"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white")
             }
           >
             {o.label}
@@ -239,7 +240,7 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-500">
         <span>
           Business Performance for w/c {weekLongLabel(data.period.from)} to
           {" "}w/c {weekLongLabel(data.period.to)}
@@ -284,22 +285,22 @@ function KpiRow({ data, channel, concentration }) {
 
 function KpiTile({ icon: Icon, label, value, deltaPct, deltaPp, subline }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             {label}
           </div>
-          <div className="mt-2 truncate font-display text-2xl font-semibold tracking-normal text-slate-950">
+          <div className="mt-2 truncate font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">
             {value}
           </div>
         </div>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
           <Icon size={19} strokeWidth={1.8} />
         </div>
       </div>
       <div className="mt-4 flex min-h-6 items-center justify-between gap-3">
-        <span className="truncate text-xs text-slate-500">{subline}</span>
+        <span className="truncate text-xs text-slate-500 dark:text-slate-400">{subline}</span>
         {deltaPct !== undefined && deltaPct !== null ? (
           <DeltaPill value={deltaPct} suffix="%" />
         ) : deltaPp !== undefined && deltaPp !== null ? (
@@ -330,29 +331,29 @@ function DeltaPill({ value, suffix }) {
 function ConcentrationTile({ concentration, channel }) {
   const band = concentration?.band || "healthy";
   const bandStyle = {
-    healthy: { label: "Healthy", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-    watch: { label: "Watch", cls: "border-amber-200 bg-amber-50 text-amber-800" },
-    concentrated: { label: "Concentrated", cls: "border-rose-200 bg-rose-50 text-rose-700" },
+    healthy: { label: "Healthy", cls: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300" },
+    watch: { label: "Watch", cls: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" },
+    concentrated: { label: "Concentrated", cls: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300" },
   }[band];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             Concentration
           </div>
-          <div className="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950">
+          <div className="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">
             {pct(concentration?.top_5_pct)}
-            <span className="ml-1 text-xs font-medium text-slate-500">top 5</span>
+            <span className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400">top 5</span>
           </div>
         </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
           <ShieldAlert size={19} strokeWidth={1.8} />
         </div>
       </div>
       <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="truncate text-xs text-slate-500">
+        <span className="truncate text-xs text-slate-500 dark:text-slate-400">
           {channel === "wholesale" ? "Wholesale" : "Internal"} · top account:
           {" "}{concentration?.top_1_name || "none"}
         </span>
@@ -368,17 +369,17 @@ function ExecutiveSummary({ data, channel, concentration }) {
   const best = data.best_worst?.best_week;
   const worst = data.best_worst?.worst_week;
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="font-display text-base font-semibold text-slate-950">
+          <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
             Executive Summary
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Highest, lowest, and dependency signals for this period.
           </p>
         </div>
-        <BarChart3 size={18} strokeWidth={1.8} className="text-slate-400" />
+        <BarChart3 size={18} strokeWidth={1.8} className="text-slate-400 dark:text-slate-500" />
       </div>
 
       <div className="mt-5 space-y-3">
@@ -387,20 +388,20 @@ function ExecutiveSummary({ data, channel, concentration }) {
         <SummaryRow label="Spread" value={gbp(data.best_worst?.spread)} sub={`Variability ${data.best_worst?.variability_pct != null ? `+/-${Number(data.best_worst.variability_pct).toFixed(1)}%` : "--"}`} />
       </div>
 
-      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="font-medium text-slate-700">
+          <span className="font-medium text-slate-700 dark:text-slate-300">
             {channel === "wholesale" ? "Wholesale" : "Internal"} dependency
           </span>
-          <span className="font-semibold text-slate-950">{pct(concentration?.top_1_pct)}</span>
+          <span className="font-semibold text-slate-950 dark:text-slate-100">{pct(concentration?.top_1_pct)}</span>
         </div>
-        <div className="mt-2 h-2 rounded-full bg-slate-200">
+        <div className="mt-2 h-2 rounded-full bg-slate-200 dark:bg-slate-800">
           <div
             className="h-2 rounded-full bg-amber-500"
             style={{ width: `${Math.max(0, Math.min(100, Number(concentration?.top_1_pct) || 0))}%` }}
           />
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
           Top customer share: {concentration?.top_1_name || "none"}
         </p>
       </div>
@@ -410,14 +411,14 @@ function ExecutiveSummary({ data, channel, concentration }) {
 
 function SummaryRow({ label, value, sub }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
           {label}
         </div>
-        <div className="mt-1 text-xs text-slate-500">{sub}</div>
+        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sub}</div>
       </div>
-      <div className="font-display text-lg font-semibold text-slate-950">{value}</div>
+      <div className="font-display text-lg font-semibold text-slate-950 dark:text-slate-100">{value}</div>
     </div>
   );
 }
@@ -433,19 +434,19 @@ function WatchlistPanel({ customers, concentration, channel }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="font-display text-base font-semibold text-slate-950">
+          <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
             Risk & Watchlist
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {channel === "wholesale" ? "Wholesale" : "Internal"} customer signals.
           </p>
         </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800"
           title="More watchlist actions"
         >
           <ChevronDown size={15} strokeWidth={1.8} />
@@ -500,23 +501,23 @@ function WatchlistSection({ title, icon: Icon, tone, items, empty }) {
   }[tone] ?? "text-slate-600 bg-slate-100";
 
   return (
-    <div className="mt-4 border-t border-slate-200 pt-4">
+    <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
       <div className="flex items-center gap-2">
         <span className={`flex h-6 w-6 items-center justify-center rounded-md ${toneCls}`}>
           <Icon size={13} strokeWidth={2} />
         </span>
-        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
           {title}
         </span>
       </div>
       {items.length === 0 ? (
-        <div className="mt-3 text-sm text-slate-400">{empty}</div>
+        <div className="mt-3 text-sm text-slate-400 dark:text-slate-500">{empty}</div>
       ) : (
         <ul className="mt-3 space-y-2">
           {items.map((it, i) => (
             <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-3 text-sm">
-              <span className="min-w-0 truncate text-slate-700">{it.name}</span>
-              <span className="shrink-0 tabular text-xs font-semibold text-slate-950">{it.tail}</span>
+              <span className="min-w-0 truncate text-slate-700 dark:text-slate-300">{it.name}</span>
+              <span className="shrink-0 tabular text-xs font-semibold text-slate-950 dark:text-slate-100">{it.tail}</span>
             </li>
           ))}
         </ul>

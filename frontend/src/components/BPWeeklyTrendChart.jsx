@@ -28,25 +28,25 @@ export default function BPWeeklyTrendChart({ rows }) {
   }));
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5">
-            <h3 className="font-display text-base font-semibold text-slate-950">
+            <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
               Weekly Revenue Trend
             </h3>
             <span
               title="Ordered value by week. Stacked: wholesale on top of internal."
-              className="text-slate-400"
+              className="text-slate-400 dark:text-slate-500"
             >
               <Info size={12} strokeWidth={2} />
             </span>
           </div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Selected period, stacked by channel, ordered value in GBP.
           </div>
         </div>
-        <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+        <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
           Weekly
         </span>
       </div>
@@ -107,7 +107,7 @@ export default function BPWeeklyTrendChart({ rows }) {
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+      <div className="mt-3 flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-3 rounded-sm bg-wholesale" />
           Wholesale
@@ -126,25 +126,25 @@ function BPTrendTooltip({ active, payload }) {
   const row = payload[0]?.payload;
   if (!row) return null;
   return (
-    <div className="min-w-[180px] rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg">
-      <div className="mb-1.5 font-display font-semibold text-slate-950">w/c {row.label}</div>
+    <div className="min-w-[180px] rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-1.5 font-display font-semibold text-slate-950 dark:text-slate-100">w/c {row.label}</div>
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-slate-400">
           <span className="h-2 w-2 rounded-sm bg-wholesale" />
           Wholesale
         </span>
-        <span className="tabular text-slate-950">{gbp(row.wholesale)}</span>
+        <span className="tabular text-slate-950 dark:text-slate-100">{gbp(row.wholesale)}</span>
       </div>
       <div className="mt-1 flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-slate-400">
           <span className="h-2 w-2 rounded-sm bg-internal" />
           Internal
         </span>
-        <span className="tabular text-slate-950">{gbp(row.internal)}</span>
+        <span className="tabular text-slate-950 dark:text-slate-100">{gbp(row.internal)}</span>
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-3 border-t border-slate-200 pt-1.5">
-        <span className="font-display font-semibold text-slate-700">Total</span>
-        <span className="tabular font-semibold text-slate-950">{gbp(row.total)}</span>
+      <div className="mt-1.5 flex items-center justify-between gap-3 border-t border-slate-200 pt-1.5 dark:border-slate-800">
+        <span className="font-display font-semibold text-slate-700 dark:text-slate-300">Total</span>
+        <span className="tabular font-semibold text-slate-950 dark:text-slate-100">{gbp(row.total)}</span>
       </div>
     </div>
   );

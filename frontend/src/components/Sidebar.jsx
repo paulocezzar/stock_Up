@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   ScrollText,
@@ -10,6 +11,7 @@ import {
   Truck,
   Users,
   Moon,
+  Sun,
   LogOut,
 } from "lucide-react";
 
@@ -36,7 +38,7 @@ const NAV = [
 // preferring the bottom anchor. The footer block uses an inline
 // `marginTop:auto` to bottom-pin itself rather than relying on
 // `flex-1` on the nav.
-const ASIDE_STYLE = {
+const BASE_ASIDE_STYLE = {
   position: "fixed",
   top: 0,
   left: 0,
@@ -48,8 +50,6 @@ const ASIDE_STYLE = {
   alignItems: "stretch",
   justifyContent: "flex-start",
   overflow: "hidden",
-  background: "#ffffff",
-  borderRight: "1px solid rgb(226 232 240)",
   boxSizing: "border-box",
 };
 
@@ -66,18 +66,35 @@ const FOOTER_STYLE = { flex: "0 0 auto", marginTop: "auto" };
 export default function Sidebar() {
   if (typeof document === "undefined") return null;  // SSR safety; harmless here
   const path = window.location.pathname;
+  const [dark, setDark] = useState(() => {
+    const saved = window.localStorage.getItem("stockup-theme");
+    if (saved) return saved === "dark";
+    return document.documentElement.classList.contains("dark");
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    window.localStorage.setItem("stockup-theme", dark ? "dark" : "light");
+  }, [dark]);
+
+  const asideStyle = {
+    ...BASE_ASIDE_STYLE,
+    background: dark ? "#020617" : "#ffffff",
+    borderRight: dark ? "1px solid rgb(30 41 59)" : "1px solid rgb(226 232 240)",
+  };
+
   return createPortal(
-    <aside style={ASIDE_STYLE}>
-      <div style={HEADER_STYLE} className="border-b border-slate-200 px-5 py-5">
+    <aside style={asideStyle}>
+      <div style={HEADER_STYLE} className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">
             SU
           </div>
           <div>
-            <div className="font-display text-lg font-semibold tracking-normal text-slate-950">
+            <div className="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">
               StockUp
             </div>
-            <div className="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+            <div className="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
               Bakery
             </div>
           </div>
@@ -93,8 +110,8 @@ export default function Sidebar() {
             className={
               "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition " +
               (active
-                ? "bg-slate-950 text-white shadow-sm"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-950")
+                ? "bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100")
             }
           >
             {active && (
@@ -108,36 +125,44 @@ export default function Sidebar() {
           </a>
         );})}
       </nav>
-      <div style={FOOTER_STYLE} className="space-y-2 border-t border-slate-200 p-3">
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600">
+      <div style={FOOTER_STYLE} className="space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
           <span className="flex items-center gap-3">
-            <Moon size={15} strokeWidth={1.75} />
+            {dark ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
             Dark mode
           </span>
           <button
             type="button"
-            className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition"
-            title="Light mode not wired yet"
-            aria-label="Toggle theme (light mode coming soon)"
+            onClick={() => setDark((v) => !v)}
+            className={
+              "relative inline-flex h-5 w-9 items-center rounded-full transition " +
+              (dark ? "bg-amber-500" : "bg-slate-200")
+            }
+            title={dark ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+            aria-pressed={dark}
           >
             <span
               aria-hidden="true"
-              className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"
+              className={
+                "inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform " +
+                (dark ? "translate-x-[18px]" : "translate-x-1")
+              }
             />
           </button>
         </div>
         <a
           href="/logout/"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-slate-100"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-slate-100 dark:hover:bg-slate-900"
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">
             B
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-sm leading-tight text-slate-950">
+            <div className="truncate font-display text-sm leading-tight text-slate-950 dark:text-slate-100">
               Bakery account
             </div>
-            <div className="mt-0.5 truncate text-xs text-slate-500">
+            <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
               Sign out
             </div>
           </div>
