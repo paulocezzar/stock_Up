@@ -11227,14 +11227,14 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertEqual(margin["basis"], "ingredient_only")
         self.assertEqual(margin["coverage_pct"], "0.0")
         self.assertEqual(
-            margin["blocker_counts"]["missing_sale_product"], 6)
+            margin["blocker_counts"]["missing_sale_product"], 2)
 
     def test_default_period_clamps_to_imported_weeks(self):
         self.client.force_login(self.user)
         body = self.client.get(self.URL).json()
-        # Only 3 weeks imported (wc1..wc3) — period must clamp to that
-        # range rather than claim 8 weeks of which 5 are empty.
-        self.assertEqual(body["period"]["from"], self.wc1.isoformat())
+        # No params defaults to the latest imported/current week. Longer
+        # ranges are selected explicitly by the SPA period picker.
+        self.assertEqual(body["period"]["from"], self.wc3.isoformat())
         self.assertEqual(body["period"]["to"], self.wc3.isoformat())
         self.assertEqual(body["period"]["earliest_imported"], self.wc1.isoformat())
         self.assertEqual(body["period"]["latest_imported"], self.wc3.isoformat())

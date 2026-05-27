@@ -495,7 +495,7 @@ def business_performance_export_csv(request):
 # ---------------------------------------------------------------------------
 
 
-_DEFAULT_PERIOD_WEEKS = 8
+_DEFAULT_PERIOD_WEEKS = 1
 
 
 def _empty_bp_payload(from_wc, to_wc):
@@ -832,8 +832,7 @@ def business_performance_summary(request):
     Query string:
 
     * ``?from=YYYY-MM-DD`` — start Monday (snaps to Monday-of-week).
-      Defaults to ``latest_imported - 7 weeks`` (i.e. the last 8 weeks
-      ending at the most recent imported week).
+      Defaults to the latest imported week.
     * ``?to=YYYY-MM-DD`` — end Monday. Defaults to ``latest_imported``.
     * If ``from`` is before the earliest imported week it snaps up to
       it. If ``to`` is after the latest imported week it snaps down.
