@@ -21,11 +21,9 @@ Two modes, dispatched by presence of ``?week`` in the query string:
   shape this module shipped with so the older client keeps working
   while the SPA is being upgraded.
 
-Strict label discipline: the main dashboard figures are "ordered / demand",
-never revenue / sales / waste / margin. Business Performance additionally
-surfaces a clearly labelled ingredient-only margin estimate. The bakery's own
-consumption (``is_internal``) is already excluded by financials.py and never
-surfaces here.
+Strict label discipline: figures are "ordered / demand", never revenue /
+sales / waste / margin. The bakery's own consumption (``is_internal``)
+is already excluded by financials.py and never surfaces here.
 """
 import csv
 from datetime import date, timedelta
@@ -35,7 +33,6 @@ from django.http import HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .costing import range_margin_summary
 from .financials import (
     available_week_range, available_weeks,
     concentration_metrics, customer_dynamics,
@@ -569,19 +566,6 @@ def _empty_bp_payload(from_wc, to_wc):
             "top_5_share_pct": "0.0",
             "top_10_share_pct": "0.0",
         },
-        "margin": {
-            "basis": "ingredient_only",
-            "revenue": str(zero),
-            "costed_revenue": str(zero),
-            "estimated_ingredient_cost": str(zero),
-            "gross_profit": str(zero),
-            "gross_margin_pct": None,
-            "line_count": 0,
-            "costed_line_count": 0,
-            "coverage_pct": "0.0",
-            "blocker_counts": {},
-            "blockers": [],
-        },
         "current_week": None,
     }
 
@@ -687,25 +671,6 @@ def _bp_products_payload(matrix):
         "n_to_80pct": matrix["n_to_80pct"],
         "top_5_share_pct": str(matrix["top_5_share_pct"]),
         "top_10_share_pct": str(matrix["top_10_share_pct"]),
-    }
-
-
-def _bp_margin_payload(summary):
-    return {
-        "basis": summary["basis"],
-        "revenue": str(summary["revenue"]),
-        "costed_revenue": str(summary["costed_revenue"]),
-        "estimated_ingredient_cost": str(
-            summary["estimated_ingredient_cost"]),
-        "gross_profit": str(summary["gross_profit"]),
-        "gross_margin_pct": (
-            None if summary["gross_margin_pct"] is None
-            else str(summary["gross_margin_pct"])),
-        "line_count": summary["line_count"],
-        "costed_line_count": summary["costed_line_count"],
-        "coverage_pct": str(summary["coverage_pct"]),
-        "blocker_counts": summary["blocker_counts"],
-        "blockers": summary["blockers"],
     }
 
 
@@ -885,7 +850,6 @@ def business_performance_summary(request):
     internal_dyn = customer_dynamics(
         dept, Customer.INTERNAL, from_wc, to_wc)
     products = range_product_revenue(dept, from_wc, to_wc)
-    margin = range_margin_summary(dept, from_wc, to_wc)
 
     payload = {
         "period": {
@@ -929,7 +893,6 @@ def business_performance_summary(request):
             "internal": _bp_customers_payload(internal_dyn),
         },
         "products": _bp_products_payload(products),
-        "margin": _bp_margin_payload(margin),
     }
     payload["current_week"] = _bp_current_week_payload(
         dept,

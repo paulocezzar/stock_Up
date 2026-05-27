@@ -10,7 +10,6 @@ import {
   Package,
   LineChart,
   PieChart as PieIcon,
-  Scale,
   ShieldAlert,
   Sparkles,
   Users,
@@ -227,7 +226,6 @@ function Body({ data, channel }) {
     <>
       <KpiRow data={data} channel={channel} concentration={concentration} />
       <SignalStrip data={data} customers={customers} channel={channel} />
-      <MarginPanel margin={data.margin} />
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
@@ -348,65 +346,6 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
   );
 }
 
-function MarginPanel({ margin }) {
-  if (!margin) return null;
-  const blockers = Object.entries(margin.blocker_counts || {});
-  const totalBlockers = blockers.reduce((sum, [, count]) => sum + Number(count || 0), 0);
-  const coverage = Number(margin.coverage_pct) || 0;
-  const coverageTone = coverage >= 90 ? "positive" : coverage >= 60 ? "warning" : "neutral";
-
-  return (
-    <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-              <Scale size={17} strokeWidth={1.9} />
-            </span>
-            <div>
-              <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-                Ingredient Margin
-              </h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Ingredient-only estimate from linked products, recipes, and supplier prices.
-              </p>
-            </div>
-          </div>
-        </div>
-        <span className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          Packaging excluded
-        </span>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MiniSignal
-          label="Gross margin"
-          value={margin.gross_margin_pct == null ? "--" : pct(margin.gross_margin_pct)}
-          tone={margin.gross_margin_pct == null ? "neutral" : "positive"}
-        />
-        <MiniSignal label="Gross profit" value={gbp(margin.gross_profit)} />
-        <MiniSignal label="Ingredient cost" value={gbp(margin.estimated_ingredient_cost)} />
-        <MiniSignal label="Costed revenue" value={gbp(margin.costed_revenue)} />
-        <MiniSignal label="Coverage" value={pct(margin.coverage_pct)} tone={coverageTone} />
-      </div>
-
-      {totalBlockers > 0 && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          <div className="flex flex-wrap items-center gap-2">
-            <AlertTriangle size={15} strokeWidth={2} className="shrink-0" />
-            <span className="font-medium">
-              {totalBlockers} costing blocker{totalBlockers === 1 ? "" : "s"}
-            </span>
-            <span className="text-xs text-amber-800 dark:text-amber-200">
-              {blockers.map(([code, count]) => `${code.replaceAll("_", " ")}: ${count}`).join(" · ")}
-            </span>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function CurrentWeekPanel({ data }) {
   const projected = data.projected_total ? gbp(data.projected_total) : "Complete";
   const avg8 = data.avg_8w_total ? gbp(data.avg_8w_total) : "--";
@@ -474,9 +413,8 @@ function KpiRow({ data, channel, concentration }) {
   const t = data.totals;
   const cur = t.current;
   const delta = t.delta;
-  const margin = data.margin;
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <KpiTile
         icon={CircleDollarSign}
         label="Period Ordered"
@@ -497,12 +435,6 @@ function KpiRow({ data, channel, concentration }) {
         value={`${pct(cur.wholesale_pct)} wholesale`}
         deltaPp={delta?.wholesale_share_pp}
         subline={`${pct(cur.internal_pct)} internal · ${gbp(cur.wholesale)} / ${gbp(cur.internal)}`}
-      />
-      <KpiTile
-        icon={Scale}
-        label="Ingredient Margin"
-        value={margin?.gross_margin_pct == null ? "--" : pct(margin.gross_margin_pct)}
-        subline={`${gbp(margin?.gross_profit)} gross profit · ${pct(margin?.coverage_pct)} coverage`}
       />
       <ConcentrationTile concentration={concentration} channel={channel} />
     </div>
