@@ -1,0 +1,38 @@
+{% extends "stock/_section_stock.html" %}
+{% block n_prod %}on{% endblock %}
+{% block body %}
+<h2>Ingredients</h2>
+<div class="card"><h3>Add ingredient</h3>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Supplier</label>
+    <input type="text" name="supplier" list="suplist" placeholder="optional" style="width:150px">
+    <datalist id="suplist">{% for s in suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist></div>
+  <div class="field"><label>Code <span class="muted">(optional)</span></label><input type="text" name="code" placeholder="BAKE00123" style="width:120px"></div>
+  <div class="field"><label>Name *</label><input type="text" name="name" required placeholder="Caster Sugar" style="width:190px"></div>
+  <div class="field"><label>Pack size</label><input type="number" step="any" name="quantity" class="count" placeholder="25"></div>
+  <div class="field"><label>Pack unit</label><select name="unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="ea">each</option></select></div>
+  <div class="field"><label>Cost / pack (£)</label><input type="number" step="any" name="cost" class="count" placeholder="34.91"></div>
+  <div class="field"><label>Minimum</label><input type="number" step="any" name="minimum" class="count" value="0"></div>
+  <button class="btn" type="submit">Add</button>
+</form>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Supplier, quantity and cost are optional here — add or compare more suppliers later from the ingredient's page. £/1000 is worked out for you.</p></div>
+<div class="filter">
+  <input type="search" placeholder="filter by name or code…" data-filter="ingredients-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="ingredients-tbl">
+  <thead><tr><th>Ingredient</th><th>Cheapest</th><th class="num">£/1000</th><th class="num">Min</th><th></th><th></th></tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr data-search="{{ p.name|lower }} {{ p.code|default:''|lower }}">
+      <td><a href="{% url 'product_detail' p.pk %}">{{ p.name }}</a> <span class="muted">{{ p.code|default:"" }}</span></td>
+      <td>{% with c=p.cheapest_price %}{% if c %}{{ c.supplier.name }}{% else %}<span class="muted">no price</span>{% endif %}{% endwith %}</td>
+      <td class="num">{% with c=p.cheapest_price %}{% if c %}{{ c.per_1000|floatformat:2 }}{% else %}—{% endif %}{% endwith %}</td>
+      <td class="num">{{ p.minimum|floatformat:0 }}</td>
+      <td><a href="{% url 'product_detail' p.pk %}">edit prices →</a></td>
+      <td><form method="post" action="{% url 'product_delete' p.pk %}" style="display:inline" onsubmit="return confirm('Delete {{ p.name }}?')">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">delete</button></form></td>
+    </tr>
+  {% empty %}<tr><td colspan="5" class="muted">No ingredients yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

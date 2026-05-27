@@ -1,0 +1,127 @@
+{% extends "stock/_section_stock.html" %}{% load pack_format %}
+{% block n_prod %}on{% endblock %}
+{% block body %}
+<h2>{{ product.name }} <span class="muted" style="font-size:14px">{% if product.code %}{{ product.code }} · {% endif %}min {{ product.minimum|floatformat:0 }}{% with c=product.cheapest_price %}{% if c %} (×{{ c.pack_weight|pack_size:product.unit }}){% endif %}{% endwith %}</span></h2>
+
+<div class="card"><h3>Allergens</h3>
+{% if allergens_contains or allergens_may_contain %}
+  {% if allergens_contains %}<div style="margin:0 0 10px">
+    <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-right:10px">Contains</span>
+    {% for a in allergens_contains %}<span class="tag low" style="margin-right:6px">{{ a.name }}</span>{% endfor %}
+  </div>{% endif %}
+  {% if allergens_may_contain %}<div>
+    <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-right:10px">May contain</span>
+    {% for a in allergens_may_contain %}<span class="tag prov" style="margin-right:6px">{{ a.name }}</span>{% endfor %}
+    <span class="muted" style="font-size:11px;margin-left:6px">(cross-contamination risk)</span>
+  </div>{% endif %}
+{% else %}
+  <p class="muted" style="margin:0">No declared allergens.</p>
+{% endif %}
+</div>
+
+<div class="card"><h3>On hand (from batches)</h3>
+<p style="font-family:var(--disp);font-size:24px;font-weight:600;margin:0 0 12px">{{ product.on_hand_from_batches|floatformat:0 }} <span class="muted" style="font-size:13px;font-weight:400">packs across {{ batches|length }} batch{{ batches|length|pluralize:"es" }}</span></p>
+{% if batches %}
+<table>
+  <thead><tr><th>Batch</th><th>Delivery</th><th>Use-by</th><th class="num">Received</th><th class="num">Remaining</th></tr></thead>
+  <tbody>
+  {% for b in batches %}<tr>
+    <td>{{ b.batch_code|default:"—" }}{% if not b.has_supplier_price %} <span class="tag prov" title="No supplier price set for this ingredient with the delivery's supplier">no price</span>{% endif %}</td>
+    <td>{% if b.delivery %}{{ b.delivery.supplier.name }} · {{ b.delivery.date|date:"d M Y" }}{% else %}<span class="muted">manual</span>{% endif %}</td>
+    <td>{% if b.use_by %}{{ b.use_by|date:"d M Y" }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{{ b.qty_received|floatformat:0 }}</td>
+    <td class="num">{{ b.qty_remaining|floatformat:0 }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No batches recorded — log a delivery to start tracking.</p>{% endif %}
+</div>
+
+<div class="card"><h3>Supplier prices <span class="muted" style="font-size:11px">current</span></h3>
+<table>
+  <thead><tr><th>Supplier</th><th class="num">Pack size</th><th class="num">Pack price</th><th class="num">£/1000</th><th class="muted">since</th><th></th></tr></thead>
+  <tbody>
+  {% for pr in latest_prices %}
+    <tr>
+      <td>{{ pr.supplier.name }}{% if cheapest and pr.id == cheapest.id %} <span class="tag ok">cheapest</span>{% endif %}</td>
+      <td class="num">{{ pr.pack_weight|pack_size:product.unit }}</td>
+      <td class="num">£{{ pr.pack_price|floatformat:2 }}</td>
+      <td class="num">{{ pr.per_1000|floatformat:2 }}</td>
+      <td class="muted">{{ pr.effective_date|date:"d M Y" }}</td>
+      <td><form method="post" action="{% url 'price_delete' pr.id %}" style="display:inline">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">remove</button></form></td>
+    </tr>
+  {% empty %}<tr><td colspan="6" class="muted">No prices yet — add one below.</td></tr>{% endfor %}
+  </tbody>
+</table>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Supplier</label>
+    <input type="text" name="supplier" list="suplist" required placeholder="type or pick">
+    <datalist id="suplist">{% for s in suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist></div>
+  <div class="field"><label>Pack size</label><input type="number" step="any" name="pack_weight" class="count" required></div>
+  <div class="field"><label>Unit</label><select name="pack_unit">{% if product.unit == "g" %}<option value="g">g</option><option value="kg" selected>kg</option>{% elif product.unit == "ml" %}<option value="ml">ml</option><option value="L" selected>L</option>{% else %}<option value="ea">each</option>{% endif %}</select></div>
+  <div class="field"><label>Pack price (£)</label><input type="number" step="any" name="pack_price" class="count" required></div>
+  <button class="btn" type="submit">Save price</button>
+</form>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Saving a new price keeps the old one as history below — prices are dated, not overwritten.</p>
+</div>
+
+{% if price_history %}
+<div class="card"><h3>Price history</h3>
+<table style="margin:0">
+  <thead><tr><th>Supplier</th><th>Date</th><th class="num">Pack size</th><th class="num">Pack price</th><th class="num">vs prev</th></tr></thead>
+  <tbody>
+  {% for g in price_history %}{% for e in g.entries %}
+    <tr>
+      <td>{% if forloop.first %}<b>{{ g.supplier.name }}</b>{% else %}<span class="muted">{{ g.supplier.name }}</span>{% endif %}</td>
+      <td>{{ e.price.effective_date|date:"d M Y" }}{% if forloop.first %} <span class="tag ok" style="font-size:9px;padding:1px 5px">current</span>{% endif %}</td>
+      <td class="num">{{ e.price.pack_weight|pack_size:product.unit }}</td>
+      <td class="num">£{{ e.price.pack_price|floatformat:2 }}</td>
+      <td class="num">{% if e.delta_pct is not None %}{% if e.notable %}<span class="tag low" title="More than 10% change from the previous price">{% if e.delta_pct > 0 %}+{% endif %}{{ e.delta_pct }}%</span>{% else %}<span class="muted">{% if e.delta_pct > 0 %}+{% endif %}{{ e.delta_pct }}%</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<div class="card"><h3>Usage <span class="muted" style="font-size:11px">(rough estimate)</span></h3>
+{% if usage_rows %}
+<div class="stats" style="margin-bottom:14px">
+  <div class="stat"><div class="k">Avg per count</div><div class="v">{{ avg_weekly_usage|floatformat:1 }} <span class="muted" style="font-size:13px;font-weight:400">packs</span></div></div>
+  <div class="stat"><div class="k">Days of cover</div><div class="v">{% if days_of_cover is not None %}~{{ days_of_cover }}{% else %}—{% endif %}</div></div>
+  <div class="stat"><div class="k">On hand</div><div class="v">{{ on_hand|floatformat:0 }} <span class="muted" style="font-size:13px;font-weight:400">packs</span></div></div>
+</div>
+<table>
+  <thead><tr><th>Between</th><th class="num">Days</th><th class="num">Previous</th><th class="num">Delivered</th><th class="num">Adjustments</th><th class="num">This count</th><th class="num">Usage</th></tr></thead>
+  <tbody>
+  {% for r in usage_rows %}<tr>
+    <td>{{ r.previous.date|date:"d M" }} → {{ r.stocktake.date|date:"d M Y" }}</td>
+    <td class="num">{{ r.days }}</td>
+    <td class="num">{{ r.previous_current|floatformat:0 }}</td>
+    <td class="num">{% if r.delivered %}+{{ r.delivered|floatformat:0 }}{% else %}—{% endif %}</td>
+    <td class="num">{% if r.adjustments %}{% if r.adjustments > 0 %}+{% endif %}{{ r.adjustments|floatformat:0 }}{% else %}—{% endif %}</td>
+    <td class="num">{{ r.current|floatformat:0 }}</td>
+    <td class="num">{{ r.usage|floatformat:0 }}{% if r.clamped %} <span class="tag prov" title="Raw figure was negative — likely an unlogged delivery or miscount; clamped to 0">clamped</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">Not enough data yet — need at least two counts for this ingredient to estimate usage.</p>{% endif %}
+</div>
+
+<div class="card"><h3>Count history</h3>
+{% if history %}
+<table>
+  <thead><tr><th>Stocktake</th><th class="num">On hand</th><th class="num">Min</th><th></th></tr></thead>
+  <tbody>
+  {% for l in history %}<tr>
+    <td>{{ l.stocktake.date|date:"d M Y" }}</td>
+    <td class="num">{{ l.current|floatformat:0 }}</td>
+    <td class="num">{{ product.minimum|floatformat:0 }}</td>
+    <td>{% if l.needed %}<span class="tag low">was low</span>{% else %}<span class="tag ok">ok</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No counts recorded yet.</p>{% endif %}
+</div>
+<p><a href="{% url 'products' %}">← all ingredients</a> &nbsp;·&nbsp; <form method="post" action="{% url 'product_delete' product.pk %}" style="display:inline" onsubmit="return confirm('Delete {{ product.name }}?')">{% csrf_token %}<button class="btn ghost" style="padding:4px 12px">delete ingredient</button></form></p>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "stock/_section_stock.html" %}{% load humanize %}
+{% block n_st %}on{% endblock %}
+{% block body %}
+<h2>Stocktakes</h2>
+<div class="card"><h3>Start a new weekly count</h3>
+{% if has_products %}
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Counted by (optional)</label><input type="text" name="completed_by" placeholder="your name"></div>
+  <button class="btn" type="submit">Start count for today</button>
+</form>
+{% else %}<p class="muted">Add some ingredients first, then you can start a count.</p>{% endif %}
+</div>
+<table>
+  <thead><tr><th>Date</th><th>Counted by</th><th class="num">Items counted</th><th class="num">Value</th><th></th></tr></thead>
+  <tbody>
+  {% for st in stocktakes %}<tr>
+    <td>{{ st.date|date:"d M Y" }}</td>
+    <td>{{ st.completed_by|default:"—" }}</td>
+    <td class="num">{{ st.counted }}</td>
+    <td class="num">£{{ st.total_value|floatformat:2|intcomma }}</td>
+    <td><a href="{% url 'count' st.pk %}">open →</a></td>
+  </tr>{% empty %}<tr><td colspan="5" class="muted">No stocktakes yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

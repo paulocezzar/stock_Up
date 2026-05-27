@@ -1,0 +1,33 @@
+{% extends "stock/_section_stock.html" %}{% load humanize %}
+{% block n_st %}on{% endblock %}
+{% block body %}
+<h2>Count — {{ st.date|date:"d M Y" }}</h2>
+<p style="margin:-6px 0 14px"><a class="btn" href="{% url 'stocktake_csv' st.pk %}">Download CSV</a></p>
+<p class="muted">Type a number and tab out; each line saves itself.</p>
+<div class="filter">
+  <input type="search" placeholder="filter by name or code…" data-filter="count-tbl" autocomplete="off">
+  <span class="count-out"></span>
+</div>
+<table id="count-tbl">
+  <thead><tr><th>Ingredient</th><th class="num">Min</th><th class="num">Count</th><th></th></tr></thead>
+  <tbody>
+  {% for line in lines %}<tr data-search="{{ line.product.name|lower }} {{ line.product.code|default:''|lower }}">
+    <td>{{ line.product.name }} <span class="muted">{{ line.product.code|default:"" }}</span></td>
+    <td class="num">{{ line.product.minimum|floatformat:0 }}</td>
+    <td class="num"><input type="number" step="any" inputmode="decimal" name="current"
+        class="count{% if line.carried_over %} provisional{% endif %}"
+        value="{{ line.current|default_if_none:'' }}"
+        onchange="this.classList.remove('provisional')"
+        hx-post="{% url 'save_count' line.id %}" hx-trigger="change"
+        hx-target="#s-{{ line.id }}" hx-swap="innerHTML"></td>
+    <td id="s-{{ line.id }}">{% include "stock/_line_status.html" %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+<p style="margin:-14px 0 18px;font-family:var(--disp);font-size:15px">
+  <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Total stock value</span>
+  &nbsp;<b>£{{ total_value|floatformat:2|intcomma }}</b>
+  <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">(counted lines only)</span>
+</p>
+<p><a href="{% url 'stocktakes' %}">← all stocktakes</a> &nbsp;·&nbsp; <a href="{% url 'dashboard' %}">dashboard →</a></p>
+{% endblock %}

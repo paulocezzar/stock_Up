@@ -1,0 +1,103 @@
+{% extends "stock/_section_orders.html" %}
+{% block body %}
+<h2>Order
+  <span class="muted" style="font-size:14px">{{ order.customer.name }} · {{ order.order_date|date:"d M Y" }}</span>
+</h2>
+
+<p style="margin:-8px 0 14px">
+  <a href="{% url 'order_edit' order.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  &nbsp;
+  <form method="post" action="{% url 'order_delete' order.pk %}" style="display:inline"
+        onsubmit="return confirm('Delete this order? This can\'t be undone.')">{% csrf_token %}
+    <button class="btn ghost" style="padding:4px 12px">delete</button>
+  </form>
+</p>
+
+<div class="card"><h3>Details</h3>
+<dl style="display:grid;grid-template-columns:max-content 1fr;column-gap:14px;row-gap:6px;margin:0">
+  <dt class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Customer</dt>
+  <dd style="margin:0"><a href="{% url 'customer_detail' order.customer.pk %}">{{ order.customer.name }}</a></dd>
+  <dt class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Order date</dt>
+  <dd style="margin:0">{{ order.order_date|date:"d M Y" }}</dd>
+  {% if order.note %}
+    <dt class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Note</dt>
+    <dd style="margin:0">{{ order.note }}</dd>
+  {% endif %}
+  <dt class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Department</dt>
+  <dd style="margin:0">{{ order.department.name|default:"—" }}</dd>
+</dl>
+</div>
+
+<div class="card"><h3>Lines <span class="muted" style="font-size:11px">({{ lines|length }})</span></h3>
+{% if lines %}
+<table>
+  <thead><tr>
+    <th>Product</th>
+    <th class="num">Qty ordered</th>
+    <th class="num">Unit price</th>
+    <th class="num">Line value</th>
+  </tr></thead>
+  <tbody>
+  {% for line in lines %}
+    <tr>
+      <td>{% if line.sale_product %}<a href="{% url 'sale_product_detail' line.sale_product.pk %}">{{ line.display_name }}</a>{% if line.sale_product.pack_size %} <span class="muted" style="font-size:11px">· {{ line.sale_product.pack_size }}</span>{% endif %}{% else %}<span class="muted" title="discontinued / not in current catalogue">{{ line.display_name }}</span>{% endif %}
+      </td>
+      <td class="num">{{ line.qty_ordered|floatformat:"-3" }}</td>
+      <td class="num">{% if line.unit_price is not None %}£{{ line.unit_price }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if line.line_value is not None %}£{{ line.line_value }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr>
+    <td colspan="3" class="num" style="border-top:2px solid var(--line)"><strong>Total</strong></td>
+    <td class="num" style="border-top:2px solid var(--line)"><strong>£{{ total_value }}</strong></td>
+  </tr></tfoot>
+</table>
+{% else %}
+<p class="muted">No lines on this order yet. <a href="{% url 'order_edit' order.pk %}">Edit to add some</a>.</p>
+{% endif %}
+</div>
+
+{% if resolved %}
+<div class="card"><h3>Resolved consumption <span class="muted" style="font-size:11px">recipe load this order implies (preview)</span></h3>
+<table>
+  <thead><tr>
+    <th>Product</th>
+    <th class="num">Qty</th>
+    <th>Resolves to</th>
+    <th class="num">Total at recipe</th>
+  </tr></thead>
+  <tbody>
+  {% for r in resolved %}
+    <tr>
+      <td>{% if r.sale_product %}{{ r.sale_product.name }}{% else %}<span class="muted">{{ r.line.display_name }}</span>{% endif %}</td>
+      <td class="num">{{ r.line.qty_ordered|floatformat:"-3" }}</td>
+      <td>
+        {% if r.recipe %}
+          <a href="{% url 'recipe_detail' r.recipe.pk %}"><code>{{ r.recipe.code }}</code> — {{ r.recipe.name }}</a>
+        {% elif r.error %}
+          <span class="muted">— cycle: {{ r.error }} —</span>
+        {% elif not r.sale_product %}
+          <span class="muted">— discontinued / no catalogue product —</span>
+        {% else %}
+          <span class="muted">— not linked to a recipe —</span>
+        {% endif %}
+      </td>
+      <td class="num">
+        {% if r.total_quantity is not None %}
+          {{ r.total_quantity|floatformat:"-3" }}
+          {% if r.unit == 'count' %}units{% elif r.unit == 'weight_kg' %}kg{% elif r.unit == 'weight_g' %}g{% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="font-size:11px;margin:10px 0 0">This is the recipe-side load each line implies — the input the later production / ingredient consumption maths consumes. No ingredient maths is done here yet.</p>
+</div>
+{% endif %}
+
+<p><a href="{% url 'orders' %}">← all orders</a></p>
+{% endblock %}

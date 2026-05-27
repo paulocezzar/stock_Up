@@ -1,0 +1,185 @@
+{% extends "stock/_section_products.html" %}
+{% block n_sp_review %}on{% endblock %}
+{% block body %}
+<style>
+  .link-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;display:inline-block;margin-left:6px;vertical-align:middle}
+  .link-tag.sage{color:var(--green);border-color:var(--green)}
+  .link-tag.name{color:var(--amber);border-color:var(--amber)}
+  .link-tag.manual{color:var(--amber);border-color:var(--amber);border-style:dashed}
+  .link-tag.none{color:var(--red);border-color:var(--red)}
+  .role-tag{font-family:var(--disp);font-size:9px;letter-spacing:.5px;text-transform:uppercase;
+    padding:1px 6px;border:1px solid;display:inline-block;margin-left:4px;vertical-align:middle}
+  .role-tag.sold{color:var(--amber);border-color:var(--amber)}
+  .role-tag.component{color:var(--muted);border-color:var(--muted)}
+  .link-row{display:grid;grid-template-columns:1fr 24px 2fr;column-gap:14px;align-items:start;
+    padding:10px 0;border-bottom:1px solid var(--line)}
+  .link-row:last-child{border-bottom:0}
+  .link-row .arrow{color:var(--muted);text-align:center;font-size:18px;line-height:1.3}
+  .link-row .product-side .name{font-weight:600}
+  .link-row .product-side .meta{font-size:11px;color:var(--muted);margin-top:2px}
+  .link-row .product-side .auto-hint{font-size:11px;color:var(--muted);margin-top:6px}
+  .link-row .recipe-side .sugg{display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap}
+  .link-row .recipe-side .pct{font-size:10px;color:var(--muted);min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+  .link-row .recipe-side .sugg .grow{flex:1;min-width:0}
+  .link-row .recipe-side form{display:inline}
+  .link-row .recipe-side .other-pick{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .link-row .recipe-side .other-pick select{flex:1;min-width:240px;max-width:380px}
+</style>
+
+<h2>Link review
+  <span class="muted" style="font-size:14px">
+    {{ n_unresolved }} product{{ n_unresolved|pluralize }} still to review
+  </span>
+</h2>
+
+<p class="muted" style="margin:-8px 0 14px;font-size:13px">
+  Products are matched first by Sage No., then by exact name. Anything below isn't confirmed yet — pick a suggestion or use the searchable dropdown. Each candidate is labelled <span class="role-tag sold">sold</span> (a sellable recipe) or <span class="role-tag component">component</span> (used as a sub-recipe somewhere — usually an internal helper), so you can spot the customer-facing one. Confirming a link sets a manual link the importer will never override — the product then drops off this list.
+</p>
+
+{% if n_sage_unconfirmed %}
+<div class="card">
+  <h3>Bulk action</h3>
+  <p style="margin:0">
+    <form method="post" action="{% url 'sale_product_confirm_sage' %}" style="display:inline"
+          onsubmit="return confirm('Mark every Sage-matched link as manually-confirmed so future re-imports leave them alone?')">{% csrf_token %}
+      <button class="btn" type="submit" style="padding:4px 12px">Confirm all {{ n_sage_unconfirmed }} Sage match{{ n_sage_unconfirmed|pluralize:",es" }}</button>
+    </form>
+    <span class="muted" style="font-size:12px;margin-left:10px">Promotes each Sage-auto-linked product to a manual link so it survives even if the Sage code later changes.</span>
+  </p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Needs review {% if n_unresolved %}<span class="muted" style="font-size:11px">({{ n_unresolved }} unresolved)</span>{% endif %}</h3>
+  {% if unresolved %}
+    {% for row in unresolved %}
+      <div class="link-row">
+        <div class="product-side">
+          <div class="name"><a href="{% url 'sale_product_detail' row.product.pk %}">{{ row.product.name }}</a></div>
+          <div class="meta">
+            {% if row.product.price is not None %}£{{ row.product.price }}{% endif %}
+            {% if row.product.pack_size %} · {{ row.product.pack_size }}{% endif %}
+            {% if row.product.sage_number %} · Sage <code>{{ row.product.sage_number }}</code>{% endif %}
+          </div>
+          {% if row.product.recipe %}
+            <div class="auto-hint">
+              Auto-matched to <a href="{% url 'recipe_detail' row.product.recipe.pk %}"><code>{{ row.product.recipe.code }}</code> {{ row.product.recipe.name }}</a>
+              {% if row.product.link_source == 'sage' %}<span class="link-tag sage">by Sage</span>{% elif row.product.link_source == 'name' %}<span class="link-tag name">by name</span>{% endif %}
+              — confirm below to lock it in.
+            </div>
+          {% endif %}
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="recipe-side">
+          {% if row.product.recipe %}
+            <div class="sugg">
+              <span class="pct" title="Auto-matched">●</span>
+              <code>{{ row.product.recipe.code }}</code>
+              <span class="grow">{{ row.product.recipe.name }}
+                {% if row.product.recipe.sold_as_product %}<span class="role-tag sold">sold</span>{% endif %}
+                {% if row.product.recipe.is_used_as_component %}<span class="role-tag component">component</span>{% endif %}
+              </span>
+              <form method="post" action="{% url 'sale_product_link_set' row.product.pk %}">{% csrf_token %}
+                <input type="hidden" name="recipe_id" value="{{ row.product.recipe.pk }}">
+                <input type="hidden" name="next" value="{% url 'sale_product_link_review' %}">
+                <button class="btn" type="submit" style="padding:3px 12px;font-size:11px">confirm</button>
+              </form>
+            </div>
+          {% endif %}
+          {% if row.suggestions %}
+            {% for s in row.suggestions %}
+              <div class="sugg">
+                <span class="pct">{{ s.percent }}%</span>
+                <code>{{ s.recipe.code }}</code>
+                <span class="grow">{{ s.recipe.name }}
+                  {% if s.is_sold %}<span class="role-tag sold">sold</span>{% endif %}
+                  {% if s.is_component %}<span class="role-tag component">component</span>{% endif %}
+                </span>
+                <form method="post" action="{% url 'sale_product_link_set' row.product.pk %}">{% csrf_token %}
+                  <input type="hidden" name="recipe_id" value="{{ s.recipe.pk }}">
+                  <input type="hidden" name="next" value="{% url 'sale_product_link_review' %}">
+                  <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">confirm</button>
+                </form>
+              </div>
+            {% endfor %}
+          {% elif not row.product.recipe %}
+            <p class="muted" style="margin:0 0 4px">No close-enough name matches.</p>
+          {% endif %}
+          <form method="post" action="{% url 'sale_product_link_set' row.product.pk %}"
+                class="other-pick lr-pick" data-row="{{ row.product.pk }}">{% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'sale_product_link_review' %}">
+            <input type="hidden" name="link_target_type" value="recipe" class="lr-target-type">
+            <select class="lr-target-switch" aria-label="Link target type"
+                    style="width:auto;padding:3px 8px;font-size:11px">
+              <option value="recipe">recipe</option>
+              <option value="product">product</option>
+            </select>
+            <div class="recipe-picker lr-target-recipe" data-seed="{{ row.product.name }}">
+              <input type="text" class="rcp-search" autocomplete="off"
+                     placeholder="search recipes…"
+                     aria-label="Search recipes for {{ row.product.code }}">
+              <input type="hidden" class="rcp-id" name="recipe_id" value="">
+              <div class="rcp-list" hidden role="listbox"></div>
+            </div>
+            <div class="recipe-picker lr-target-product" data-source="product-picker-data"
+                 data-seed="{{ row.product.name }}" style="display:none">
+              <input type="text" class="rcp-search" autocomplete="off"
+                     placeholder="search products…"
+                     aria-label="Search products for {{ row.product.code }}">
+              <input type="hidden" class="rcp-id" name="product_id" value="">
+              <div class="rcp-list" hidden role="listbox"></div>
+            </div>
+            <input type="text" name="link_quantity" value="1" inputmode="decimal"
+                   style="width:64px;padding:3px 6px;font-size:11px"
+                   aria-label="Quantity">
+            <select name="link_unit"
+                    style="width:auto;padding:3px 6px;font-size:11px"
+                    aria-label="Unit">
+              {% for value, label in link_unit_choices %}
+                <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn" type="submit" style="padding:3px 12px;font-size:11px">link</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">Nothing to review. Every product's link is confirmed.</p>
+  {% endif %}
+</div>
+
+<p class="muted" style="font-size:12px;margin:14px 0 0">
+  Confirmed products live on the <a href="{% url 'sale_products' %}">Products list</a> — that's where to go to edit or re-link them later. Re-imports leave manual links untouched, so a confirmed pick survives every deploy.
+</p>
+
+{{ recipe_picker_payload|json_script:"recipe-picker-data" }}
+{{ product_picker_payload|json_script:"product-picker-data" }}
+{% include "stock/_recipe_picker_assets.html" %}
+<script>
+(function(){
+  // Per-row target switch: flips the hidden link_target_type and
+  // shows/hides the corresponding picker. Sage / name suggestions
+  // still POST recipe_id only (defaulting target_type=recipe is the
+  // back-compat path), so the simple one-click confirm is unaffected.
+  document.querySelectorAll('form.lr-pick').forEach(function(form){
+    var sw = form.querySelector('.lr-target-switch');
+    var tt = form.querySelector('.lr-target-type');
+    var rPick = form.querySelector('.lr-target-recipe');
+    var pPick = form.querySelector('.lr-target-product');
+    if(!sw) return;
+    function apply(){
+      tt.value = sw.value;
+      if(sw.value === 'recipe'){
+        rPick.style.display = ''; pPick.style.display = 'none';
+      } else {
+        rPick.style.display = 'none'; pPick.style.display = '';
+      }
+    }
+    sw.addEventListener('change', apply);
+    apply();
+  });
+})();
+</script>
+{% endblock %}

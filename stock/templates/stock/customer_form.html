@@ -1,0 +1,57 @@
+{% extends "stock/_section_customers.html" %}
+{% block n_cust_internal %}{% if mode == "new" and default_type == "internal" or customer.customer_type == "internal" %}on{% endif %}{% endblock %}
+{% block n_cust_wholesale %}{% if mode == "new" and default_type == "wholesale" or customer.customer_type == "wholesale" %}on{% endif %}{% endblock %}
+{% block body %}
+<h2>{% if mode == "edit" %}Edit customer{% else %}Add customer{% endif %}
+  {% if mode == "edit" %}<span class="muted" style="font-size:14px">{{ customer.name }}</span>{% endif %}
+</h2>
+
+<form method="post">{% csrf_token %}
+<div class="card"><h3>{% if mode == "edit" %}Details{% else %}New customer details{% endif %}</h3>
+  <div class="row">
+    <div class="field"><label>Name *</label>
+      <input type="text" name="name" value="{{ form.name }}" required
+             autofocus placeholder="e.g. GARDEN CAFE" style="width:280px"></div>
+    <div class="field"><label>Type *</label>
+      <select name="customer_type" aria-label="Customer type">
+        {% for value, label in type_choices %}
+          <option value="{{ value }}" {% if form.customer_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="field"><label>Location</label>
+      <input type="text" name="location" value="{{ form.location }}"
+             placeholder="e.g. Estate" style="width:260px"></div>
+    <div class="field"><label>Ordered by</label>
+      <input type="text" name="ordered_by" value="{{ form.ordered_by }}"
+             placeholder="contact name" style="width:260px"></div>
+  </div>
+  {% if mode == "edit" %}
+  <div class="row" style="margin-top:10px">
+    <div class="field" style="max-width:560px">
+      <label style="display:flex;gap:8px;align-items:center;font-weight:400">
+        <input type="checkbox" name="is_internal"
+               {% if form.is_internal %}checked{% endif %}>
+        <span><strong>Internal use / non-revenue</strong>
+          <span class="muted" style="font-size:12px">
+            — bakery's own consumption or wastage. Still listed with its
+            own orders + value, but excluded from the Week revenue total.
+          </span>
+        </span>
+      </label>
+    </div>
+  </div>
+  {% endif %}
+</div>
+<p>
+  <button class="btn" type="submit">{% if mode == "edit" %}Save changes{% else %}Create customer{% endif %}</button>
+  &nbsp;<a href="{% if customer %}{% url 'customer_detail' customer.pk %}{% elif default_type == 'wholesale' %}{% url 'customers_wholesale' %}{% else %}{% url 'customers' %}{% endif %}" class="muted">cancel</a>
+</p>
+</form>
+
+<p class="muted" style="font-size:12px;margin:14px 0 0">
+  {% if mode == "new" %}Hand-created customers are flagged so the order-sheet importer never touches them on subsequent deploys.{% else %}Saving an edit locks every field on this customer against the next import — re-imports won't overwrite your changes.{% endif %}
+</p>
+{% endblock %}

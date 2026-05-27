@@ -1,0 +1,10 @@
+sage,price,note
+# Committed price overlay for items whose price was dropped from newer
+# order-sheet Products tabs. Only consulted when the current week's
+# Products tab has no price for the SKU. Sheet-authoritative: anything
+# in the Products tab wins over this file. Add/remove rows freely.
+660130120,3.30,Loaf Seeded Rye 650g
+660130078,2.30,Wholewheat Sourdough
+660130101,5.50,TN Cake Carrot Walnut 600g
+660130121,5.50,Cake Somerset Apple 550g
+660130107,2.80,Choc Brownie Bag 150g

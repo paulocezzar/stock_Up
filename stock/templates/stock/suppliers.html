@@ -1,0 +1,17 @@
+{% extends "stock/_section_stock.html" %}
+{% block n_sup %}on{% endblock %}
+{% block body %}
+<h2>Suppliers</h2>
+<div class="card"><h3>Add supplier</h3>
+<form method="post" class="row">{% csrf_token %}
+  <div class="field"><label>Name</label><input type="text" name="name" required placeholder="e.g. Wellocks"></div>
+  <button class="btn" type="submit">Add</button>
+</form></div>
+<table>
+  <thead><tr><th>Supplier</th><th class="num">Priced ingredients</th><th></th></tr></thead>
+  <tbody>
+  {% for s in suppliers %}<tr><td>{{ s.name }}</td><td class="num">{{ s.n }}</td><td><form method="post" action="{% url 'supplier_delete' s.id %}" style="display:inline" onsubmit="return confirm('Delete {{ s.name }}? Its prices will be removed too.')">{% csrf_token %}<button class="btn ghost" style="padding:4px 10px">delete</button></form></td></tr>
+  {% empty %}<tr><td colspan="3" class="muted">None yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

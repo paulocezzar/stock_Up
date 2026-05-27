@@ -1,0 +1,94 @@
+{% extends "stock/_section_stock.html" %}{% load humanize pack_format %}
+{% block n_reorder %}on{% endblock %}
+{% block body %}
+<h2>Reorder list <span class="muted" style="font-size:14px">{{ dept.name }}</span></h2>
+{% if rows %}
+<form method="post" action="{% url 'reorder_csv' %}">{% csrf_token %}
+<p style="margin:-6px 0 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+  <button class="btn" type="submit">Download CSV</button>
+  <span class="muted">Estimated total: <b id="grand-total" style="color:var(--ink)">£{{ total|floatformat:2|intcomma }}</b></span>
+  <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">edit any quantity — total and CSV update</span>
+</p>
+
+<div class="card" style="padding:0">
+<table id="reorder-tbl" style="margin:0;table-layout:fixed">
+  <colgroup>
+    <col>
+    <col style="width:80px">
+    <col style="width:70px">
+    <col style="width:150px">
+    <col style="width:90px">
+    <col style="width:110px">
+  </colgroup>
+  <thead><tr>
+    <th>Ingredient</th>
+    <th class="num">On hand</th>
+    <th class="num">Min</th>
+    <th class="num">Order qty</th>
+    <th class="num">Pack £</th>
+    <th class="num">Est. cost</th>
+  </tr></thead>
+  {% for supplier, items in groups.items %}
+  <tbody>
+    <tr class="sup-row"><td colspan="6">{{ supplier }}</td></tr>
+    {% for r in items %}
+    <tr data-row="{{ r.product.pk }}" data-pack-price="{{ r.pack_price|default:0 }}">
+      <td><a href="{% url 'product_detail' r.product.pk %}">{{ r.product.name }}</a> <span class="muted">{{ r.product.code|default:"" }}</span></td>
+      <td class="num">{{ r.current|floatformat:0 }}</td>
+      <td class="num">{{ r.minimum|floatformat:0 }}</td>
+      <td class="num">
+        <input type="number" step="any" inputmode="decimal" min="0"
+               name="qty_{{ r.product.pk }}"
+               value="{{ r.order_qty|floatformat:0 }}"
+               class="count qty-input">
+        {% if r.pack_weight %}<div class="muted" style="font-size:11px;margin-top:2px">×{{ r.pack_weight|pack_size:r.product.unit }}</div>{% endif %}
+      </td>
+      <td class="num">{% if r.pack_price %}£{{ r.pack_price|floatformat:2 }}{% else %}—{% endif %}</td>
+      <td class="num est-cost">{% if r.est_cost %}£{{ r.est_cost|floatformat:2 }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  {% endfor %}
+</table>
+</div>
+</form>
+
+<style>
+  #reorder-tbl tr.sup-row td{
+    background:var(--panel2);
+    font-family:var(--disp);font-size:12px;text-transform:uppercase;letter-spacing:1px;
+    color:var(--muted);
+    border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);
+    padding:10px 14px;
+  }
+  #reorder-tbl tbody:first-of-type tr.sup-row td{border-top:none}
+  #reorder-tbl .qty-input{width:90px;text-align:right}
+</style>
+<script>
+(function(){
+  var tbl=document.getElementById('reorder-tbl');
+  var total=document.getElementById('grand-total');
+  function fmt(n){return '£'+n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+  function recompute(){
+    var sum=0;
+    tbl.querySelectorAll('tr[data-row]').forEach(function(tr){
+      var price=parseFloat(tr.dataset.packPrice)||0;
+      var q=parseFloat(tr.querySelector('.qty-input').value)||0;
+      var cell=tr.querySelector('.est-cost');
+      if(price>0){var c=q*price;cell.textContent=fmt(c);sum+=c;}
+      else{cell.textContent='—';}
+    });
+    total.textContent=fmt(sum);
+  }
+  tbl.addEventListener('input',function(e){
+    if(e.target&&e.target.classList.contains('qty-input'))recompute();
+  });
+})();
+</script>
+{% else %}
+<div class="card"><h3>Nothing to reorder</h3>
+<p class="muted">Every counted ingredient is at or above its minimum. Run a
+<a href="{% url 'stocktakes' %}">stocktake</a> to update what's on hand.</p></div>
+{% endif %}
+{% endblock %}

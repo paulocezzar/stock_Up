@@ -1,0 +1,36 @@
+{% extends "stock/_section_stock.html" %}
+{% block n_deliv %}on{% endblock %}
+{% block body %}
+<h2>{{ delivery.supplier.name }} <span class="muted" style="font-size:14px">· {{ delivery.date|date:"d M Y" }}</span></h2>
+
+<div class="stats">
+  <div class="stat"><div class="k">Date</div><div class="v" style="font-size:15px">{{ delivery.date|date:"d M Y" }}</div></div>
+  <div class="stat"><div class="k">Supplier</div><div class="v" style="font-size:15px">{{ delivery.supplier.name }}</div></div>
+  <div class="stat"><div class="k">Lines</div><div class="v">{{ n_lines }}</div></div>
+  <div class="stat"><div class="k">Packs in</div><div class="v">{{ total_packs|floatformat:0 }}</div></div>
+</div>
+
+{% if delivery.note %}
+<div class="card"><h3>Note</h3>
+<p style="margin:0">{{ delivery.note }}</p></div>
+{% endif %}
+
+<div class="card"><h3>Batches</h3>
+{% if batches %}
+<table style="margin:0">
+  <thead><tr><th>Ingredient</th><th class="num">Received</th><th>Batch</th><th>Use-by</th><th></th></tr></thead>
+  <tbody>
+  {% for b in batches %}<tr>
+    <td><a href="{% url 'product_detail' b.product.pk %}">{{ b.product.name }}</a> <span class="muted">{{ b.product.code|default:"" }}</span></td>
+    <td class="num">{{ b.qty_received|floatformat:0 }}</td>
+    <td>{{ b.batch_code|default:"—" }}</td>
+    <td>{% if b.use_by %}{{ b.use_by|date:"d M Y" }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{% if not b.has_supplier_price %}<span class="tag prov" title="No supplier price set for this ingredient with the delivery's supplier">no price</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted" style="margin:0">No batches on this delivery.</p>{% endif %}
+</div>
+
+<p><a href="{% url 'deliveries' %}">← all deliveries</a></p>
+{% endblock %}

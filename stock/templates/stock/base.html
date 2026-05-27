@@ -1,0 +1,170 @@
+{% load humanize %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Stock Up{% endblock %}</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<script>/*pre-paint theme*/(function(){try{var t=localStorage.getItem("stockops-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0e0f12;--panel:#16181d;--panel2:#1d2027;--line:#2a2e37;
+    --ink:#e7e3d8;--muted:#8b8f9a;--amber:#f0a500;--red:#e0573e;--green:#3a9d6b;
+    --header-bg:#0b0c0e;--dot-grid:#1a1c22;--low-bg:rgba(224,87,62,.07);
+    --mono:"DM Mono",ui-monospace,Menlo,monospace;--disp:"Space Grotesk",system-ui,sans-serif;}
+  html[data-theme="light"]{
+    --bg:#f4f2ec;--panel:#ffffff;--panel2:#f0ede4;--line:#ddd8cc;
+    --ink:#23211c;--muted:#7a7568;--amber:#b87400;--red:#c2412b;--green:#2f7d54;
+    --header-bg:#ffffff;--dot-grid:#e8e4d8;--low-bg:rgba(194,65,43,.07);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;line-height:1.5;
+    background-image:radial-gradient(circle at 1px 1px,var(--dot-grid) 1px,transparent 0);background-size:22px 22px;}
+  a{color:var(--amber);text-decoration:none}
+  header{border-bottom:1px solid var(--line);padding:16px 22px;display:flex;align-items:baseline;
+    gap:22px;background:var(--header-bg);flex-wrap:wrap}
+  header h1{font-family:var(--disp);font-weight:600;font-size:17px;margin:0;letter-spacing:.5px;text-transform:uppercase}
+  header h1 .dot{color:var(--amber)}
+  nav a{margin-right:14px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  nav a.on,nav a:hover{color:var(--amber)}
+  main{padding:22px;max-width:1100px;margin:0 auto}
+  /* Wide layout — pages opt in by overriding the main_class block to
+     "wide". Raises the max-width well beyond the default 1100px and
+     keeps a modest side gutter so a wide table (the Orders products
+     × days grid) can use most of the viewport without running flush
+     to the screen edges. Only the Orders page opts in today; every
+     other page keeps the default centred 1100px container. */
+  main.wide{max-width:1700px;padding-left:28px;padding-right:28px}
+  h2{font-family:var(--disp);font-weight:600;letter-spacing:.5px;margin:0 0 16px}
+  .stats{display:flex;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+  .stat{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);padding:14px 18px;min-width:130px}
+  .stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .stat .v{font-family:var(--disp);font-size:24px;font-weight:600;margin-top:4px}
+  .stat.warn{border-left-color:var(--red)} .stat.warn .v{color:var(--red)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);margin-bottom:24px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.low td{background:var(--low-bg)}
+  .tag{font-size:10px;padding:2px 7px;border:1px solid;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+  .tag.low{color:var(--red);border-color:var(--red)} .tag.ok{color:var(--green);border-color:var(--green)}
+  .tag.prov{color:var(--muted);border-color:var(--muted);border-style:dashed}
+  input.count.provisional{color:var(--muted);font-style:italic;border-style:dashed}
+  .muted{color:var(--muted)}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);padding:8px 10px}
+  input:focus,select:focus{outline:none;border-color:var(--amber)}
+  input.count{width:90px;text-align:right}
+  .btn{display:inline-block;background:var(--amber);color:#111;padding:9px 18px;border:none;cursor:pointer;
+    font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:1px;font-size:12px}
+  .btn.ghost{background:transparent;color:var(--amber);border:1px solid var(--amber)}
+  .card{background:var(--panel);border:1px solid var(--line);padding:18px;margin-bottom:24px}
+  .card h3{margin:0 0 14px;font-family:var(--disp);font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .msg{padding:10px 14px;margin-bottom:16px;border-left:3px solid var(--green);background:var(--panel)}
+  .msg.error{border-left-color:var(--red)}
+  .spark{display:inline-flex;gap:3px;align-items:flex-end;height:28px}
+  .spark span{width:7px;background:var(--amber-dim,#5a4410);background:linear-gradient(var(--amber),#5a4410)}
+  .filter{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+  .filter input{width:280px;max-width:100%}
+  .filter .count-out{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .hdr-right{margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+
+  /* ---- responsive ---- */
+  /* tablet landscape and smaller: trim outer chrome a touch */
+  @media (max-width:1024px){
+    main{padding:18px}
+    main.wide{padding-left:20px;padding-right:20px}
+    header{padding:14px 18px;gap:16px}
+  }
+  /* tablet portrait: tighter spacing; let wide tables scroll inside their card rather than breaking the page */
+  @media (max-width:768px){
+    main{padding:16px}
+    main.wide{padding-left:16px;padding-right:16px}
+    header{gap:12px;padding:12px 16px}
+    header h1{font-size:16px}
+    nav a{margin-right:12px;font-size:11px}
+    h2{font-size:17px;margin-bottom:14px}
+    .stat{min-width:110px;padding:12px 14px}
+    .stat .v{font-size:21px}
+    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%;max-width:100%}
+  }
+  /* phone: stack header, full-width fields, finger-sized targets (16px font keeps iOS from auto-zooming on focus) */
+  @media (max-width:480px){
+    body{font-size:13px}
+    main{padding:12px}
+    main.wide{padding-left:12px;padding-right:12px}
+    header{padding:10px 12px;gap:8px}
+    header h1{width:100%;font-size:15px;margin:0}
+    nav{width:100%;order:2}
+    nav a{margin-right:10px;font-size:11px;letter-spacing:.5px}
+    .hdr-right{margin-left:0;width:100%;order:3;gap:10px}
+    .hdr-right select{flex:1 1 140px}
+    h2{font-size:16px;margin-bottom:12px}
+    .stats{gap:8px}
+    .stat{flex:1 1 calc(50% - 4px);min-width:0;padding:11px 12px;border-left-width:2px}
+    .stat .v{font-size:19px}
+    th,td{padding:9px 9px}
+    input,select,textarea{font-size:16px;padding:10px 11px;min-height:42px}
+    input.count{width:96px;min-height:44px}
+    .btn{padding:12px 18px;min-height:44px}
+    .btn.ghost{padding:11px 16px}
+    .row{flex-direction:column;align-items:stretch;gap:10px}
+    .row .field{width:100%}
+    .row .field input,.row .field select{width:100%}
+    .filter{flex-direction:column;align-items:stretch;gap:6px}
+    .filter input{width:100%}
+    .card{padding:14px;margin-bottom:16px}
+    .card h3{margin-bottom:10px}
+  }
+</style>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<header>
+  <h1>STOCK<span class="dot">.</span>UP</h1>
+  <nav>{% block section_nav %}<a href="{% url 'home' %}">Home</a>{% endblock %}</nav>
+  <div class="hdr-right">
+    {% if departments %}
+    <select onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"
+      style="background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);padding:6px 8px">
+      {% for d in departments %}<option value="{{ d.pk }}" {% if d.pk == current_dept.pk %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select>{% endif %}
+    <button id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark" style="background:none;border:1px solid var(--line);color:var(--ink);font-family:var(--mono);font-size:12px;padding:5px 9px;cursor:pointer">◐ theme</button>
+    <span class="muted" style="font-size:12px">{{ user.username }}</span>
+    {% if user.is_superuser %}<a href="/admin/" style="font-size:12px;text-transform:uppercase;letter-spacing:1px">Admin</a>{% endif %}
+    <form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" style="background:none;border:none;color:var(--amber);font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:1px;cursor:pointer;padding:0">Log out</button></form>
+  </div>
+</header>
+<main class="{% block main_class %}{% endblock %}">
+  {% for m in messages %}<div class="msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</div>{% endfor %}
+  {% block body %}{% endblock %}
+</main>
+<script>
+  function applyTheme(t){document.documentElement.setAttribute("data-theme",t);}
+  function toggleTheme(){
+    var cur=document.documentElement.getAttribute("data-theme")==="light"?"dark":"light";
+    try{localStorage.setItem("stockops-theme",cur);}catch(e){}
+    applyTheme(cur);
+  }
+  (function(){try{var t=localStorage.getItem("stockops-theme");if(t)applyTheme(t);}catch(e){}})();
+  document.addEventListener("input",function(e){
+    var t=e.target;
+    if(!t.dataset||!t.dataset.filter) return;
+    var tbl=document.getElementById(t.dataset.filter);
+    if(!tbl) return;
+    var q=t.value.trim().toLowerCase();
+    var shown=0;
+    tbl.querySelectorAll("tbody tr").forEach(function(r){
+      if(r.dataset.search===undefined) return;
+      var match=!q||r.dataset.search.indexOf(q)>=0;
+      r.style.display=match?"":"none";
+      if(match) shown++;
+    });
+    var out=t.parentNode.querySelector(".count-out");
+    if(out) out.textContent=shown+" shown";
+  });
+</script>
+</body>
+</html>

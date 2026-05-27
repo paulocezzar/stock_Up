@@ -1,0 +1,76 @@
+{% extends "stock/_section_recipes.html" %}
+{% block n_rec_list %}on{% endblock %}
+{% block body %}
+<h2 style="color:var(--red)">Permanently delete {{ recipe.code }}? <span class="muted" style="font-size:14px">{{ recipe.name }}</span></h2>
+
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>This is NOT the same as archiving</h3>
+  <p>Archive (the default action) hides the recipe and is reversible. <strong>Permanent delete</strong> removes the row from the database and is irreversible from the UI. Use this only when you want the code itself blacklisted — for example because it was created in error.</p>
+  <p style="margin:0">If you only want to hide it,
+    <form method="post" action="{% url 'recipe_archive' recipe.pk %}" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="next" value="/recipes/">
+      <button class="btn ghost" type="submit" style="padding:4px 12px">archive instead</button>
+    </form>
+  </p>
+</div>
+
+{% if parents %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>This recipe is used as a sub-recipe in {{ parents|length }} other{{ parents|length|pluralize:" recipe, recipes" }}</h3>
+  <p class="muted" style="margin:0 0 10px">Deleting it will also remove the sub-recipe line from each parent below. The parents themselves are kept; you'll likely want to edit them afterwards.</p>
+  <ul style="margin:0;padding-left:20px">
+    {% for p in parents %}<li><a href="{% url 'recipe_detail' p.pk %}">{{ p.code }} — {{ p.name }}</a></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Confirm permanent deletion</h3>
+  <p>This will:</p>
+  <ul style="margin:0 0 14px;padding-left:20px">
+    <li>Remove the recipe and its {{ recipe.lines.count }} ingredient line{{ recipe.lines.count|pluralize }} (raw ingredient Products are kept).</li>
+    {% if parents %}<li>Drop the sub-recipe line from {{ parents|length }} parent recipe{{ parents|length|pluralize }}.</li>{% endif %}
+    <li>Record the code <code>{{ recipe.code }}</code> as suppressed so the next deploy's bulk re-import won't bring it back. Un-suppress via the Django admin if you change your mind.</li>
+  </ul>
+  {% if error %}<p class="muted" style="color:var(--red);margin:0 0 10px">{{ error }}</p>{% endif %}
+  <form method="post" id="hard-delete-form">{% csrf_token %}
+    <p>
+      <label style="display:inline-flex;align-items:center;gap:8px">
+        <input type="checkbox" name="acknowledge" id="hard-delete-ack">
+        I understand this is permanent and is different from archiving.
+      </label>
+    </p>
+    <p>
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span>Type <code>{{ recipe.code }}</code> to confirm:</span>
+        <input type="text" name="confirm_code" id="hard-delete-code"
+               autocomplete="off" spellcheck="false"
+               style="width:240px;font-family:var(--mono)">
+      </label>
+    </p>
+    <p>
+      <button class="btn" type="submit" id="hard-delete-btn" disabled
+              style="background:var(--red);border-color:var(--red);color:#fff">
+        Permanently delete {{ recipe.code }}
+      </button>
+      &nbsp;<a href="{% url 'recipe_detail' recipe.pk %}" class="muted">cancel</a>
+    </p>
+  </form>
+</div>
+
+<script>
+(function(){
+  var ack = document.getElementById('hard-delete-ack');
+  var code = document.getElementById('hard-delete-code');
+  var btn = document.getElementById('hard-delete-btn');
+  var expected = "{{ recipe.code|escapejs }}".toUpperCase();
+  function refresh(){
+    var typed = (code.value || '').trim().toUpperCase();
+    btn.disabled = !(ack.checked && typed === expected);
+  }
+  ack.addEventListener('change', refresh);
+  code.addEventListener('input', refresh);
+  refresh();
+})();
+</script>
+{% endblock %}

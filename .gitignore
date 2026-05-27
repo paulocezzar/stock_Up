@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+db.sqlite3
+staticfiles/
+.env
+*.xlsx
+.DS_Store
+venv/
+
+.claude/
+
+# Codex / agent workspace
+.codex/

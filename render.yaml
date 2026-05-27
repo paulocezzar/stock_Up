@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: stockup
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn bakerystock.wsgi:application"
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stockup-db
+          property: connectionString
+      # Bootstrap superuser: stock/management/commands/bootstrap.py reads
+      # these and creates the admin idempotently on every deploy. sync:false
+      # means Render prompts for the value in the Blueprint flow instead of
+      # using a placeholder committed to the repo.
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+
+databases:
+  - name: stockup-db
+    plan: free
