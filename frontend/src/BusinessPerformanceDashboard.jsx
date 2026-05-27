@@ -7,7 +7,6 @@ import {
   ChevronDown,
   CircleDollarSign,
   Download,
-  Package,
   LineChart,
   PieChart as PieIcon,
   ShieldAlert,
@@ -58,18 +57,6 @@ export default function BusinessPerformanceDashboard() {
     fetchBusinessPerformance(request)
       .then((d) => {
         if (cancelled) return;
-        if (
-          periodKey === "current" &&
-          !request.from &&
-          !request.to &&
-          d?.period?.latest_imported
-        ) {
-          setRequest({
-            from: d.period.latest_imported,
-            to: d.period.latest_imported,
-          });
-          return;
-        }
         setData(d);
       })
       .catch((e) => !cancelled && setError(e.message || String(e)));
@@ -87,6 +74,12 @@ export default function BusinessPerformanceDashboard() {
     ));
   }, [data, periodKey]);
 
+  const selectWeek = useCallback((week) => {
+    if (!week) return;
+    setPeriodKey("current");
+    setRequest({ from: week, to: week });
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
@@ -96,6 +89,7 @@ export default function BusinessPerformanceDashboard() {
             data={data}
             periodKey={periodKey}
             onPeriod={selectPeriod}
+            onWeek={selectWeek}
             channel={channel}
             onChannel={setChannel}
             exportHref={data?.period ? businessPerformanceExportUrl({
@@ -123,7 +117,9 @@ export default function BusinessPerformanceDashboard() {
   );
 }
 
-function Header({ data, periodKey, onPeriod, channel, onChannel, exportHref }) {
+function Header({
+  data, periodKey, onPeriod, onWeek, channel, onChannel, exportHref,
+}) {
   const period = data?.period;
   return (
     <header className="mb-5">
@@ -149,6 +145,13 @@ function Header({ data, periodKey, onPeriod, channel, onChannel, exportHref }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <PeriodPicker value={periodKey} onSelect={onPeriod} />
+          {periodKey === "current" && (
+            <WeekSelect
+              value={period?.from}
+              options={data?.available_weeks || []}
+              onSelect={onWeek}
+            />
+          )}
           <ChannelToggle value={channel} onSelect={onChannel} />
           <a
             href={exportHref}
@@ -263,38 +266,41 @@ function Body({ data, channel }) {
   );
 }
 
-function SignalStrip({ data, customers, channel }) {
+function WeekSelect({ value, options, onSelect }) {
+  return (
+    <div className="relative inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <select
+        value={value || ""}
+        onChange={(e) => onSelect(e.target.value)}
+        className="h-8 appearance-none bg-transparent pr-7 text-sm font-medium text-slate-700 outline-none dark:text-slate-300"
+        aria-label="Select week"
+      >
+        {(options || []).map((iso) => (
+          <option key={iso} value={iso}>
+            w/c {weekLongLabel(iso)}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        size={14}
+        strokeWidth={1.8}
+        className="pointer-events-none absolute right-3 text-slate-400"
+      />
+    </div>
+  );
+}
+
+function SignalStrip({ customers }) {
   const rows = customers?.rows || [];
-  const summary = customers?.summary || {};
-  const cur = data.totals?.current || {};
-  const distinctOrders = Number(cur.distinct_orders) || 0;
-  const aov = distinctOrders ? Number(cur.total) / distinctOrders : null;
-  const growing = Number(summary.growing) || 0;
-  const declining = Number(summary.declining) || 0;
-  const newCount = Number(summary.new) || 0;
-  const dormantCount = Number(summary.dormant) || 0;
   const topRiser = rows
     .filter((r) => Number.isFinite(Number(r.delta_pct)) && Number(r.delta_pct) > 0)
     .sort((a, b) => Number(b.delta_pct) - Number(a.delta_pct))[0];
   const topFaller = rows
     .filter((r) => Number.isFinite(Number(r.delta_pct)) && Number(r.delta_pct) < 0)
     .sort((a, b) => Number(a.delta_pct) - Number(b.delta_pct))[0];
-  const movement = `${growing} growing · ${declining} declining`;
 
   return (
-    <section className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-5">
-      <SignalCard
-        icon={CircleDollarSign}
-        label="Average Order Value"
-        value={aov === null ? "--" : gbp(aov)}
-        subline={`${distinctOrders} order${distinctOrders === 1 ? "" : "s"} in period`}
-      />
-      <SignalCard
-        icon={Users}
-        label="Customer Movement"
-        value={`${newCount} new · ${dormantCount} dormant`}
-        subline={movement}
-      />
+    <section className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
       <SignalCard
         icon={ArrowUpRight}
         label="Top Riser"
@@ -308,12 +314,6 @@ function SignalStrip({ data, customers, channel }) {
         value={topFaller?.name || "--"}
         subline={topFaller ? `${pct(topFaller.delta_pct, { signed: true })} · ${gbp(topFaller.current)}` : "No falling accounts"}
         tone="negative"
-      />
-      <SignalCard
-        icon={Package}
-        label="Product Focus"
-        value={`${data.products?.n_to_80pct || 0} products`}
-        subline={`${pct(data.products?.top_5_share_pct)} from top 5 · ${channel}`}
       />
     </section>
   );
