@@ -18,8 +18,11 @@ import Sidebar from "./components/Sidebar.jsx";
 import BPWeeklyTrendChart from "./components/BPWeeklyTrendChart.jsx";
 import BPCustomersTable from "./components/BPCustomersTable.jsx";
 import BPProductPareto from "./components/BPProductPareto.jsx";
-import { fetchBusinessPerformance } from "./lib/api.js";
-import { gbp, pct, weekLongLabel } from "./lib/format.js";
+import {
+  businessPerformanceExportUrl,
+  fetchBusinessPerformance,
+} from "./lib/api.js";
+import { gbp, pct, weekLabel, weekLongLabel } from "./lib/format.js";
 
 const PERIOD_OPTIONS = [
   { key: "current", label: "Current", weeks: 1 },
@@ -95,6 +98,10 @@ export default function BusinessPerformanceDashboard() {
             onPeriod={selectPeriod}
             channel={channel}
             onChannel={setChannel}
+            exportHref={data?.period ? businessPerformanceExportUrl({
+              from: data.period.from,
+              to: data.period.to,
+            }) : businessPerformanceExportUrl()}
           />
 
           {error && (
@@ -116,7 +123,7 @@ export default function BusinessPerformanceDashboard() {
   );
 }
 
-function Header({ data, periodKey, onPeriod, channel, onChannel }) {
+function Header({ data, periodKey, onPeriod, channel, onChannel, exportHref }) {
   const period = data?.period;
   return (
     <header className="mb-5">
@@ -143,14 +150,14 @@ function Header({ data, periodKey, onPeriod, channel, onChannel }) {
         <div className="flex flex-wrap items-center gap-2">
           <PeriodPicker value={periodKey} onSelect={onPeriod} />
           <ChannelToggle value={channel} onSelect={onChannel} />
-          <button
-            type="button"
+          <a
+            href={exportHref}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white"
-            title="Export workflow can be wired to the business-performance endpoint when available."
+            title="Download the selected Business Performance range as CSV."
           >
             <Download size={15} strokeWidth={1.8} />
             Export
-          </button>
+          </a>
         </div>
       </div>
     </header>
@@ -222,7 +229,10 @@ function Body({ data, channel }) {
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
-        <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+        <div className="space-y-5">
+          {data.current_week && <CurrentWeekPanel data={data.current_week} />}
+          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -331,6 +341,69 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
         <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400" title={subline}>
           {subline}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CurrentWeekPanel({ data }) {
+  const projected = data.projected_total ? gbp(data.projected_total) : "Complete";
+  const avg8 = data.avg_8w_total ? gbp(data.avg_8w_total) : "--";
+  const vs8 = data.vs_8w_pct != null ? pct(data.vs_8w_pct, { signed: true }) : "--";
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
+            Current Week Pace
+          </h2>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Projection and freshness against the recent run rate.
+          </p>
+        </div>
+        <LineChart size={18} strokeWidth={1.8} className="text-slate-400 dark:text-slate-500" />
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <MiniSignal label="Days covered" value={`${data.days_covered || 0}/7`} />
+        <MiniSignal
+          label="Status"
+          value={data.is_complete ? "Complete" : "Partial"}
+          tone={data.is_complete ? "positive" : "warning"}
+        />
+        <MiniSignal label="Projected week" value={projected} />
+        <MiniSignal label="8w avg" value={avg8} />
+      </div>
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+            Pace vs 8w average
+          </span>
+          <span className="font-display text-lg font-semibold text-slate-950 dark:text-slate-100">
+            {vs8}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Latest order date: {data.latest_order_date ? weekLabel(data.latest_order_date) : "--"}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function MiniSignal({ label, value, tone = "neutral" }) {
+  const toneCls = {
+    neutral: "text-slate-950 dark:text-slate-100",
+    positive: "text-emerald-700 dark:text-emerald-300",
+    warning: "text-amber-800 dark:text-amber-200",
+  }[tone];
+  return (
+    <div className="rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
+      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        {label}
+      </div>
+      <div className={`mt-1 truncate font-display text-lg font-semibold ${toneCls}`}>
+        {value}
       </div>
     </div>
   );

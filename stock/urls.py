@@ -2,7 +2,7 @@ from django.urls import path, re_path
 from django.contrib.auth import views as auth_views
 from . import views
 from .api import (
-    business_performance_summary,
+    business_performance_export_csv, business_performance_summary,
     dashboard_export_csv, dashboard_summary,
 )
 
@@ -86,6 +86,8 @@ urlpatterns = [
          name="api_dashboard_export_csv"),
     path("api/business-performance/summary/", business_performance_summary,
          name="api_business_performance_summary"),
+    path("api/business-performance/export.csv", business_performance_export_csv,
+         name="api_business_performance_export_csv"),
     path("dashboard/", views.spa_dashboard, name="spa_dashboard"),
     path("business-performance-dashboard/", views.spa_dashboard,
          name="business_performance_dashboard"),

@@ -45,3 +45,11 @@ export function fetchBusinessPerformance({ from, to } = {}) {
     `/api/business-performance/summary/${qs ? `?${qs}` : ""}`,
   );
 }
+
+export function businessPerformanceExportUrl({ from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return `/api/business-performance/export.csv${qs ? `?${qs}` : ""}`;
+}

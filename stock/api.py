@@ -414,6 +414,74 @@ def dashboard_export_csv(request):
     return response
 
 
+def _write_order_lines_csv(response, lines):
+    writer = csv.writer(response)
+    writer.writerow([
+        "date", "customer", "channel",
+        "product", "qty", "unit_price", "line_value",
+    ])
+    for line in lines:
+        cust = line.order.customer
+        channel = ("wholesale" if cust.customer_type == Customer.WHOLESALE
+                   else "internal")
+        unit_price = line.unit_price if line.unit_price is not None else ""
+        line_value = line.line_value if line.line_value is not None else ""
+        writer.writerow([
+            line.order.order_date.isoformat(),
+            cust.name,
+            channel,
+            line.display_name,
+            str(line.qty_ordered),
+            str(unit_price),
+            str(line_value),
+        ])
+
+
+@api_view(["GET"])
+def business_performance_export_csv(request):
+    """CSV download for the selected Business Performance date range."""
+    dept = current_department(request)
+    response = HttpResponse(content_type="text/csv")
+    if dept is None:
+        response["Content-Disposition"] = (
+            'attachment; filename="business-performance.csv"')
+        _write_order_lines_csv(response, [])
+        return response
+
+    weeks = available_weeks(dept)
+    if not weeks:
+        wc = _monday_of(date.today())
+        response["Content-Disposition"] = (
+            f'attachment; filename="business-performance-{wc.isoformat()}.csv"')
+        _write_order_lines_csv(response, [])
+        return response
+
+    earliest = weeks[-1]
+    latest = weeks[0]
+    default_from = latest - timedelta(weeks=7)
+    from_wc = _snap(request.GET.get("from"), default_from)
+    to_wc = _snap(request.GET.get("to"), latest)
+    if from_wc < earliest:
+        from_wc = earliest
+    if to_wc > latest:
+        to_wc = latest
+    if to_wc < from_wc:
+        from_wc, to_wc = to_wc, from_wc
+
+    end = to_wc + timedelta(days=6)
+    response["Content-Disposition"] = (
+        f'attachment; filename="business-performance-{from_wc.isoformat()}'
+        f'-to-{to_wc.isoformat()}.csv"')
+    lines = (OrderLine.objects
+             .filter(order__department=dept,
+                     order__order_date__range=(from_wc, end),
+                     order__customer__is_internal=False)
+             .select_related("order__customer")
+             .order_by("order__order_date", "order__customer__name", "id"))
+    _write_order_lines_csv(response, lines)
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Business Performance — multi-week commercial-finance view.
 #
@@ -498,6 +566,7 @@ def _empty_bp_payload(from_wc, to_wc):
             "top_5_share_pct": "0.0",
             "top_10_share_pct": "0.0",
         },
+        "current_week": None,
     }
 
 
@@ -619,6 +688,81 @@ def _bp_best_worst_payload(stats):
         "variability_pct": (None if stats["variability_pct"] is None
                             else str(stats["variability_pct"])),
         "n_active_weeks": stats["n_active_weeks"],
+    }
+
+
+def _pct_change(current, prior):
+    if prior is None or prior == 0:
+        return None
+    return ((current - prior) / prior * Decimal("100")).quantize(Decimal("0.1"))
+
+
+def _bp_current_week_payload(dept, from_wc, to_wc, current_total):
+    """Current-week pace and freshness signals.
+
+    Only meaningful when the selected period is one week. Historical imports
+    are often partial while being built up, so the payload labels whether the
+    latest imported week contains all seven calendar days and estimates a
+    full-week pace when it does not.
+    """
+    if from_wc != to_wc:
+        return None
+
+    week_end = to_wc + timedelta(days=6)
+    latest_order_date = (Order.objects
+        .filter(department=dept,
+                order_date__range=(from_wc, week_end),
+                customer__is_internal=False)
+        .order_by("-order_date")
+        .values_list("order_date", flat=True)
+        .first())
+    days_covered = 0
+    projected_total = None
+    is_complete = False
+    if latest_order_date:
+        days_covered = max(1, min(7, (latest_order_date - from_wc).days + 1))
+        is_complete = latest_order_date >= week_end
+        if not is_complete and current_total is not None:
+            projected_total = (
+                current_total / Decimal(days_covered) * Decimal("7")
+            ).quantize(Decimal("0.01"))
+
+    earliest, _latest = available_week_range(dept)
+    benchmark_to = from_wc - timedelta(days=7)
+    benchmark_from = max(earliest, from_wc - timedelta(weeks=8))
+    benchmark_rows = []
+    if benchmark_to >= benchmark_from:
+        benchmark_rows = [
+            r for r in per_week_split(dept, benchmark_from, benchmark_to)
+            if r["wc"] < from_wc
+        ][-8:]
+    nonzero = [r for r in benchmark_rows if r["total"]]
+    benchmark_total = None
+    benchmark_weeks = len(nonzero)
+    if nonzero:
+        benchmark_total = (
+            sum((r["total"] for r in nonzero), Decimal("0")) /
+            Decimal(benchmark_weeks)
+        ).quantize(Decimal("0.01"))
+
+    comparison_total = projected_total or current_total
+    vs_8w_pct = (
+        _pct_change(comparison_total, benchmark_total)
+        if comparison_total is not None and benchmark_total is not None
+        else None
+    )
+
+    return {
+        "latest_order_date": (
+            latest_order_date.isoformat() if latest_order_date else None),
+        "days_covered": days_covered,
+        "is_complete": is_complete,
+        "projected_total": (
+            None if projected_total is None else str(projected_total)),
+        "avg_8w_total": (
+            None if benchmark_total is None else str(benchmark_total)),
+        "avg_8w_weeks": benchmark_weeks,
+        "vs_8w_pct": None if vs_8w_pct is None else str(vs_8w_pct),
     }
 
 
@@ -751,4 +895,10 @@ def business_performance_summary(request):
         },
         "products": _bp_products_payload(products),
     }
+    payload["current_week"] = _bp_current_week_payload(
+        dept,
+        from_wc,
+        to_wc,
+        comparison["current"]["total"] if comparison["current"] else None,
+    )
     return Response(payload)
