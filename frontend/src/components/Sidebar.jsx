@@ -10,7 +10,7 @@ import {
   Truck,
   Users,
   Moon,
-  ChevronRight,
+  LogOut,
 } from "lucide-react";
 
 // Fixed left rail. Every entry routes to a page that actually exists
@@ -48,8 +48,8 @@ const ASIDE_STYLE = {
   alignItems: "stretch",
   justifyContent: "flex-start",
   overflow: "hidden",
-  background: "#050912",
-  borderRight: "1px solid rgb(30 41 59)",
+  background: "#ffffff",
+  borderRight: "1px solid rgb(226 232 240)",
   boxSizing: "border-box",
 };
 
@@ -68,15 +68,22 @@ export default function Sidebar() {
   const path = window.location.pathname;
   return createPortal(
     <aside style={ASIDE_STYLE}>
-      <div style={HEADER_STYLE} className="px-5 py-5 border-b border-slate-800">
-        <div className="font-display text-xl font-bold tracking-tight text-slate-100">
-          STOCK.UP
-        </div>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-brand mt-1 font-medium">
-          BAKERY
+      <div style={HEADER_STYLE} className="border-b border-slate-200 px-5 py-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white">
+            SU
+          </div>
+          <div>
+            <div className="font-display text-lg font-semibold tracking-normal text-slate-950">
+              StockUp
+            </div>
+            <div className="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+              Bakery
+            </div>
+          </div>
         </div>
       </div>
-      <nav style={NAV_STYLE} className="px-3 py-3 space-y-1">
+      <nav style={NAV_STYLE} className="space-y-1 px-3 py-4">
         {NAV.map(({ label, icon: Icon, href }) => {
           const active = path === href || path.startsWith(href);
           return (
@@ -84,16 +91,16 @@ export default function Sidebar() {
             key={label}
             href={href}
             className={
-              "relative flex items-center gap-3 pl-4 pr-3 py-2 rounded-lg text-sm font-display transition " +
+              "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition " +
               (active
-                ? "bg-brand/15 text-brand"
-                : "text-slate-400 hover:bg-slate-900 hover:text-slate-100")
+                ? "bg-slate-950 text-white shadow-sm"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-950")
             }
           >
             {active && (
               <span
                 aria-hidden="true"
-                className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand"
+                className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-amber-500"
               />
             )}
             <Icon size={16} strokeWidth={1.75} />
@@ -101,40 +108,40 @@ export default function Sidebar() {
           </a>
         );})}
       </nav>
-      <div style={FOOTER_STYLE} className="border-t border-slate-800 p-3 space-y-2">
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg text-sm text-slate-300">
+      <div style={FOOTER_STYLE} className="space-y-2 border-t border-slate-200 p-3">
+        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600">
           <span className="flex items-center gap-3">
             <Moon size={15} strokeWidth={1.75} />
             Dark mode
           </span>
           <button
             type="button"
-            className="relative inline-flex h-5 w-9 items-center rounded-full bg-brand transition"
+            className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition"
             title="Light mode not wired yet"
             aria-label="Toggle theme (light mode coming soon)"
           >
             <span
               aria-hidden="true"
-              className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow translate-x-[18px] transition-transform"
+              className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"
             />
           </button>
         </div>
         <a
           href="/logout/"
-          className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-900 transition"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-slate-100"
         >
-          <div className="h-9 w-9 shrink-0 rounded-full bg-brand text-page flex items-center justify-center font-display text-sm font-bold">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800">
             B
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm text-slate-100 font-display leading-tight truncate">
+            <div className="truncate font-display text-sm leading-tight text-slate-950">
               Bakery account
             </div>
-            <div className="text-[10px] text-slate-500 font-mono uppercase tracking-widest truncate mt-0.5">
+            <div className="mt-0.5 truncate text-xs text-slate-500">
               Sign out
             </div>
           </div>
-          <ChevronRight size={13} strokeWidth={1.75} className="text-slate-500 shrink-0" />
+          <LogOut size={14} strokeWidth={1.75} className="shrink-0 text-slate-400" />
         </a>
       </div>
     </aside>,

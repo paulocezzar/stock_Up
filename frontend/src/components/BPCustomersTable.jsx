@@ -8,10 +8,10 @@ import { gbp, pct } from "../lib/format.js";
 // payload field (data.customers[channel].dormant) and live in the
 // Watchlist panel — not in this table.
 const STATE_STYLE = {
-  new:       { label: "New",       cls: "bg-brand/15 text-brand" },
-  growing:   { label: "Growing",   cls: "bg-pos/15 text-pos" },
-  declining: { label: "Declining", cls: "bg-neg/15 text-neg" },
-  stable:    { label: "Stable",    cls: "bg-slate-800 text-slate-300" },
+  new:       { label: "New",       cls: "border-amber-200 bg-amber-50 text-amber-800" },
+  growing:   { label: "Growing",   cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  declining: { label: "Declining", cls: "border-rose-200 bg-rose-50 text-rose-700" },
+  stable:    { label: "Stable",    cls: "border-slate-200 bg-slate-50 text-slate-600" },
 };
 
 const INITIAL_VISIBLE = 10;
@@ -23,13 +23,13 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
   const hidden = rows.length - visible.length;
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-display text-base font-semibold text-slate-100">
+          <h3 className="font-display text-base font-semibold text-slate-950">
             Customer Performance
           </h3>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+          <div className="mt-1 text-xs text-slate-500">
             {channel === "wholesale" ? "Wholesale" : "Internal"} ·
             {" "}{rows.length} active · ordered value vs prior period
           </div>
@@ -37,13 +37,13 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
       </div>
 
       {rows.length === 0 ? (
-        <div className="font-mono text-xs text-slate-500">
+        <div className="text-sm text-slate-500">
           No active customers in this period.
         </div>
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-left font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               <th className="w-8 py-2.5 pr-2 text-right">#</th>
               <th className="py-2.5 px-2">Customer</th>
               <th className="py-2.5 px-2 text-right">Value</th>
@@ -58,16 +58,16 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
               return (
                 <tr
                   key={r.customer_id ?? `${r.name}-${i}`}
-                  className="border-b border-slate-900 transition last:border-0 hover:bg-slate-900/40"
+                  className="border-b border-slate-100 transition last:border-0 hover:bg-slate-50"
                 >
-                  <td className="py-2.5 pr-2 text-right font-mono tabular text-slate-500">
+                  <td className="py-2.5 pr-2 text-right tabular text-slate-400">
                     {i + 1}
                   </td>
-                  <td className="py-2.5 px-2 text-slate-200">{r.name}</td>
-                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-100 whitespace-nowrap">
+                  <td className="py-2.5 px-2 font-medium text-slate-800">{r.name}</td>
+                  <td className="py-2.5 px-2 text-right tabular font-semibold text-slate-950 whitespace-nowrap">
                     {gbp(r.current)}
                   </td>
-                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-400">
+                  <td className="py-2.5 px-2 text-right tabular text-slate-500">
                     {pct(r.share_pct)}
                   </td>
                   <td className="py-2.5 px-2 text-right">
@@ -75,7 +75,7 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
                   </td>
                   <td className="py-2.5 pl-2 text-right">
                     <span
-                      className={`inline-block rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest ${state.cls}`}
+                      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${state.cls}`}
                     >
                       {state.label}
                     </span>
@@ -91,39 +91,39 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mt-3 inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-slate-300 transition hover:border-brand/40 hover:text-brand"
+          className="mt-3 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
         >
           Show {hidden} more
         </button>
       )}
-    </div>
+    </section>
   );
 }
 
 function DeltaCell({ state, deltaPct }) {
   if (state === "new") {
-    return <span className="font-mono text-[11px] text-brand">NEW</span>;
+    return <span className="text-xs font-semibold text-amber-700">NEW</span>;
   }
   if (deltaPct === null || deltaPct === undefined) {
-    return <span className="font-mono text-slate-600">—</span>;
+    return <span className="text-slate-400">—</span>;
   }
   const n = Number(deltaPct);
   if (!Number.isFinite(n)) {
-    return <span className="font-mono text-slate-600">—</span>;
+    return <span className="text-slate-400">—</span>;
   }
   if (Math.abs(n) < 0.05) {
     return (
-      <span className="inline-flex items-center justify-end gap-1 font-mono tabular text-slate-400">
+      <span className="inline-flex items-center justify-end gap-1 tabular text-slate-500">
         <Minus size={13} strokeWidth={2} />
         0.0%
       </span>
     );
   }
   const Icon = n > 0 ? ArrowUpRight : ArrowDownRight;
-  const cls = n > 0 ? "text-pos" : "text-neg";
+  const cls = n > 0 ? "text-emerald-700" : "text-rose-700";
   const sign = n > 0 ? "+" : "";
   return (
-    <span className={`inline-flex items-center justify-end gap-1 font-mono tabular ${cls}`}>
+    <span className={`inline-flex items-center justify-end gap-1 tabular font-semibold ${cls}`}>
       <Icon size={13} strokeWidth={2.25} />
       {sign}{n.toFixed(1)}%
     </span>

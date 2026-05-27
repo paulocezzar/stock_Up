@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
   AlertTriangle,
   BarChart3,
+  ChevronDown,
+  CircleDollarSign,
+  Download,
+  LineChart,
   PieChart as PieIcon,
-  PoundSterling,
   ShieldAlert,
   Sparkles,
   TrendingUp,
@@ -17,19 +20,6 @@ import BPCustomersTable from "./components/BPCustomersTable.jsx";
 import BPProductPareto from "./components/BPProductPareto.jsx";
 import { fetchBusinessPerformance } from "./lib/api.js";
 import { gbp, pct, weekLongLabel } from "./lib/format.js";
-
-// "Business Performance" is the multi-week commercial-finance lens —
-// distinct from /dashboard/, which is single-week operational. This
-// page is built around four questions:
-//   1) Are we growing?           — Period Ordered + Δ, Run Rate
-//   2) Where is the money?        — Channel Mix, Top customers
-//   3) What's at risk?            — Concentration, Watchlist
-//   4) Which products carry us?   — Pareto with 80/20 highlight
-//
-// All figures come from one API call (/api/business-performance/summary/).
-// from/to is derived client-side from the selected period preset + the
-// latest imported week; the server clamps if requested range extends
-// before the earliest imported week.
 
 const PERIOD_OPTIONS = [
   { key: "4w", label: "4w", weeks: 4 },
@@ -49,10 +39,7 @@ function computeFromTo(periodKey, earliest, latest) {
   if (!latest) return { from: undefined, to: undefined };
   const opt = PERIOD_OPTIONS.find((o) => o.key === periodKey) ?? PERIOD_OPTIONS[1];
   if (opt.weeks === null) return { from: earliest, to: latest };
-  const from = dateMinusWeeks(latest, opt.weeks - 1);
-  // The server clamps to earliest; client doesn't pre-clamp so the
-  // request stays a single, predictable shape.
-  return { from, to: latest };
+  return { from: dateMinusWeeks(latest, opt.weeks - 1), to: latest };
 }
 
 export default function BusinessPerformanceDashboard() {
@@ -60,9 +47,6 @@ export default function BusinessPerformanceDashboard() {
   const [error, setError] = useState(null);
   const [periodKey, setPeriodKey] = useState("8w");
   const [channel, setChannel] = useState("wholesale");
-
-  // Initial fetch with no params — server returns its default 8-week
-  // window. From then on, the period buttons drive from/to.
   const [request, setRequest] = useState({});
 
   useEffect(() => {
@@ -75,24 +59,21 @@ export default function BusinessPerformanceDashboard() {
   }, [request]);
 
   const selectPeriod = useCallback((key) => {
-    if (key === periodKey) return;  // no-op on same-button re-click
+    if (key === periodKey) return;
     setPeriodKey(key);
-    if (!data?.period) {
-      // First load — let the server default decide. Just remember the
-      // preference; the next render will refetch once latest_imported
-      // arrives.
-      return;
-    }
-    const next = computeFromTo(
-      key, data.period.earliest_imported, data.period.latest_imported);
-    setRequest(next);
+    if (!data?.period) return;
+    setRequest(computeFromTo(
+      key,
+      data.period.earliest_imported,
+      data.period.latest_imported,
+    ));
   }, [data, periodKey]);
 
   return (
-    <div className="min-h-screen bg-page text-slate-100">
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <Sidebar />
-      <main className="ml-64 p-6">
-        <div className="mx-auto max-w-[1900px]">
+      <main className="ml-64 min-h-screen">
+        <div className="mx-auto max-w-[1760px] px-8 py-7">
           <Header
             data={data}
             periodKey={periodKey}
@@ -100,16 +81,19 @@ export default function BusinessPerformanceDashboard() {
             channel={channel}
             onChannel={setChannel}
           />
+
           {error && (
-            <div className="rounded-2xl border border-neg/40 bg-neg/10 p-4 text-rose-200">
+            <div className="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               Failed to load business performance: {error}
             </div>
           )}
+
           {!data && !error && (
-            <div className="font-mono text-xs uppercase tracking-widest text-slate-500">
-              Loading…
+            <div className="rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">
+              Loading business performance...
             </div>
           )}
+
           {data && <Body data={data} channel={channel} />}
         </div>
       </main>
@@ -120,34 +104,52 @@ export default function BusinessPerformanceDashboard() {
 function Header({ data, periodKey, onPeriod, channel, onChannel }) {
   const period = data?.period;
   return (
-    <header className="mb-5 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <h1 className="font-display text-3xl font-bold tracking-tight text-slate-100">
+    <header className="mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Commercial Performance
+          </div>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-normal text-slate-950">
             Business Performance
           </h1>
-          <span
-            title="Commercial finance lens — multi-week ordered value, channel mix, concentration, and product Pareto."
-            className="text-slate-500"
-          >
-            <TrendingUp size={16} strokeWidth={2} />
-          </span>
-        </div>
-        <p className="mt-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
-          {period
-            ? `w/c ${weekLongLabel(period.from)} → w/c ${weekLongLabel(period.to)} · ${period.n_weeks} week${period.n_weeks === 1 ? "" : "s"}`
-            : "Commercial finance overview"}
-        </p>
-        {period?.prior_truncated && (
-          <p className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-amber-300">
-            <AlertTriangle size={11} strokeWidth={2} />
-            Prior-period comparison unavailable — earlier weeks not yet imported
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            Revenue, customer concentration, channel mix, and product performance
+            across the selected trading period.
           </p>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <PeriodPicker value={periodKey} onSelect={onPeriod} />
-        <ChannelToggle value={channel} onSelect={onChannel} />
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
+              {period
+                ? `w/c ${weekLongLabel(period.from)} to w/c ${weekLongLabel(period.to)}`
+                : "Waiting for imported weeks"}
+            </span>
+            {period && (
+              <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
+                {period.n_weeks} week{period.n_weeks === 1 ? "" : "s"}
+              </span>
+            )}
+            {period?.prior_truncated && (
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">
+                <AlertTriangle size={12} strokeWidth={2} />
+                Prior comparison limited
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodPicker value={periodKey} onSelect={onPeriod} />
+          <ChannelToggle value={channel} onSelect={onChannel} />
+          <button
+            type="button"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+            title="Export workflow can be wired to the business-performance endpoint when available."
+          >
+            <Download size={15} strokeWidth={1.8} />
+            Export
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -155,7 +157,7 @@ function Header({ data, periodKey, onPeriod, channel, onChannel }) {
 
 function PeriodPicker({ value, onSelect }) {
   return (
-    <div className="inline-flex rounded-lg border border-slate-800 bg-card p-0.5">
+    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
       {PERIOD_OPTIONS.map((o) => {
         const active = o.key === value;
         return (
@@ -164,10 +166,10 @@ function PeriodPicker({ value, onSelect }) {
             type="button"
             onClick={() => onSelect(o.key)}
             className={
-              "px-3 py-1.5 rounded-md font-display text-xs transition " +
+              "h-8 rounded-md px-3 text-sm font-medium transition " +
               (active
-                ? "bg-brand/15 text-brand"
-                : "text-slate-400 hover:text-slate-100")
+                ? "bg-slate-950 text-white shadow-sm"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900")
             }
           >
             {o.label}
@@ -180,7 +182,7 @@ function PeriodPicker({ value, onSelect }) {
 
 function ChannelToggle({ value, onSelect }) {
   return (
-    <div className="inline-flex rounded-lg border border-slate-800 bg-card p-0.5">
+    <div className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
       {[
         { key: "wholesale", label: "Wholesale" },
         { key: "internal", label: "Internal" },
@@ -192,12 +194,10 @@ function ChannelToggle({ value, onSelect }) {
             type="button"
             onClick={() => onSelect(o.key)}
             className={
-              "px-3 py-1.5 rounded-md font-display text-xs transition " +
+              "h-8 rounded-md px-3 text-sm font-medium transition " +
               (active
-                ? (o.key === "wholesale"
-                    ? "bg-wholesale/20 text-purple-300"
-                    : "bg-internal/20 text-blue-300")
-                : "text-slate-400 hover:text-slate-100")
+                ? "bg-amber-100 text-amber-900"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900")
             }
           >
             {o.label}
@@ -217,12 +217,12 @@ function Body({ data, channel }) {
     <>
       <KpiRow data={data} channel={channel} concentration={concentration} />
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
-        <BestWorstPanel stats={data.best_worst} />
+        <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPCustomersTable
           payload={customers}
           channel={channel}
@@ -235,13 +235,13 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-5">
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-4 font-mono text-[10px] uppercase tracking-widest text-slate-600">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500">
         <span>
-          Business Performance for w/c {weekLongLabel(data.period.from)} →
+          Business Performance for w/c {weekLongLabel(data.period.from)} to
           {" "}w/c {weekLongLabel(data.period.to)}
         </span>
         <span>Ordered value · excl. VAT · external customers only</span>
@@ -250,10 +250,6 @@ function Body({ data, channel }) {
   );
 }
 
-// ---------------------------------------------------------------------
-// KPI tiles
-// ---------------------------------------------------------------------
-
 function KpiRow({ data, channel, concentration }) {
   const t = data.totals;
   const cur = t.current;
@@ -261,32 +257,21 @@ function KpiRow({ data, channel, concentration }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <KpiTile
-        icon={PoundSterling}
-        accent="brand"
+        icon={CircleDollarSign}
         label="Period Ordered"
         value={gbp(cur.total)}
         deltaPct={delta?.total_pct}
-        subline={
-          delta
-            ? `vs ${gbp(t.prior?.total)} prior ${data.period.n_weeks}w`
-            : "No prior comparison available"
-        }
+        subline={delta ? `Prior ${gbp(t.prior?.total)}` : "No prior comparison"}
       />
       <KpiTile
-        icon={BarChart3}
-        accent="brand"
+        icon={LineChart}
         label="Weekly Run Rate"
         value={`${gbp(cur.avg_week)}/wk`}
         deltaPct={delta?.avg_week_pct}
-        subline={
-          delta
-            ? `${gbp(t.prior?.avg_week)} prior period`
-            : `${cur.distinct_orders} order${cur.distinct_orders === 1 ? "" : "s"} · ${cur.active_customers} active`
-        }
+        subline={`${cur.distinct_orders} orders · ${cur.active_customers} active customers`}
       />
       <KpiTile
         icon={PieIcon}
-        accent={channel === "wholesale" ? "wholesale" : "internal"}
         label="Channel Mix"
         value={`${pct(cur.wholesale_pct)} wholesale`}
         deltaPp={delta?.wholesale_share_pp}
@@ -297,30 +282,24 @@ function KpiRow({ data, channel, concentration }) {
   );
 }
 
-function KpiTile({ icon: Icon, accent = "brand", label, value, deltaPct, deltaPp, subline }) {
-  const accentBg = {
-    brand: "bg-brand/15 text-brand",
-    wholesale: "bg-wholesale/20 text-purple-300",
-    internal: "bg-internal/20 text-blue-300",
-  }[accent] ?? "bg-brand/15 text-brand";
-
+function KpiTile({ icon: Icon, label, value, deltaPct, deltaPp, subline }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
             {label}
           </div>
-          <div className="mt-2 font-display text-2xl font-semibold text-slate-100">
+          <div className="mt-2 truncate font-display text-2xl font-semibold tracking-normal text-slate-950">
             {value}
           </div>
         </div>
-        <div className={`flex h-9 w-9 items-center justify-center rounded-full ${accentBg}`}>
-          <Icon size={16} strokeWidth={1.75} />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+          <Icon size={19} strokeWidth={1.8} />
         </div>
       </div>
-      <div className="mt-4 flex items-center justify-between gap-3 text-[11px]">
-        <span className="font-mono text-slate-500">{subline}</span>
+      <div className="mt-4 flex min-h-6 items-center justify-between gap-3">
+        <span className="truncate text-xs text-slate-500">{subline}</span>
         {deltaPct !== undefined && deltaPct !== null ? (
           <DeltaPill value={deltaPct} suffix="%" />
         ) : deltaPp !== undefined && deltaPp !== null ? (
@@ -336,11 +315,13 @@ function DeltaPill({ value, suffix }) {
   if (!Number.isFinite(n)) return null;
   const up = n >= 0;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
-  const cls = up ? "text-pos bg-pos/10" : "text-neg bg-neg/10";
+  const cls = up
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : "border-rose-200 bg-rose-50 text-rose-700";
   const sign = up ? "+" : "";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono tabular ${cls}`}>
-      <Icon size={11} strokeWidth={2.5} />
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold tabular ${cls}`}>
+      <Icon size={13} strokeWidth={2.2} />
       {sign}{n.toFixed(1)}{suffix}
     </span>
   );
@@ -349,38 +330,33 @@ function DeltaPill({ value, suffix }) {
 function ConcentrationTile({ concentration, channel }) {
   const band = concentration?.band || "healthy";
   const bandStyle = {
-    healthy:      { label: "Healthy",      cls: "bg-pos/15 text-pos" },
-    watch:        { label: "Watch",        cls: "bg-amber-500/15 text-amber-300" },
-    concentrated: { label: "Concentrated", cls: "bg-neg/15 text-neg" },
+    healthy: { label: "Healthy", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    watch: { label: "Watch", cls: "border-amber-200 bg-amber-50 text-amber-800" },
+    concentrated: { label: "Concentrated", cls: "border-rose-200 bg-rose-50 text-rose-700" },
   }[band];
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-            Concentration · {channel === "wholesale" ? "Wholesale" : "Internal"}
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Concentration
           </div>
-          <div className="mt-2 font-display text-2xl font-semibold text-slate-100">
+          <div className="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950">
             {pct(concentration?.top_5_pct)}
-            <span className="ml-1 font-mono text-xs text-slate-500">top-5</span>
+            <span className="ml-1 text-xs font-medium text-slate-500">top 5</span>
           </div>
         </div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800 text-slate-300">
-          <ShieldAlert size={16} strokeWidth={1.75} />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          <ShieldAlert size={19} strokeWidth={1.8} />
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-500">
-        <ConcentrationRatio label="Top 1" value={concentration?.top_1_pct} />
-        <ConcentrationRatio label="Top 3" value={concentration?.top_3_pct} />
-        <ConcentrationRatio label="Top 5" value={concentration?.top_5_pct} />
-      </div>
-      <div className="mt-3 flex items-center justify-between text-[11px]">
-        <span className="font-mono text-slate-500 truncate">
-          {concentration?.top_1_name
-            ? `Top: ${concentration.top_1_name}`
-            : `${concentration?.n_customers ?? 0} customers`}
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <span className="truncate text-xs text-slate-500">
+          {channel === "wholesale" ? "Wholesale" : "Internal"} · top account:
+          {" "}{concentration?.top_1_name || "none"}
         </span>
-        <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono ${bandStyle.cls}`}>
+        <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${bandStyle.cls}`}>
           {bandStyle.label}
         </span>
       </div>
@@ -388,95 +364,63 @@ function ConcentrationTile({ concentration, channel }) {
   );
 }
 
-function ConcentrationRatio({ label, value }) {
+function ExecutiveSummary({ data, channel, concentration }) {
+  const best = data.best_worst?.best_week;
+  const worst = data.best_worst?.worst_week;
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1.5 text-center">
-      <div className="text-slate-500">{label}</div>
-      <div className="mt-0.5 font-display text-sm font-semibold normal-case text-slate-100 tracking-normal">
-        {pct(value)}
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold text-slate-950">
+            Executive Summary
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Highest, lowest, and dependency signals for this period.
+          </p>
+        </div>
+        <BarChart3 size={18} strokeWidth={1.8} className="text-slate-400" />
       </div>
-    </div>
+
+      <div className="mt-5 space-y-3">
+        <SummaryRow label="Strongest week" value={best ? gbp(best.total) : "--"} sub={best ? `w/c ${weekLongLabel(best.week)}` : "No data"} />
+        <SummaryRow label="Quietest week" value={worst ? gbp(worst.total) : "--"} sub={worst ? `w/c ${weekLongLabel(worst.week)}` : "No data"} />
+        <SummaryRow label="Spread" value={gbp(data.best_worst?.spread)} sub={`Variability ${data.best_worst?.variability_pct != null ? `+/-${Number(data.best_worst.variability_pct).toFixed(1)}%` : "--"}`} />
+      </div>
+
+      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="font-medium text-slate-700">
+            {channel === "wholesale" ? "Wholesale" : "Internal"} dependency
+          </span>
+          <span className="font-semibold text-slate-950">{pct(concentration?.top_1_pct)}</span>
+        </div>
+        <div className="mt-2 h-2 rounded-full bg-slate-200">
+          <div
+            className="h-2 rounded-full bg-amber-500"
+            style={{ width: `${Math.max(0, Math.min(100, Number(concentration?.top_1_pct) || 0))}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Top customer share: {concentration?.top_1_name || "none"}
+        </p>
+      </div>
+    </section>
   );
 }
 
-// ---------------------------------------------------------------------
-// Best / Worst weeks panel
-// ---------------------------------------------------------------------
-
-function BestWorstPanel({ stats }) {
-  const best = stats?.best_week;
-  const worst = stats?.worst_week;
+function SummaryRow({ label, value, sub }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
-      <h3 className="font-display text-base font-semibold text-slate-100">
-        Best & Worst Weeks
-      </h3>
-      <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
-        Range of weekly ordered value · variability
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {label}
+        </div>
+        <div className="mt-1 text-xs text-slate-500">{sub}</div>
       </div>
-      <div className="mt-4 space-y-3">
-        <StatRow
-          label="Strongest week"
-          value={best ? gbp(best.total) : "—"}
-          sub={best ? `w/c ${weekLongLabel(best.week)}` : "No data in period"}
-          accent="pos"
-        />
-        <StatRow
-          label="Quietest week"
-          value={worst ? gbp(worst.total) : "—"}
-          sub={worst ? `w/c ${weekLongLabel(worst.week)}` : "No data in period"}
-          accent="neg"
-        />
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-800 pt-4">
-        <MiniStat label="Spread" value={gbp(stats?.spread)} />
-        <MiniStat
-          label="Variability"
-          value={stats?.variability_pct !== null && stats?.variability_pct !== undefined
-            ? `±${Number(stats.variability_pct).toFixed(1)}%`
-            : "—"}
-        />
-      </div>
+      <div className="font-display text-lg font-semibold text-slate-950">{value}</div>
     </div>
   );
 }
-
-function StatRow({ label, value, sub, accent }) {
-  const accentCls = {
-    pos: "border-pos/30 bg-pos/5",
-    neg: "border-neg/30 bg-neg/5",
-  }[accent] ?? "border-slate-800 bg-slate-950/40";
-  return (
-    <div className={`rounded-lg border ${accentCls} p-3`}>
-      <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-        {label}
-      </div>
-      <div className="mt-1 font-display text-lg font-semibold text-slate-100">
-        {value}
-      </div>
-      <div className="mt-0.5 font-mono text-[10px] text-slate-500">
-        {sub}
-      </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }) {
-  return (
-    <div>
-      <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-        {label}
-      </div>
-      <div className="mt-1 font-display text-base font-semibold text-slate-100">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------
-// Watchlist (right rail on row 3)
-// ---------------------------------------------------------------------
 
 function WatchlistPanel({ customers, concentration, channel }) {
   const rows = customers?.rows || [];
@@ -489,25 +433,35 @@ function WatchlistPanel({ customers, concentration, channel }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
-      <h3 className="font-display text-base font-semibold text-slate-100">
-        Risk & Watchlist
-      </h3>
-      <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
-        {channel === "wholesale" ? "Wholesale" : "Internal"} · automated signals
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold text-slate-950">
+            Risk & Watchlist
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            {channel === "wholesale" ? "Wholesale" : "Internal"} customer signals.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
+          title="More watchlist actions"
+        >
+          <ChevronDown size={15} strokeWidth={1.8} />
+        </button>
       </div>
 
       {band !== "healthy" && (
-        <div className={`mt-4 rounded-lg border p-3 text-xs ${
+        <div className={`mt-4 rounded-lg border p-3 text-sm ${
           band === "concentrated"
-            ? "border-neg/40 bg-neg/5 text-rose-200"
-            : "border-amber-500/30 bg-amber-500/5 text-amber-200"
+            ? "border-rose-200 bg-rose-50 text-rose-700"
+            : "border-amber-200 bg-amber-50 text-amber-800"
         }`}>
           <div className="flex items-start gap-2">
-            <ShieldAlert size={14} strokeWidth={2} className="mt-0.5 shrink-0" />
+            <ShieldAlert size={15} strokeWidth={2} className="mt-0.5 shrink-0" />
             <span>
-              Top-5 concentration at <strong>{pct(concentration?.top_5_pct)}</strong> —
-              {" "}{band === "concentrated" ? "high single-customer dependency" : "watch threshold crossed"}.
+              Top-5 concentration is {pct(concentration?.top_5_pct)}.
             </span>
           </div>
         </div>
@@ -516,64 +470,53 @@ function WatchlistPanel({ customers, concentration, channel }) {
       <WatchlistSection
         title="New this period"
         icon={Sparkles}
-        accent="brand"
-        items={newCustomers.map((r) => ({
-          name: r.name,
-          tail: gbp(r.current),
-        }))}
+        tone="amber"
+        items={newCustomers.map((r) => ({ name: r.name, tail: gbp(r.current) }))}
         empty="No new customers."
       />
       <WatchlistSection
         title="Declining accounts"
         icon={ArrowDownRight}
-        accent="neg"
-        items={declining.map((r) => ({
-          name: r.name,
-          tail: `${Number(r.delta_pct).toFixed(1)}%`,
-        }))}
+        tone="rose"
+        items={declining.map((r) => ({ name: r.name, tail: `${Number(r.delta_pct).toFixed(1)}%` }))}
         empty="No accounts down >10%."
       />
       <WatchlistSection
-        title="Dormant (was active)"
+        title="Dormant accounts"
         icon={Users}
-        accent="amber"
-        items={dormant.map((d) => ({
-          name: d.name,
-          tail: `was ${gbp(d.prior)}`,
-        }))}
+        tone="slate"
+        items={dormant.map((d) => ({ name: d.name, tail: `was ${gbp(d.prior)}` }))}
         empty="No dormant accounts."
       />
-    </div>
+    </section>
   );
 }
 
-function WatchlistSection({ title, icon: Icon, accent, items, empty }) {
-  const tailCls = {
-    brand: "text-brand",
-    neg: "text-neg",
-    amber: "text-amber-300",
-  }[accent] ?? "text-slate-300";
-  const iconCls = {
-    brand: "text-brand",
-    neg: "text-neg",
-    amber: "text-amber-400",
-  }[accent] ?? "text-slate-400";
+function WatchlistSection({ title, icon: Icon, tone, items, empty }) {
+  const toneCls = {
+    amber: "text-amber-700 bg-amber-50",
+    rose: "text-rose-700 bg-rose-50",
+    slate: "text-slate-600 bg-slate-100",
+  }[tone] ?? "text-slate-600 bg-slate-100";
+
   return (
-    <div className="mt-4 border-t border-slate-800 pt-3">
-      <div className="flex items-center gap-1.5">
-        <Icon size={12} strokeWidth={2} className={iconCls} />
-        <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center gap-2">
+        <span className={`flex h-6 w-6 items-center justify-center rounded-md ${toneCls}`}>
+          <Icon size={13} strokeWidth={2} />
+        </span>
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
           {title}
         </span>
       </div>
       {items.length === 0 ? (
-        <div className="mt-2 font-mono text-[11px] text-slate-600">{empty}</div>
+        <div className="mt-3 text-sm text-slate-400">{empty}</div>
       ) : (
-        <ul className="mt-2 space-y-1.5">
+        <ul className="mt-3 space-y-2">
           {items.map((it, i) => (
-            <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate text-slate-200">{it.name}</span>
-              <span className={`shrink-0 font-mono tabular text-xs ${tailCls}`}>{it.tail}</span>
+            <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-3 text-sm">
+              <span className="min-w-0 truncate text-slate-700">{it.name}</span>
+              <span className="shrink-0 tabular text-xs font-semibold text-slate-950">{it.tail}</span>
             </li>
           ))}
         </ul>

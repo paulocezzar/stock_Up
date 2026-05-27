@@ -15,17 +15,17 @@ export default function BPProductPareto({ payload }) {
   const hidden = rows.length - visible.length;
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-card p-5 shadow-sm shadow-black/20">
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-display text-base font-semibold text-slate-100">
+          <h3 className="font-display text-base font-semibold text-slate-950">
             Product Revenue Pareto
           </h3>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+          <div className="mt-1 text-xs text-slate-500">
             Sorted by ordered value · cumulative share of period revenue
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
           <Chip label={`${payload?.n_products ?? 0} products`} />
           <Chip label={`top 5 · ${pct(payload?.top_5_share_pct)}`} />
           <Chip label={`top 10 · ${pct(payload?.top_10_share_pct)}`} />
@@ -33,13 +33,13 @@ export default function BPProductPareto({ payload }) {
       </div>
 
       {rows.length === 0 ? (
-        <div className="font-mono text-xs text-slate-500">
+        <div className="text-sm text-slate-500">
           No products sold in this period.
         </div>
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-left font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               <th className="w-8 py-2.5 pr-2 text-right">#</th>
               <th className="py-2.5 px-2">Product</th>
               <th className="py-2.5 px-2 text-right">Qty</th>
@@ -55,29 +55,29 @@ export default function BPProductPareto({ payload }) {
               return (
                 <tr
                   key={`${r.product}-${i}`}
-                  className="border-b border-slate-900 transition last:border-0 hover:bg-slate-900/40"
+                  className="border-b border-slate-100 transition last:border-0 hover:bg-slate-50"
                 >
-                  <td className="py-2.5 pr-2 text-right font-mono tabular text-slate-500">
+                  <td className="py-2.5 pr-2 text-right tabular text-slate-400">
                     {i + 1}
                   </td>
-                  <td className="py-2.5 px-2 text-slate-200">
+                  <td className="py-2.5 px-2 font-medium text-slate-800">
                     {r.product}
                     {inPareto && (
                       <span
-                        className="ml-2 inline-block rounded-full bg-brand/15 px-1.5 py-0.5 align-middle font-mono text-[9px] uppercase tracking-widest text-brand"
+                        className="ml-2 inline-block rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-800"
                         title="In the top set that drives 80% of period revenue"
                       >
                         80/20
                       </span>
                     )}
                   </td>
-                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-400 whitespace-nowrap">
+                  <td className="py-2.5 px-2 text-right tabular text-slate-500 whitespace-nowrap">
                     {formatQty(r.qty)}
                   </td>
-                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-100 whitespace-nowrap">
+                  <td className="py-2.5 px-2 text-right tabular font-semibold text-slate-950 whitespace-nowrap">
                     {gbp(r.value)}
                   </td>
-                  <td className="py-2.5 px-2 text-right font-mono tabular text-slate-400">
+                  <td className="py-2.5 px-2 text-right tabular text-slate-500">
                     {pct(r.share_pct)}
                   </td>
                   <td className="py-2.5 pl-2">
@@ -94,12 +94,12 @@ export default function BPProductPareto({ payload }) {
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mt-3 inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-slate-300 transition hover:border-brand/40 hover:text-brand"
+          className="mt-3 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
         >
           Show remaining {hidden}
         </button>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -107,13 +107,13 @@ function CumulativeBar({ pctValue }) {
   const w = Math.max(0, Math.min(100, pctValue));
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 w-32 rounded-full bg-slate-900">
+      <div className="h-1.5 w-32 rounded-full bg-slate-200">
         <div
-          className="h-1.5 rounded-full bg-brand"
+          className="h-1.5 rounded-full bg-amber-500"
           style={{ width: `${w}%` }}
         />
       </div>
-      <span className="font-mono tabular text-xs text-slate-400">
+      <span className="tabular text-xs text-slate-500">
         {w.toFixed(1)}%
       </span>
     </div>
@@ -122,7 +122,7 @@ function CumulativeBar({ pctValue }) {
 
 function Chip({ label }) {
   return (
-    <span className="rounded-md border border-slate-800 bg-slate-950/40 px-2 py-0.5">
+    <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5">
       {label}
     </span>
   );
