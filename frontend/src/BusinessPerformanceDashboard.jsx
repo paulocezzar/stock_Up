@@ -7,6 +7,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   Download,
+  Package,
   LineChart,
   PieChart as PieIcon,
   ShieldAlert,
@@ -217,6 +218,7 @@ function Body({ data, channel }) {
   return (
     <>
       <KpiRow data={data} channel={channel} concentration={concentration} />
+      <SignalStrip data={data} customers={customers} channel={channel} />
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
@@ -248,6 +250,89 @@ function Body({ data, channel }) {
         <span>Ordered value · excl. VAT · external customers only</span>
       </footer>
     </>
+  );
+}
+
+function SignalStrip({ data, customers, channel }) {
+  const rows = customers?.rows || [];
+  const summary = customers?.summary || {};
+  const cur = data.totals?.current || {};
+  const distinctOrders = Number(cur.distinct_orders) || 0;
+  const aov = distinctOrders ? Number(cur.total) / distinctOrders : null;
+  const growing = Number(summary.growing) || 0;
+  const declining = Number(summary.declining) || 0;
+  const newCount = Number(summary.new) || 0;
+  const dormantCount = Number(summary.dormant) || 0;
+  const topRiser = rows
+    .filter((r) => Number.isFinite(Number(r.delta_pct)) && Number(r.delta_pct) > 0)
+    .sort((a, b) => Number(b.delta_pct) - Number(a.delta_pct))[0];
+  const topFaller = rows
+    .filter((r) => Number.isFinite(Number(r.delta_pct)) && Number(r.delta_pct) < 0)
+    .sort((a, b) => Number(a.delta_pct) - Number(b.delta_pct))[0];
+  const movement = `${growing} growing · ${declining} declining`;
+
+  return (
+    <section className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-5">
+      <SignalCard
+        icon={CircleDollarSign}
+        label="Average Order Value"
+        value={aov === null ? "--" : gbp(aov)}
+        subline={`${distinctOrders} order${distinctOrders === 1 ? "" : "s"} in period`}
+      />
+      <SignalCard
+        icon={Users}
+        label="Customer Movement"
+        value={`${newCount} new · ${dormantCount} dormant`}
+        subline={movement}
+      />
+      <SignalCard
+        icon={ArrowUpRight}
+        label="Top Riser"
+        value={topRiser?.name || "--"}
+        subline={topRiser ? `${pct(topRiser.delta_pct, { signed: true })} · ${gbp(topRiser.current)}` : "No rising accounts"}
+        tone="positive"
+      />
+      <SignalCard
+        icon={ArrowDownRight}
+        label="Top Faller"
+        value={topFaller?.name || "--"}
+        subline={topFaller ? `${pct(topFaller.delta_pct, { signed: true })} · ${gbp(topFaller.current)}` : "No falling accounts"}
+        tone="negative"
+      />
+      <SignalCard
+        icon={Package}
+        label="Product Focus"
+        value={`${data.products?.n_to_80pct || 0} products`}
+        subline={`${pct(data.products?.top_5_share_pct)} from top 5 · ${channel}`}
+      />
+    </section>
+  );
+}
+
+function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
+  const toneCls = {
+    neutral: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    positive: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+    negative: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
+  }[tone];
+
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${toneCls}`}>
+        <Icon size={17} strokeWidth={1.9} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+          {label}
+        </div>
+        <div className="mt-1 truncate font-display text-base font-semibold text-slate-950 dark:text-slate-100" title={String(value)}>
+          {value}
+        </div>
+        <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400" title={subline}>
+          {subline}
+        </div>
+      </div>
+    </div>
   );
 }
 
