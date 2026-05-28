@@ -91,7 +91,8 @@ products × days grid fits more day columns without horizontal scroll.
     --ink:#f1f5f9;--muted:#cbd5e1;--amber:#f59e0b;--red:#fb7185;--green:#34d399;
     --header-bg:#0f172a;--dot-grid:transparent;--low-bg:rgba(251,113,133,.08);
   }
-  body{background:var(--bg);background-image:none;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  *{box-sizing:border-box}
+  body{background:var(--bg);background-image:none;color:var(--ink);font-family:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-feature-settings:"tnum" 1}
   body > header{position:fixed;inset:0 auto 0 0;z-index:50;width:16rem;height:100vh;
     display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border-right:1px solid var(--line);
     border-bottom:0;background:var(--panel)}
@@ -116,26 +117,66 @@ products × days grid fits more day columns without horizontal scroll.
   .orders-title-row h2{margin:0;font-family:var(--disp);font-size:28px;letter-spacing:0;text-transform:none;color:var(--ink)}
   .orders-title-row .subtitle{margin-top:4px;font-size:13px;color:var(--muted)}
   .orders-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .btn{border-radius:8px;background:#020617;color:white;font-family:inherit;font-size:14px;font-weight:700;
-    letter-spacing:0;text-transform:none;padding:10px 14px;min-height:40px}
-  html[data-theme="dark"] .btn{background:white;color:#020617}
-  .btn.ghost{background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;border-radius:8px;border:1px solid var(--line);
+    background:#020617;color:#fff;font-family:inherit;font-size:14px;font-weight:600;letter-spacing:0;text-transform:none;
+    padding:0 14px;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:border-color .15s,color .15s,background .15s}
+  html[data-theme="dark"] .btn{background:#fff;color:#020617}
+  .btn:hover{border-color:#cbd5e1}
+  .btn.ghost{background:var(--panel);color:#334155;border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  html[data-theme="dark"] .btn.ghost{background:var(--panel);color:#cbd5e1}
   .card,.week-nav,.day-block{border-radius:12px;border:1px solid var(--line);background:var(--panel);
     box-shadow:0 1px 2px rgba(15,23,42,.05)}
   .card{padding:20px;margin-bottom:20px}
   .card h3{font-family:var(--disp);font-size:16px;text-transform:none;letter-spacing:0;color:var(--ink)}
-  input,select{border-radius:8px;background:var(--panel);font-family:inherit;min-height:40px}
+  input,select{height:40px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:#334155;font-family:inherit;font-size:14px;font-weight:500;min-height:40px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  html[data-theme="dark"] input,html[data-theme="dark"] select{color:#cbd5e1;background:var(--panel)}
   .field label,.week-nav .label{font-family:inherit;font-size:12px;text-transform:none;letter-spacing:0;color:var(--muted)}
-  .week-nav{padding:12px 14px;margin-bottom:16px}
+  .week-nav{padding:12px 14px;margin-bottom:16px;gap:10px}
   .week-nav .current{color:var(--ink)}
-  .day-strip{gap:12px;margin:16px 0}
+  .week-nav form{display:inline-flex;align-items:center;gap:8px}
+  .week-nav .btn.ghost{height:32px;border-radius:6px;padding:0 12px;font-size:13px}
+  form.card{padding:16px 20px!important;margin-bottom:20px!important}
+  form.card .row{gap:16px}
+  form.card .btn{height:40px;padding:0 14px!important}
+  .day-strip{gap:12px;margin:16px 0 20px}
   .day-tile{border-radius:12px;border:1px solid var(--line);border-left:1px solid var(--line);background:var(--panel);
-    padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
-  .day-tile.today,.day-tile.total{border-color:#fbbf24;background:rgba(245,158,11,.12)}
-  .day-tile .value{font-size:14px}
-  .cust-list .cust{padding:9px 4px}
+    padding:20px;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:border-color .15s,background .15s}
+  .day-tile:hover{border-color:#cbd5e1;background:#f8fafc}
+  html[data-theme="dark"] .day-tile:hover{border-color:#334155;background:#1e293b}
+  .day-tile.today{border-color:var(--line);background:var(--panel)}
+  .day-tile.total{border-color:#fde68a;background:#fffbeb}
+  html[data-theme="dark"] .day-tile.total{border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.1)}
+  .day-tile .dn{font-family:var(--disp);font-size:12px;font-weight:500;letter-spacing:0;color:var(--muted)}
+  .day-tile .dd,.day-tile .count{font-size:12px;color:var(--muted)}
+  .day-tile .value{margin-top:4px;font-family:var(--disp);font-size:24px;font-weight:600;color:var(--ink);letter-spacing:0}
+  .day-tile.empty .value{color:#94a3b8}
+  .internal-subtotal{color:var(--muted);margin:-8px 0 20px}
+  .cust-list{border-top:1px solid #f1f5f9}
+  html[data-theme="dark"] .cust-list{border-top-color:#1e293b}
+  .cust-list .divider{border-bottom:1px solid #e2e8f0;padding:12px 8px 8px;font-family:inherit;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
+  html[data-theme="dark"] .cust-list .divider{border-bottom-color:#1e293b}
+  .cust-list .cust{padding:10px 8px;border-bottom:1px solid #f1f5f9;transition:background .15s}
+  html[data-theme="dark"] .cust-list .cust{border-bottom-color:#1e293b}
+  .cust-list .cust:hover{background:#f8fafc}
+  html[data-theme="dark"] .cust-list .cust:hover{background:rgba(30,41,59,.5)}
+  .cust-list .cust.muted{opacity:1}
+  .cust-list .cust.muted .name a,.cust-list .cust.muted .badge{color:#94a3b8}
+  .cust-list .cust .name a{font-weight:500;color:#1e293b}
+  html[data-theme="dark"] .cust-list .cust .name a{color:#e2e8f0}
+  .cust-list .cust .badge{font-family:var(--mono);font-size:12px;font-weight:600;color:#0f172a;margin-left:auto;text-align:right;font-variant-numeric:tabular-nums}
+  html[data-theme="dark"] .cust-list .cust .badge{color:#f1f5f9}
+  .cust-list .cust.active .badge{color:#0f172a}
+  html[data-theme="dark"] .cust-list .cust.active .badge{color:#f1f5f9}
+  .cust-list .cust .tag-internal{border-color:#e2e8f0;border-radius:999px;color:#64748b;background:#f8fafc}
+  html[data-theme="dark"] .cust-list .cust .tag-internal{border-color:#334155;color:#cbd5e1;background:#1e293b}
   table{border-radius:10px;border-color:var(--line);background:var(--panel);overflow:hidden}
   th{letter-spacing:0;text-transform:none;font-family:inherit}
+  .day-block{padding:20px;margin-bottom:20px}
+  .day-block.today{border-color:#fde68a;background:#fffbeb}
+  html[data-theme="dark"] .day-block.today{border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.1)}
+  .day-block table tr{transition:background .15s}
+  .day-block table tr:hover{background:#f8fafc}
+  html[data-theme="dark"] .day-block table tr:hover{background:rgba(30,41,59,.5)}
   @media (max-width:1024px){
     body > header{position:static;width:auto;height:auto}
     header nav{flex-direction:row;flex-wrap:wrap}
@@ -156,22 +197,22 @@ products × days grid fits more day columns without horizontal scroll.
   </div>
 </div>
 
-<div class="week-nav">
+<div class="week-nav" aria-label="Week controls">
   <span class="label">Week</span>
-  <a href="?week={{ prev_week|date:'Y-m-d' }}" class="btn ghost" style="padding:3px 10px;font-size:11px">← previous</a>
+  <a href="?week={{ prev_week|date:'Y-m-d' }}" class="btn ghost">← previous</a>
   <span class="current">{{ week_start|date:"d M" }} – {{ week_end|date:"d M Y" }}</span>
-  <a href="?week={{ next_week|date:'Y-m-d' }}" class="btn ghost" style="padding:3px 10px;font-size:11px">next →</a>
+  <a href="?week={{ next_week|date:'Y-m-d' }}" class="btn ghost">next →</a>
   {% if not on_today_week %}
-    <a href="?week={{ today_week|date:'Y-m-d' }}" class="btn ghost" style="padding:3px 10px;font-size:11px">this week</a>
+    <a href="?week={{ today_week|date:'Y-m-d' }}" class="btn ghost">this week</a>
   {% endif %}
   <form method="get" style="margin-left:auto">
     <label class="label">jump to:</label>
     <input type="date" name="week" value="{{ week_start|date:'Y-m-d' }}">
-    <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">go</button>
+    <button class="btn ghost" type="submit">go</button>
   </form>
 </div>
 
-<form method="get" class="card" style="padding:12px 16px;margin-bottom:18px">
+<form method="get" class="card">
   <input type="hidden" name="week" value="{{ week_start|date:'Y-m-d' }}">
   <div class="row" style="align-items:end">
     <div class="field"><label>Customer</label>
@@ -185,7 +226,7 @@ products × days grid fits more day columns without horizontal scroll.
     <div class="field"><label>Specific day</label>
       <input type="date" name="date" value="{{ filter_date }}"
              min="{{ week_start|date:'Y-m-d' }}" max="{{ week_end|date:'Y-m-d' }}"></div>
-    <button class="btn" type="submit" style="padding:6px 14px">Filter</button>
+    <button class="btn" type="submit">Filter</button>
     {% if filter_customer or filter_date %}
       <a href="?week={{ week_start|date:'Y-m-d' }}" class="muted" style="font-size:12px;margin-left:6px">clear within-week filters</a>
     {% endif %}
@@ -313,6 +354,28 @@ weekday tile is a link that narrows the view to that specific day.
   .order-grid tbody td.total-val,.order-grid thead th.total-val{right:0;z-index:2}
   .order-grid tbody td.total-qty,.order-grid thead th.total-qty{right:90px;z-index:2}
   .order-grid thead th.total-qty,.order-grid thead th.total-val{z-index:5}
+  .order-grid-wrap{border-radius:10px;border-color:var(--line);background:var(--panel)}
+  .order-grid thead th{font-family:inherit;text-transform:none;letter-spacing:0;color:var(--muted);background:#f8fafc}
+  html[data-theme="dark"] .order-grid thead th{background:#0f172a}
+  .order-grid th,.order-grid td{border-color:#f1f5f9;background:var(--panel)}
+  html[data-theme="dark"] .order-grid th,html[data-theme="dark"] .order-grid td{border-color:#1e293b}
+  .order-grid tbody tr{transition:background .15s}
+  .order-grid tbody tr:hover td{background:#f8fafc}
+  html[data-theme="dark"] .order-grid tbody tr:hover td{background:rgba(30,41,59,.5)}
+  .order-grid td.sku{color:#64748b;font-family:var(--mono);letter-spacing:0}
+  .order-grid td.name a{color:#1e293b;font-weight:500}
+  html[data-theme="dark"] .order-grid td.name a{color:#e2e8f0}
+  .order-grid tbody td.total-qty,.order-grid tbody td.total-val,
+  .order-grid thead th.total-qty,.order-grid thead th.total-val,
+  .order-grid tfoot td,.order-grid tfoot td.col-sticky-foot{background:#f8fafc}
+  html[data-theme="dark"] .order-grid tbody td.total-qty,
+  html[data-theme="dark"] .order-grid tbody td.total-val,
+  html[data-theme="dark"] .order-grid thead th.total-qty,
+  html[data-theme="dark"] .order-grid thead th.total-val,
+  html[data-theme="dark"] .order-grid tfoot td,
+  html[data-theme="dark"] .order-grid tfoot td.col-sticky-foot{background:#0f172a}
+  .order-grid thead th.today{color:#d97706;background:#fffbeb}
+  html[data-theme="dark"] .order-grid thead th.today{color:#fbbf24;background:rgba(245,158,11,.1)}
 </style>
 <div class="card">
   <h3>{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}
