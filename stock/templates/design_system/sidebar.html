@@ -1,0 +1,50 @@
+<aside class="bp-sidebar">
+  <div class="bp-sidebar-head">
+    <a class="bp-logo" href="{% url 'home' %}">
+      <span class="bp-logo-mark">SU</span>
+      <span>
+        <span class="bp-logo-title">StockUp</span>
+        <span class="bp-logo-subtitle">Bakery</span>
+      </span>
+    </a>
+  </div>
+
+  <nav class="bp-nav">
+    <a class="bp-nav-link {% if request.path == '/dashboard/' %}is-active{% endif %}" href="/dashboard/">Dashboard</a>
+    <a class="bp-nav-link {% if request.path|slice:':32' == '/business-performance-dashboard/' %}is-active{% endif %}" href="/business-performance-dashboard/">Business Performance</a>
+    <a class="bp-nav-link {% if request.path|slice:':8' == '/orders/' %}is-active{% endif %}" href="{% url 'orders' %}">Orders</a>
+    <a class="bp-nav-link {% if request.path|slice:':12' == '/financials/' %}is-active{% endif %}" href="/financials/">Financials</a>
+    <a class="bp-nav-link {% if request.path|slice:':10' == '/products/' %}is-active{% endif %}" href="/products/">Products</a>
+    <a class="bp-nav-link {% if request.path|slice:':9' == '/recipes/' %}is-active{% endif %}" href="/recipes/">Recipes</a>
+    <a class="bp-nav-link {% if request.path|slice:':7' == '/stock/' %}is-active{% endif %}" href="/stock/">Stock</a>
+    <a class="bp-nav-link {% if request.path|slice:':12' == '/deliveries/' %}is-active{% endif %}" href="/deliveries/">Deliveries</a>
+    <a class="bp-nav-link {% if request.path|slice:':11' == '/customers/' %}is-active{% endif %}" href="/customers/">Customers</a>
+  </nav>
+
+  <div class="bp-sidebar-foot">
+    {% if departments %}
+      <label class="bp-label" for="bp-dept-select">Department</label>
+      <select
+        id="bp-dept-select"
+        class="bp-control"
+        onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"
+      >
+        {% for d in departments %}
+          <option value="{{ d.pk }}" {% if d.pk == current_dept.pk %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+
+    <button type="button" class="bp-btn" onclick="bpToggleTheme()">Dark mode</button>
+
+    <div class="bp-inner-surface" style="padding:10px 12px">
+      <div class="bp-section-title" style="font-size:14px">{{ user.username }}</div>
+      <div class="bp-subtext">Signed in</div>
+    </div>
+
+    <form method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button type="submit" class="bp-btn" style="width:100%">Log out</button>
+    </form>
+  </div>
+</aside>

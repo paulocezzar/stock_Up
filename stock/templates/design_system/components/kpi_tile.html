@@ -1,0 +1,19 @@
+<div class="bp-card">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+    <div style="min-width:0">
+      <div class="bp-label">{{ label }}</div>
+      <div class="bp-value">{{ value }}</div>
+    </div>
+    {% if icon %}
+      <div style="display:flex;height:40px;width:40px;flex-shrink:0;align-items:center;justify-content:center;border-radius:8px;background:var(--bp-amber-50);color:var(--bp-amber-700)">
+        {{ icon }}
+      </div>
+    {% endif %}
+  </div>
+  {% if subline or delta %}
+    <div style="margin-top:16px;display:flex;min-height:24px;align-items:center;justify-content:space-between;gap:12px">
+      {% if subline %}<span class="bp-subtext" style="margin-top:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ subline }}</span>{% endif %}
+      {% if delta %}{{ delta }}{% endif %}
+    </div>
+  {% endif %}
+</div>
