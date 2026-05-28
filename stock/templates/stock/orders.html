@@ -79,13 +79,82 @@ products × days grid fits more day columns without horizontal scroll.
   .day-block table{margin:0;background:transparent;border:0}
   .day-block th,.day-block td{border-bottom:1px solid var(--line);padding:6px 10px}
   .day-block table tr:last-child td{border-bottom:0}
+
+  /* Business Performance dashboard visual system for the Orders surface. */
+  :root{
+    --bg:#f8fafc;--panel:#ffffff;--panel2:#f1f5f9;--line:#e2e8f0;
+    --ink:#0f172a;--muted:#64748b;--amber:#d97706;--red:#be123c;--green:#047857;
+    --header-bg:#ffffff;--dot-grid:transparent;--low-bg:rgba(190,18,60,.06);
+  }
+  html:not([data-theme="light"]){
+    --bg:#020617;--panel:#0f172a;--panel2:#020617;--line:#1e293b;
+    --ink:#f1f5f9;--muted:#cbd5e1;--amber:#f59e0b;--red:#fb7185;--green:#34d399;
+    --header-bg:#0f172a;--dot-grid:transparent;--low-bg:rgba(251,113,133,.08);
+  }
+  body{background:var(--bg);background-image:none;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body > header{position:fixed;inset:0 auto 0 0;z-index:50;width:16rem;height:100vh;
+    display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border-right:1px solid var(--line);
+    border-bottom:0;background:var(--panel)}
+  header h1{height:81px;display:flex;align-items:center;margin:0;padding:0 20px;border-bottom:1px solid var(--line);
+    font-family:var(--disp);font-size:18px;letter-spacing:0;text-transform:none;color:var(--ink)}
+  header h1::before{content:"SU";display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;
+    margin-right:12px;border-radius:12px;background:#020617;color:#fff;font-family:var(--disp);font-size:14px;font-weight:700}
+  html:not([data-theme="light"]) header h1::before{background:#fff;color:#020617}
+  header nav{display:flex;flex-direction:column;gap:4px;padding:16px 12px}
+  header nav a{position:relative;margin:0;padding:10px 12px;border-radius:8px;color:var(--muted);
+    font-size:14px;font-weight:600;text-transform:none;letter-spacing:0}
+  header nav a.on,header nav a:hover{background:rgba(245,158,11,.12);color:var(--ink)}
+  header nav a.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 4px 4px 0;background:var(--amber)}
+  header .hdr-right{margin:0;margin-top:auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;
+    padding:12px;border-top:1px solid var(--line)}
+  header .hdr-right select,header .hdr-right button{width:100%;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel)!important;color:var(--ink)!important;font-family:inherit!important;min-height:36px}
+  main.wide{width:calc(100% - 16rem);max-width:none;margin:0 0 0 16rem;padding:28px 32px}
+  main.wide > *{max-width:1760px;margin-left:auto;margin-right:auto}
+  a{color:var(--amber)}
+  .orders-title-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px}
+  .orders-title-row h2{margin:0;font-family:var(--disp);font-size:28px;letter-spacing:0;text-transform:none;color:var(--ink)}
+  .orders-title-row .subtitle{margin-top:4px;font-size:13px;color:var(--muted)}
+  .orders-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{border-radius:8px;background:#020617;color:white;font-family:inherit;font-size:14px;font-weight:700;
+    letter-spacing:0;text-transform:none;padding:10px 14px;min-height:40px}
+  html:not([data-theme="light"]) .btn{background:white;color:#020617}
+  .btn.ghost{background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+  .card,.week-nav,.day-block{border-radius:12px;border:1px solid var(--line);background:var(--panel);
+    box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .card{padding:20px;margin-bottom:20px}
+  .card h3{font-family:var(--disp);font-size:16px;text-transform:none;letter-spacing:0;color:var(--ink)}
+  input,select{border-radius:8px;background:var(--panel);font-family:inherit;min-height:40px}
+  .field label,.week-nav .label{font-family:inherit;font-size:12px;text-transform:none;letter-spacing:0;color:var(--muted)}
+  .week-nav{padding:12px 14px;margin-bottom:16px}
+  .week-nav .current{color:var(--ink)}
+  .day-strip{gap:12px;margin:16px 0}
+  .day-tile{border-radius:12px;border:1px solid var(--line);border-left:1px solid var(--line);background:var(--panel);
+    padding:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .day-tile.today,.day-tile.total{border-color:#fbbf24;background:rgba(245,158,11,.12)}
+  .day-tile .value{font-size:14px}
+  .cust-list .cust{padding:9px 4px}
+  table{border-radius:10px;border-color:var(--line);background:var(--panel);overflow:hidden}
+  th{letter-spacing:0;text-transform:none;font-family:inherit}
+  @media (max-width:1024px){
+    body > header{position:static;width:auto;height:auto}
+    header nav{flex-direction:row;flex-wrap:wrap}
+    header .hdr-right{margin-top:0;flex-direction:row}
+    main.wide{width:auto;margin:0;padding:20px}
+    main.wide > *{max-width:none}
+    .day-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
 </style>
 
-<h2>Orders <span class="muted" style="font-size:14px">week commencing {{ week_start|date:"d M Y" }}</span></h2>
-
-<p style="margin:-8px 0 14px">
-  <a href="{% url 'order_new' %}" class="btn">+ New order</a>
-</p>
+<div class="orders-title-row">
+  <div>
+    <h2>Orders</h2>
+    <div class="subtitle">week commencing {{ week_start|date:"d M Y" }}</div>
+  </div>
+  <div class="orders-actions">
+    <a href="{% url 'order_new' %}" class="btn">+ New order</a>
+  </div>
+</div>
 
 <div class="week-nav">
   <span class="label">Week</span>
