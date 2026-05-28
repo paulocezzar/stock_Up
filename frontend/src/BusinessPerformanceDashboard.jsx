@@ -268,8 +268,32 @@ function Body({ data, channel }) {
       />
       <SignalStrip customers={customers} />
 
-      <div className="mt-5 grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-w-0 flex-col gap-5">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:hidden">
+        <BPWeeklyTrendChart
+          rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
+          mode={isSingleWeek ? "daily" : "weekly"}
+        />
+        <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+        {isSingleWeek && (
+          <BPProductDayHeatmap
+            rows={data.product_day_matrix}
+            weekStart={data.period?.from}
+          />
+        )}
+        <WatchlistPanel
+          customers={customers}
+          concentration={concentration}
+          channel={channel}
+        />
+        <BPCustomersTable
+          payload={customers}
+          channel={channel}
+          hasPrior={hasPrior}
+        />
+      </div>
+
+      <div className="mt-5 hidden items-start gap-5 xl:grid xl:grid-cols-12">
+        <div className="col-span-8 flex min-w-0 flex-col gap-5">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
@@ -286,7 +310,7 @@ function Body({ data, channel }) {
             hasPrior={hasPrior}
           />
         </div>
-        <div className="flex min-w-0 flex-col gap-5">
+        <div className="col-span-4 flex min-w-0 flex-col gap-5">
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
           <WatchlistPanel
             customers={customers}

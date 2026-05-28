@@ -39,10 +39,17 @@ export default function BPProductDayHeatmap({ rows, weekStart }) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-[760px] w-full text-xs">
+          <table className="min-w-[680px] w-full table-fixed text-xs">
+            <colgroup>
+              <col className="w-[34%]" />
+              {DAYS.map((day) => (
+                <col key={day} className="w-[7.5%]" />
+              ))}
+              <col className="w-[13.5%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-100 text-left font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                <th className="w-[260px] py-1.5 pr-3">Product</th>
+                <th className="py-1.5 pr-3">Product</th>
                 {DAYS.map((day) => (
                   <th key={day} className="px-1 py-1.5 text-center">
                     {day}
@@ -68,7 +75,7 @@ export default function BPProductDayHeatmap({ rows, weekStart }) {
                     {daily.map((qty, i) => (
                       <td key={`${row.product}-${DAYS[i]}`} className="px-1 py-1">
                         <div
-                          className="flex h-6 min-w-10 items-center justify-center rounded tabular text-[11px] font-semibold text-slate-950 ring-1 ring-inset ring-amber-900/5 dark:text-slate-100"
+                          className="flex h-6 w-full items-center justify-center rounded tabular text-[11px] font-semibold text-slate-950 ring-1 ring-inset ring-amber-900/5 dark:text-slate-100"
                           style={heatCellStyle(qty, maxQty)}
                           title={`${row.product} · ${dayTooltip(weekStart, i)} · ordered quantity: ${formatQty(qty) || "0"}`}
                         >
