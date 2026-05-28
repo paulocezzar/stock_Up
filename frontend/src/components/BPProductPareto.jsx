@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { gbp, pct } from "../lib/format.js";
 
 // Product Pareto: which SKUs carry the period ordered value. Sorted by VALUE
-// descending. Default visible is the top 15 so the table stays scannable;
+// descending. Default visible is the top 10 so the table stays scannable;
 // the rest collapse behind a clear expand action.
-const INITIAL_VISIBLE = 15;
+const INITIAL_VISIBLE = 10;
 export default function BPProductPareto({ payload }) {
   const rows = payload?.rows || [];
   const nTo80 = payload?.n_to_80pct || 0;

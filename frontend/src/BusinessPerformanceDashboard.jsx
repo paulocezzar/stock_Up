@@ -265,24 +265,23 @@ function Body({ data, channel }) {
           buckets={isSingleWeek ? [] : (data.product_week_matrix?.buckets || [])}
           granularity={data.product_week_matrix?.granularity || "week"}
         />
-        <WatchlistPanel
-          customers={customers}
-          concentration={concentration}
-          channel={channel}
-        />
         <BPCustomersTable
           payload={customers}
           channel={channel}
           hasPrior={hasPrior}
         />
+        <WatchlistPanel
+          customers={customers}
+          concentration={concentration}
+          channel={channel}
+        />
       </div>
 
-      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-stretch">
+      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-start">
         <div className="col-span-8 min-w-0">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
-            className="h-full"
           />
         </div>
         <div className="col-span-4 min-w-0">
@@ -293,17 +292,22 @@ function Body({ data, channel }) {
             className="h-full"
           />
         </div>
+      </div>
 
-        <div className="col-span-8 flex min-w-0 flex-col gap-5">
-          <BPProductDayHeatmap
-            mode={isSingleWeek ? "day" : "bucket"}
-            weekStart={data.period?.from}
-            rows={isSingleWeek
-              ? data.product_day_matrix
-              : data.product_week_matrix?.rows}
-            buckets={isSingleWeek ? [] : (data.product_week_matrix?.buckets || [])}
-            granularity={data.product_week_matrix?.granularity || "week"}
-          />
+      <div className="mt-5 hidden xl:block">
+        <BPProductDayHeatmap
+          mode={isSingleWeek ? "day" : "bucket"}
+          weekStart={data.period?.from}
+          rows={isSingleWeek
+            ? data.product_day_matrix
+            : data.product_week_matrix?.rows}
+          buckets={isSingleWeek ? [] : (data.product_week_matrix?.buckets || [])}
+          granularity={data.product_week_matrix?.granularity || "week"}
+        />
+      </div>
+
+      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-start">
+        <div className="col-span-8 min-w-0">
           <BPCustomersTable
             payload={customers}
             channel={channel}

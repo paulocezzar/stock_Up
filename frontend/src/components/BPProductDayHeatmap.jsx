@@ -39,7 +39,6 @@ export default function BPProductDayHeatmap({
   const cellWidth = columnCount
     ? (100 - productWidth - totalWidth) / columnCount
     : 0;
-  const minWidth = Math.max(680, 260 + columnCount * 72 + 96);
 
   return (
     <section className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -70,10 +69,9 @@ export default function BPProductDayHeatmap({
           {emptyLabel}
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="w-full max-w-[1200px]">
           <table
             className="w-full table-fixed text-xs"
-            style={{ minWidth: `${minWidth}px` }}
           >
             <colgroup>
               <col style={{ width: `${productWidth}%` }} />
@@ -112,7 +110,7 @@ export default function BPProductDayHeatmap({
                   {row.series.map((qty, i) => (
                     <td key={`${row.product}-${columns[i].key}`} className="px-1 py-1">
                       <div
-                        className="flex h-6 w-full items-center justify-center rounded tabular text-[11px] font-semibold text-slate-950 ring-1 ring-inset ring-amber-900/5 dark:text-slate-100"
+                        className="flex h-6 w-full items-center justify-center rounded tabular text-[10px] font-semibold text-slate-950 ring-1 ring-inset ring-amber-900/5 dark:text-slate-100 sm:text-[11px]"
                         style={heatCellStyle(qty, maxQty)}
                         title={`${row.product} · ${columns[i].tooltip} · ordered quantity: ${formatQty(qty) || "0"}`}
                       >
