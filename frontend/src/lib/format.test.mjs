@@ -17,6 +17,6 @@ test("business week labels use the 30 March 2026 calendar start", () => {
 test("top summary label renders Week 8 for 18 May 2026", () => {
   assert.equal(
     businessWeekRangeLabel("2026-05-18", "2026-05-18"),
-    "Week 8 18 May 2026 - 24 May 2026",
+    "Week 8 · 18 May 2026 - 24 May 2026",
   );
 });

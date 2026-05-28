@@ -66,7 +66,7 @@ export function businessWeekLabel(iso) {
 
 export function businessWeekRangeLabel(fromIso, toIso = fromIso) {
   if (!fromIso) return "—";
-  return `${businessWeekLabel(fromIso)} ${weekRangeLabel(fromIso, toIso)}`;
+  return `${businessWeekLabel(fromIso)} · ${weekRangeLabel(fromIso, toIso)}`;
 }
 
 export function weekdayShort(iso) {

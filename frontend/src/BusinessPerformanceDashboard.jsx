@@ -292,7 +292,7 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-300">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200">
         <span>
           Business Performance for {isSingleSelectedWeek
             ? businessWeekRangeLabel(data.period.from, data.period.to)
@@ -567,6 +567,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
             <SummaryRow
               label="Selected week"
               value={gbp(current?.total)}
+              stacked
               sub={(
                 <SummaryLines
                   lines={[
@@ -580,6 +581,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
             <SummaryRow
               label="Prior week"
               value={prior ? gbp(prior.total) : "--"}
+              stacked
               sub={prior ? (
                 <SummaryLines
                   lines={[
@@ -637,13 +639,27 @@ function ExecutiveSummary({ data, channel, concentration }) {
   );
 }
 
-function SummaryRow({ label, value, sub, tone = "neutral" }) {
+function SummaryRow({ label, value, sub, tone = "neutral", stacked = false }) {
   const valueCls = {
     positive: "text-emerald-700 dark:text-emerald-300",
     negative: "text-rose-700 dark:text-rose-300",
     neutral: "text-slate-950 dark:text-slate-100",
     muted: "text-slate-500 dark:text-slate-400",
   }[tone] || "text-slate-950 dark:text-slate-100";
+
+  if (stacked) {
+    return (
+      <div className="rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
+        <div className="flex items-start justify-between gap-4">
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            {label}
+          </div>
+          <div className={`shrink-0 text-right font-display text-lg font-semibold ${valueCls}`}>{value}</div>
+        </div>
+        <div className="mt-1.5 text-xs text-slate-600 dark:text-slate-300">{sub}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">

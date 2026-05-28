@@ -38,7 +38,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
   }), { wholesale: 0, internal: 0, total: 0 });
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-5 pb-4 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-xl border border-slate-200 bg-white px-5 pb-3 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5">
@@ -66,7 +66,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
           No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
-      <div className="h-56">
+      <div className="h-52">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="2 4" vertical={false} />
@@ -126,7 +126,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
         </span>
         </div>
         <span className="tabular text-slate-600 dark:text-slate-300">
-          {isDaily ? "Week" : "Period"} total {gbp(totals.total)} · W {gbp(totals.wholesale)} · I {gbp(totals.internal)}
+          {isDaily ? "Week" : "Period"} total: {gbp(totals.total)} · Wholesale: {gbp(totals.wholesale)} · Internal: {gbp(totals.internal)}
         </span>
       </div>
     </section>
