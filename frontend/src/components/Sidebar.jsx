@@ -32,14 +32,14 @@ const NAV = [
 
 // Every layout-critical property is inlined so Tailwind purge, CSS
 // cascade order, or any future global rule can't silently break the
-// rail's positioning. The rail participates in the app flex layout,
-// then sticks to the viewport while the dashboard content scrolls.
+// rail's positioning. The rail is fixed to the viewport but rendered
+// once inside the React tree, avoiding the duplicate portal behavior.
 const BASE_ASIDE_STYLE = {
-  position: "sticky",
+  position: "fixed",
   top: 0,
+  left: 0,
   width: "16rem",
   height: "100vh",
-  flex: "0 0 16rem",
   zIndex: 50,
   display: "flex",
   flexDirection: "column",

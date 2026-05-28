@@ -21,7 +21,15 @@ import {
   businessPerformanceExportUrl,
   fetchBusinessPerformance,
 } from "./lib/api.js";
-import { gbp, pct, weekLabel, weekLongLabel, weekRangeLabel } from "./lib/format.js";
+import {
+  businessWeekLabel,
+  businessWeekRangeLabel,
+  gbp,
+  pct,
+  weekLabel,
+  weekLongLabel,
+  weekRangeLabel,
+} from "./lib/format.js";
 
 const PERIOD_OPTIONS = [
   { key: "current", label: "Current", weeks: 1 },
@@ -81,9 +89,9 @@ export default function BusinessPerformanceDashboard() {
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
-      <main className="min-w-0 flex-1">
+      <main className="ml-64 min-w-0">
         <div className="mx-auto max-w-[1760px] px-8 py-7">
           <Header
             data={data}
@@ -123,11 +131,13 @@ function Header({
   const period = data?.period;
   return (
     <header className="mb-5">
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
           <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {period
-              ? weekRangeLabel(period.from, period.to)
+              ? period.n_weeks === 1
+                ? businessWeekRangeLabel(period.from, period.to)
+                : weekRangeLabel(period.from, period.to)
               : "Waiting for imported weeks"}
           </span>
           {period && (
@@ -143,7 +153,7 @@ function Header({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-l border-slate-200 pl-5 dark:border-slate-800">
           <FilterGroup label="Range">
             <PeriodPicker value={periodKey} onSelect={onPeriod} />
           </FilterGroup>
@@ -280,11 +290,13 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
         <span>
-          Business Performance for {weekRangeLabel(data.period.from, data.period.to)}
+          Business Performance for {data.period.n_weeks === 1
+            ? businessWeekRangeLabel(data.period.from, data.period.to)
+            : weekRangeLabel(data.period.from, data.period.to)}
         </span>
-        <span>Ordered value · excl. VAT · external customers only</span>
+        <span className="text-slate-500 dark:text-slate-400">Ordered value · excl. VAT · external customers only</span>
       </footer>
     </>
   );
@@ -308,13 +320,13 @@ function InsightStrip({ data, customers, concentration }) {
   return (
     <section className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-display font-semibold text-slate-950 dark:text-slate-100">
+        <span className="mr-1 text-xs font-semibold uppercase tracking-normal text-slate-500 dark:text-slate-400">
           What changed?
         </span>
         {insights.map((insight) => (
           <span
             key={insight}
-            className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300"
+            className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300"
           >
             {insight}
           </span>
@@ -335,7 +347,7 @@ function WeekSelect({ value, options, onSelect }) {
       >
         {(options || []).map((iso) => (
           <option key={iso} value={iso}>
-            w/c {weekLongLabel(iso)}
+            {businessWeekLabel(iso)} · w/c {weekLongLabel(iso)}
           </option>
         ))}
       </select>
@@ -551,14 +563,14 @@ function ExecutiveSummary({ data, channel, concentration }) {
         {isSingleWeek ? (
           <>
             <SummaryRow
-              label="Selected week"
+              label={`Selected week: ${businessWeekLabel(data.period.from)}`}
               value={gbp(current?.total)}
-              sub={`${currentWeek?.days_covered || 0}/7 days covered · ${projected}`}
+              sub={`${weekRangeLabel(data.period.from, data.period.to)} · ${currentWeek?.days_covered || 0}/7 days covered · ${projected}`}
             />
             <SummaryRow
-              label="Prior week"
+              label={prior ? `Prior week: ${businessWeekLabel(data.period.prior_from)}` : "Prior week"}
               value={prior ? gbp(prior.total) : "--"}
-              sub={prior ? `w/c ${weekLongLabel(data.period.prior_from)}` : "No prior comparison"}
+              sub={prior ? weekRangeLabel(data.period.prior_from, data.period.prior_to) : "No prior comparison"}
             />
             <SummaryRow
               label="Change vs prior"
@@ -618,13 +630,13 @@ function SummaryRow({ label, value, sub, tone = "neutral" }) {
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
-      <div>
+      <div className="min-w-0">
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
         </div>
         <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">{sub}</div>
       </div>
-      <div className={`font-display text-lg font-semibold ${valueCls}`}>{value}</div>
+      <div className={`min-w-[104px] shrink-0 text-right font-display text-lg font-semibold ${valueCls}`}>{value}</div>
     </div>
   );
 }

@@ -50,6 +50,25 @@ export function weekRangeLabel(fromIso, toIso = fromIso) {
   return `${formatLongDate(start)} - ${formatLongDate(end)}`;
 }
 
+export function businessWeekNumber(iso) {
+  if (!iso) return null;
+  const base = Date.UTC(2026, 2, 30);
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const days = Math.floor((d.getTime() - base) / 86400000);
+  return Math.floor(days / 7) + 1;
+}
+
+export function businessWeekLabel(iso) {
+  const n = businessWeekNumber(iso);
+  return n === null ? "Week —" : `Week ${n}`;
+}
+
+export function businessWeekRangeLabel(fromIso, toIso = fromIso) {
+  if (!fromIso) return "—";
+  return `${businessWeekLabel(fromIso)} ${weekRangeLabel(fromIso, toIso)}`;
+}
+
 export function weekdayShort(iso) {
   if (!iso) return "—";
   const d = new Date(`${iso}T00:00:00Z`);
