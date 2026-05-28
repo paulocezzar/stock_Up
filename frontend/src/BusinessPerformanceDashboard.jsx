@@ -290,13 +290,13 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-300">
         <span>
           Business Performance for {data.period.n_weeks === 1
             ? businessWeekRangeLabel(data.period.from, data.period.to)
             : weekRangeLabel(data.period.from, data.period.to)}
         </span>
-        <span className="text-slate-500 dark:text-slate-400">Ordered value · excl. VAT · external customers only</span>
+        <span className="text-slate-600 dark:text-slate-300">Ordered value · excl. VAT · external customers only</span>
       </footer>
     </>
   );
@@ -320,7 +320,7 @@ function InsightStrip({ data, customers, concentration }) {
   return (
     <section className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="mr-1 text-xs font-semibold uppercase tracking-normal text-slate-500 dark:text-slate-400">
+        <span className="mr-1 text-xs font-semibold tracking-normal text-slate-500 dark:text-slate-400">
           What changed?
         </span>
         {insights.map((insight) => (
@@ -563,14 +563,29 @@ function ExecutiveSummary({ data, channel, concentration }) {
         {isSingleWeek ? (
           <>
             <SummaryRow
-              label={`Selected week: ${businessWeekLabel(data.period.from)}`}
+              label="Selected week"
               value={gbp(current?.total)}
-              sub={`${weekRangeLabel(data.period.from, data.period.to)} · ${currentWeek?.days_covered || 0}/7 days covered · ${projected}`}
+              sub={(
+                <SummaryLines
+                  lines={[
+                    businessWeekLabel(data.period.from),
+                    weekRangeLabel(data.period.from, data.period.to),
+                    `${currentWeek?.days_covered || 0}/7 days covered · ${projected}`,
+                  ]}
+                />
+              )}
             />
             <SummaryRow
-              label={prior ? `Prior week: ${businessWeekLabel(data.period.prior_from)}` : "Prior week"}
+              label="Prior week"
               value={prior ? gbp(prior.total) : "--"}
-              sub={prior ? weekRangeLabel(data.period.prior_from, data.period.prior_to) : "No prior comparison"}
+              sub={prior ? (
+                <SummaryLines
+                  lines={[
+                    businessWeekLabel(data.period.prior_from),
+                    weekRangeLabel(data.period.prior_from, data.period.prior_to),
+                  ]}
+                />
+              ) : "No prior comparison"}
             />
             <SummaryRow
               label="Change vs prior"
@@ -637,6 +652,21 @@ function SummaryRow({ label, value, sub, tone = "neutral" }) {
         <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">{sub}</div>
       </div>
       <div className={`min-w-[104px] shrink-0 text-right font-display text-lg font-semibold ${valueCls}`}>{value}</div>
+    </div>
+  );
+}
+
+function SummaryLines({ lines }) {
+  return (
+    <div className="space-y-0.5 leading-snug">
+      {lines.map((line, i) => (
+        <div
+          key={`${line}-${i}`}
+          className={i === 0 ? "font-medium text-slate-700 dark:text-slate-200" : ""}
+        >
+          {line}
+        </div>
+      ))}
     </div>
   );
 }

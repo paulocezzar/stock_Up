@@ -66,7 +66,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
           No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
-      <div className="h-60">
+      <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="2 4" vertical={false} />
@@ -114,7 +114,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
       </div>
       )}
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-1 w-4 rounded-sm bg-wholesale" />
