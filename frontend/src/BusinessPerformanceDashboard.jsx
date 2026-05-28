@@ -143,16 +143,20 @@ function Header({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <PeriodPicker value={periodKey} onSelect={onPeriod} />
-          {periodKey === "current" && (
-            <WeekSelect
-              value={period?.from}
-              options={data?.available_weeks || []}
-              onSelect={onWeek}
-            />
-          )}
-          <ChannelToggle value={channel} onSelect={onChannel} />
+        <div className="flex flex-wrap items-center gap-3">
+          <FilterGroup label="Time">
+            <PeriodPicker value={periodKey} onSelect={onPeriod} />
+            {periodKey === "current" && (
+              <WeekSelect
+                value={period?.from}
+                options={data?.available_weeks || []}
+                onSelect={onWeek}
+              />
+            )}
+          </FilterGroup>
+          <FilterGroup label="Channel">
+            <ChannelToggle value={channel} onSelect={onChannel} />
+          </FilterGroup>
           <a
             href={exportHref}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white"
@@ -164,6 +168,17 @@ function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+function FilterGroup({ label, children }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      {children}
+    </div>
   );
 }
 
@@ -180,7 +195,7 @@ function PeriodPicker({ value, onSelect }) {
             className={
               "h-8 rounded-md px-3 text-sm font-medium transition " +
               (active
-                ? "bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950"
+                ? "bg-slate-200 text-slate-950 shadow-sm dark:bg-slate-700 dark:text-white"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white")
             }
           >
@@ -228,9 +243,14 @@ function Body({ data, channel }) {
   return (
     <>
       <KpiRow data={data} channel={channel} concentration={concentration} />
-      <SignalStrip data={data} customers={customers} channel={channel} />
+      <InsightStrip
+        data={data}
+        customers={customers}
+        concentration={concentration}
+      />
+      <SignalStrip customers={customers} />
 
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
         <div className="space-y-5">
           {data.current_week && (
@@ -243,7 +263,7 @@ function Body({ data, channel }) {
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <BPCustomersTable
           payload={customers}
           channel={channel}
@@ -268,6 +288,34 @@ function Body({ data, channel }) {
         <span>Ordered value · excl. VAT · external customers only</span>
       </footer>
     </>
+  );
+}
+
+function InsightStrip({ data, customers, concentration }) {
+  const rows = customers?.rows || [];
+  const delta = data.totals?.delta;
+  const topFaller = rows
+    .filter((r) => Number.isFinite(Number(r.delta_pct)) && Number(r.delta_pct) < 0)
+    .sort((a, b) => Number(a.delta_pct) - Number(b.delta_pct))[0];
+  const mix = delta?.wholesale_share_pp != null
+    ? `Wholesale ${pct(delta.wholesale_share_pp, { signed: true }).replace("%", "pp")}`
+    : "No prior mix comparison";
+  const concentrationText = `Top 5 customers drive ${pct(concentration?.top_5_pct)}`;
+  const faller = topFaller
+    ? `${topFaller.name} ${pct(topFaller.delta_pct, { signed: true })}`
+    : "No declining account signal";
+
+  return (
+    <section className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+        <span className="font-display font-semibold text-slate-950 dark:text-slate-100">
+          What changed?
+        </span>
+        <span className="text-slate-600 dark:text-slate-300">{mix}</span>
+        <span className="text-slate-600 dark:text-slate-300">{concentrationText}</span>
+        <span className="text-slate-600 dark:text-slate-300">{faller}</span>
+      </div>
+    </section>
   );
 }
 
@@ -337,7 +385,7 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
         <Icon size={17} strokeWidth={1.9} />
       </div>
       <div className="min-w-0">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
         </div>
         <div className="mt-1 truncate font-display text-base font-semibold text-slate-950 dark:text-slate-100" title={String(value)}>
@@ -356,7 +404,7 @@ function CurrentWeekPanel({ data, weekStart }) {
   const avg8 = data.avg_8w_total ? gbp(data.avg_8w_total) : "--";
   const vs8 = data.vs_8w_pct != null ? pct(data.vs_8w_pct, { signed: true }) : "--";
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -381,7 +429,7 @@ function CurrentWeekPanel({ data, weekStart }) {
       </div>
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
             Pace vs 8w average
           </span>
           <span className="font-display text-lg font-semibold text-slate-950 dark:text-slate-100">
@@ -404,7 +452,7 @@ function MiniSignal({ label, value, tone = "neutral" }) {
   }[tone];
   return (
     <div className="rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
         {label}
       </div>
       <div className={`mt-1 truncate font-display text-lg font-semibold ${toneCls}`}>
@@ -436,8 +484,8 @@ function KpiRow({ data, channel, concentration }) {
       />
       <KpiTile
         icon={PieIcon}
-        label="Channel Mix"
-        value={`${pct(cur.wholesale_pct)} wholesale`}
+        label="Wholesale Share"
+        value={pct(cur.wholesale_pct)}
         deltaPp={delta?.wholesale_share_pp}
         subline={`${pct(cur.internal_pct)} internal · ${gbp(cur.wholesale)} / ${gbp(cur.internal)}`}
       />
@@ -451,10 +499,10 @@ function KpiTile({ icon: Icon, label, value, deltaPct, deltaPp, subline }) {
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
             {label}
           </div>
-          <div className="mt-2 truncate font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">
+          <div className="mt-2 break-words font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">
             {value}
           </div>
         </div>
@@ -503,7 +551,7 @@ function ConcentrationTile({ concentration, channel }) {
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
             Concentration
           </div>
           <div className="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">
@@ -532,7 +580,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
   const best = data.best_worst?.best_week;
   const worst = data.best_worst?.worst_week;
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -551,7 +599,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
         <SummaryRow label="Spread" value={gbp(data.best_worst?.spread)} sub={`Variability ${data.best_worst?.variability_pct != null ? `+/-${Number(data.best_worst.variability_pct).toFixed(1)}%` : "--"}`} />
       </div>
 
-      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+      <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/50">
         <div className="flex items-center justify-between gap-3 text-sm">
           <span className="font-medium text-slate-700 dark:text-slate-300">
             {channel === "wholesale" ? "Wholesale" : "Internal"} dependency
@@ -576,7 +624,7 @@ function SummaryRow({ label, value, sub }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
         </div>
         <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sub}</div>
@@ -597,7 +645,7 @@ function WatchlistPanel({ customers, concentration, channel }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -669,7 +717,7 @@ function WatchlistSection({ title, icon: Icon, tone, items, empty }) {
         <span className={`flex h-6 w-6 items-center justify-center rounded-md ${toneCls}`}>
           <Icon size={13} strokeWidth={2} />
         </span>
-        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {title}
         </span>
       </div>

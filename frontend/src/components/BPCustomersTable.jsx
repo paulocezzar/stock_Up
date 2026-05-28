@@ -8,8 +8,8 @@ import { gbp, pct } from "../lib/format.js";
 // payload field (data.customers[channel].dormant) and live in the
 // Watchlist panel — not in this table.
 const STATE_STYLE = {
-  new:       { label: "New",       cls: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" },
-  growing:   { label: "Growing",   cls: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300" },
+  new:       { label: "New",       cls: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300" },
+  growing:   { label: "Growing",   cls: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300" },
   declining: { label: "Declining", cls: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300" },
   stable:    { label: "Stable",    cls: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300" },
 };
@@ -43,7 +43,7 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <tr className="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <th className="w-8 py-2.5 pr-2 text-right">#</th>
               <th className="py-2.5 px-2">Customer</th>
               <th className="py-2.5 px-2 text-right">Value</th>
@@ -102,7 +102,7 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
 
 function DeltaCell({ state, deltaPct }) {
   if (state === "new") {
-    return <span className="text-xs font-semibold text-amber-700">NEW</span>;
+    return <span className="text-xs font-semibold text-slate-500">New</span>;
   }
   if (deltaPct === null || deltaPct === undefined) {
     return <span className="text-slate-400">—</span>;

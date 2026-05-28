@@ -110,7 +110,7 @@ export default function Sidebar() {
             className={
               "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition " +
               (active
-                ? "bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950"
+                ? "bg-amber-50 text-slate-950 ring-1 ring-amber-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100")
             }
           >
