@@ -130,34 +130,10 @@ function Header({
   data, periodKey, onPeriod, onWeek, channel, onChannel, exportHref,
 }) {
   const period = data?.period;
-  const isSingleSelectedWeek = period?.from && period.from === period.to;
   return (
     <header className="mb-5 w-full">
       <div className="flex w-full flex-wrap items-center gap-x-5 gap-y-3">
-        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
-          <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            {period
-              ? isSingleSelectedWeek
-                ? businessWeekRangeLabel(period.from, period.to)
-                : weekRangeLabel(period.from, period.to)
-              : "Waiting for imported weeks"}
-          </span>
-          {period && (
-            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              {isSingleSelectedWeek
-                ? businessWeekLabel(period.from)
-                : `${period.n_weeks} week${period.n_weeks === 1 ? "" : "s"}`}
-            </span>
-          )}
-          {period?.prior_truncated && (
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-              <AlertTriangle size={12} strokeWidth={2} />
-              Prior comparison limited
-            </span>
-          )}
-        </div>
-
-        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 border-l border-slate-200 pl-5 dark:border-slate-800">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
           <FilterGroup label="Range">
             <PeriodPicker value={periodKey} onSelect={onPeriod} />
           </FilterGroup>
@@ -173,6 +149,12 @@ function Header({
           <FilterGroup label="Channel">
             <ChannelToggle value={channel} onSelect={onChannel} />
           </FilterGroup>
+          {period?.prior_truncated && (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <AlertTriangle size={12} strokeWidth={2} />
+              Prior comparison limited
+            </span>
+          )}
           <a
             href={exportHref}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white"
@@ -293,31 +275,50 @@ function Body({ data, channel }) {
       </div>
 
       <div className="mt-5 hidden items-start gap-5 xl:grid xl:grid-cols-12">
-        <div className="col-span-8 flex min-w-0 flex-col gap-5">
+        <div className="col-span-8 min-w-0">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
           />
-          {isSingleWeek && (
-            <BPProductDayHeatmap
-              rows={data.product_day_matrix}
-              weekStart={data.period?.from}
-            />
-          )}
+        </div>
+        <div className="col-span-4 min-w-0">
+          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+        </div>
+
+        {isSingleWeek && (
+          <>
+            <div className="col-span-8 min-w-0">
+              <BPProductDayHeatmap
+                rows={data.product_day_matrix}
+                weekStart={data.period?.from}
+              />
+            </div>
+            <div className="col-span-4 min-w-0">
+              <WatchlistPanel
+                customers={customers}
+                concentration={concentration}
+                channel={channel}
+              />
+            </div>
+          </>
+        )}
+
+        <div className="col-span-8 min-w-0">
           <BPCustomersTable
             payload={customers}
             channel={channel}
             hasPrior={hasPrior}
           />
         </div>
-        <div className="col-span-4 flex min-w-0 flex-col gap-5">
-          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
-          <WatchlistPanel
-            customers={customers}
-            concentration={concentration}
-            channel={channel}
-          />
-        </div>
+        {!isSingleWeek && (
+          <div className="col-span-4 min-w-0">
+            <WatchlistPanel
+              customers={customers}
+              concentration={concentration}
+              channel={channel}
+            />
+          </div>
+        )}
       </div>
 
       <div id="product-ordered-value" className="mt-5 scroll-mt-6">
