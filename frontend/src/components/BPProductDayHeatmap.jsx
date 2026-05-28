@@ -69,7 +69,7 @@ export default function BPProductDayHeatmap({
           {emptyLabel}
         </div>
       ) : (
-        <div className="w-full max-w-[1200px]">
+        <div className="w-full max-w-[1300px]">
           <table
             className="w-full table-fixed text-xs"
           >

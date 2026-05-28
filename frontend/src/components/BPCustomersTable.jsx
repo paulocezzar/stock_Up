@@ -16,14 +16,19 @@ const STATE_STYLE = {
 
 const INITIAL_VISIBLE = 10;
 
-export default function BPCustomersTable({ payload, channel, hasPrior }) {
+export default function BPCustomersTable({
+  payload,
+  channel,
+  hasPrior,
+  className = "",
+}) {
   const rows = payload?.rows || [];
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? rows : rows.slice(0, INITIAL_VISIBLE);
   const hidden = rows.length - visible.length;
 
   return (
-    <section className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className={`flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${className}`}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -96,6 +101,7 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
           Show {hidden} more
         </button>
       )}
+      <div className="flex-1" />
     </section>
   );
 }

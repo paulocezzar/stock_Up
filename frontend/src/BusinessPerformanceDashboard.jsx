@@ -277,11 +277,12 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-start">
+      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-stretch">
         <div className="col-span-8 min-w-0">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
+            className="h-full"
           />
         </div>
         <div className="col-span-4 min-w-0">
@@ -306,12 +307,13 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-start">
+      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-stretch">
         <div className="col-span-8 min-w-0">
           <BPCustomersTable
             payload={customers}
             channel={channel}
             hasPrior={hasPrior}
+            className="h-full"
           />
         </div>
         <div className="col-span-4 min-w-0">
@@ -319,6 +321,7 @@ function Body({ data, channel }) {
             customers={customers}
             concentration={concentration}
             channel={channel}
+            className="h-full"
           />
         </div>
       </div>
@@ -670,6 +673,7 @@ function ExecutiveSummary({ data, channel, concentration, className = "" }) {
           Top customer share: {concentration?.top_1_name || "none"}
         </p>
       </div>
+      <div className="flex-1" />
     </section>
   );
 }
@@ -742,7 +746,7 @@ function WatchlistPanel({ customers, concentration, channel, className = "" }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <section className={`w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60 ${className}`}>
+    <section className={`flex h-full w-full flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -797,6 +801,7 @@ function WatchlistPanel({ customers, concentration, channel, className = "" }) {
         items={dormant.map((d) => ({ name: d.name, tail: `was ${gbp(d.prior)}` }))}
         empty="No dormant accounts."
       />
+      <div className="flex-1" />
     </section>
   );
 }
