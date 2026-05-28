@@ -17,10 +17,14 @@ import { gbp, weekLabel } from "../lib/format.js";
 // No "previous period" overlay here — period-over-period comparison is
 // handled by the KPI tiles. A second area for the prior period would
 // clutter a multi-week chart with limited width.
-export default function BPWeeklyTrendChart({ rows }) {
+export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
+  const isDaily = mode === "daily";
+  const title = isDaily ? "Daily Ordered Value" : "Weekly Ordered Value";
+  const grain = isDaily ? "Daily" : "Weekly";
   const data = (rows || []).map((r) => ({
-    label: weekLabel(r.week),
-    week: r.week,
+    label: isDaily ? dayLabel(r.date) : weekLabel(r.week),
+    tooltipLabel: isDaily ? weekLabel(r.date) : `w/c ${weekLabel(r.week)}`,
+    keyDate: isDaily ? r.date : r.week,
     wholesale: Number(r.wholesale),
     internal: Number(r.internal),
     total: Number(r.total),
@@ -34,27 +38,27 @@ export default function BPWeeklyTrendChart({ rows }) {
         <div>
           <div className="flex items-center gap-1.5">
             <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-              Weekly Ordered Value
+              {title}
             </h3>
             <span
-              title="Ordered value by week, split into Wholesale and Internal lines."
+              title={`Ordered value by ${isDaily ? "day" : "week"}, split into Wholesale and Internal lines.`}
               className="text-slate-400 dark:text-slate-500"
             >
               <Info size={12} strokeWidth={2} />
             </span>
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Selected period by channel, ordered value in GBP.
+            Selected {isDaily ? "week" : "period"} by channel, ordered value in GBP.
           </div>
         </div>
         <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
-          Weekly
+          {grain}
         </span>
       </div>
 
       {data.length === 0 ? (
         <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          No weekly ordered value in this period.
+          No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
       <div className="h-72">
@@ -131,7 +135,7 @@ function BPTrendTooltip({ active, payload }) {
   if (!row) return null;
   return (
     <div className="min-w-[220px] rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-1.5 font-display font-semibold text-slate-950 dark:text-slate-100">w/c {row.label}</div>
+      <div className="mb-1.5 font-display font-semibold text-slate-950 dark:text-slate-100">{row.tooltipLabel}</div>
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-slate-400">
           <span className="h-2 w-2 rounded-sm bg-wholesale" />
@@ -156,4 +160,10 @@ function BPTrendTooltip({ active, payload }) {
       </div>
     </div>
   );
+}
+
+function dayLabel(iso) {
+  if (!iso) return "--";
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", { weekday: "short" });
 }

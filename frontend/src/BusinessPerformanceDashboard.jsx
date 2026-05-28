@@ -239,6 +239,7 @@ function Body({ data, channel }) {
   const customers = data.customers[channel];
   const concentration = data.concentration[channel];
   const hasPrior = !data.period.prior_truncated;
+  const isSingleWeek = data.period?.n_weeks === 1;
 
   return (
     <>
@@ -251,14 +252,11 @@ function Body({ data, channel }) {
       <SignalStrip customers={customers} />
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <BPWeeklyTrendChart rows={data.weekly_trend} />
+        <BPWeeklyTrendChart
+          rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
+          mode={isSingleWeek ? "daily" : "weekly"}
+        />
         <div className="space-y-5">
-          {data.current_week && (
-            <CurrentWeekPanel
-              data={data.current_week}
-              weekStart={data.period.from}
-            />
-          )}
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
         </div>
       </div>
@@ -399,69 +397,6 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
   );
 }
 
-function CurrentWeekPanel({ data, weekStart }) {
-  const projected = data.projected_total ? gbp(data.projected_total) : "Complete";
-  const avg8 = data.avg_8w_total ? gbp(data.avg_8w_total) : "--";
-  const vs8 = data.vs_8w_pct != null ? pct(data.vs_8w_pct, { signed: true }) : "--";
-  return (
-    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-            Selected Week Pace
-          </h2>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            w/c {weekLongLabel(weekStart)} against the recent run rate.
-          </p>
-        </div>
-        <LineChart size={18} strokeWidth={1.8} className="text-slate-400 dark:text-slate-500" />
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <MiniSignal label="Days covered" value={`${data.days_covered || 0}/7`} />
-        <MiniSignal
-          label="Status"
-          value={data.is_complete ? "Complete" : "Partial"}
-          tone={data.is_complete ? "positive" : "warning"}
-        />
-        <MiniSignal label="Projected week" value={projected} />
-        <MiniSignal label="8w avg" value={avg8} />
-      </div>
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Pace vs 8w average
-          </span>
-          <span className="font-display text-lg font-semibold text-slate-950 dark:text-slate-100">
-            {vs8}
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Latest order date: {data.latest_order_date ? weekLabel(data.latest_order_date) : "--"}
-        </p>
-      </div>
-    </section>
-  );
-}
-
-function MiniSignal({ label, value, tone = "neutral" }) {
-  const toneCls = {
-    neutral: "text-slate-950 dark:text-slate-100",
-    positive: "text-emerald-700 dark:text-emerald-300",
-    warning: "text-amber-800 dark:text-amber-200",
-  }[tone];
-  return (
-    <div className="rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
-        {label}
-      </div>
-      <div className={`mt-1 truncate font-display text-lg font-semibold ${toneCls}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function KpiRow({ data, channel, concentration }) {
   const t = data.totals;
   const cur = t.current;
@@ -577,8 +512,18 @@ function ConcentrationTile({ concentration, channel }) {
 }
 
 function ExecutiveSummary({ data, channel, concentration }) {
+  const isSingleWeek = data.period?.n_weeks === 1;
+  const current = data.totals?.current;
+  const prior = data.totals?.prior;
+  const delta = data.totals?.delta;
+  const currentWeek = data.current_week;
   const best = data.best_worst?.best_week;
   const worst = data.best_worst?.worst_week;
+  const projected = currentWeek?.projected_total
+    ? `Projected ${gbp(currentWeek.projected_total)}`
+    : currentWeek?.is_complete
+      ? "Complete week"
+      : "No projection yet";
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
@@ -587,16 +532,50 @@ function ExecutiveSummary({ data, channel, concentration }) {
             Executive Summary
           </h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Highest, lowest, and dependency signals for this period.
+            {isSingleWeek
+              ? "Selected week compared with prior and recent run rate."
+              : "Highest, lowest, and dependency signals for this period."}
           </p>
         </div>
         <BarChart3 size={18} strokeWidth={1.8} className="text-slate-400 dark:text-slate-500" />
       </div>
 
       <div className="mt-5 space-y-3">
-        <SummaryRow label="Strongest week" value={best ? gbp(best.total) : "--"} sub={best ? `w/c ${weekLongLabel(best.week)}` : "No data"} />
-        <SummaryRow label="Quietest week" value={worst ? gbp(worst.total) : "--"} sub={worst ? `w/c ${weekLongLabel(worst.week)}` : "No data"} />
-        <SummaryRow label="Spread" value={gbp(data.best_worst?.spread)} sub={`Variability ${data.best_worst?.variability_pct != null ? `+/-${Number(data.best_worst.variability_pct).toFixed(1)}%` : "--"}`} />
+        {isSingleWeek ? (
+          <>
+            <SummaryRow
+              label="Selected week"
+              value={gbp(current?.total)}
+              sub={`${currentWeek?.days_covered || 0}/7 days covered · ${projected}`}
+            />
+            <SummaryRow
+              label="Prior week"
+              value={prior ? gbp(prior.total) : "--"}
+              sub={prior ? `w/c ${weekLongLabel(data.period.prior_from)}` : "No prior comparison"}
+            />
+            <SummaryRow
+              label="Change vs prior"
+              value={delta?.total_pct != null ? pct(delta.total_pct, { signed: true }) : "--"}
+              sub="Ordered value movement"
+            />
+            <SummaryRow
+              label="8w average"
+              value={currentWeek?.avg_8w_total ? gbp(currentWeek.avg_8w_total) : "--"}
+              sub={`${currentWeek?.avg_8w_weeks || 0} prior week${currentWeek?.avg_8w_weeks === 1 ? "" : "s"} in benchmark`}
+            />
+            <SummaryRow
+              label="Pace vs 8w average"
+              value={currentWeek?.vs_8w_pct != null ? pct(currentWeek.vs_8w_pct, { signed: true }) : "--"}
+              sub={`Latest order date: ${currentWeek?.latest_order_date ? weekLabel(currentWeek.latest_order_date) : "--"}`}
+            />
+          </>
+        ) : (
+          <>
+            <SummaryRow label="Strongest week" value={best ? gbp(best.total) : "--"} sub={best ? `w/c ${weekLongLabel(best.week)}` : "No data"} />
+            <SummaryRow label="Quietest week" value={worst ? gbp(worst.total) : "--"} sub={worst ? `w/c ${weekLongLabel(worst.week)}` : "No data"} />
+            <SummaryRow label="Spread" value={gbp(data.best_worst?.spread)} sub={`Variability ${data.best_worst?.variability_pct != null ? `+/-${Number(data.best_worst.variability_pct).toFixed(1)}%` : "--"}`} />
+          </>
+        )}
       </div>
 
       <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/50">

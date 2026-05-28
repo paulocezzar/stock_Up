@@ -11107,7 +11107,8 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         expected = {"period", "available_weeks", "totals", "weekly_trend",
-                    "best_worst", "concentration", "customers", "products"}
+                    "daily_trend", "best_worst", "concentration",
+                    "customers", "products", "current_week"}
         self.assertTrue(expected.issubset(body.keys()),
                         f"Missing keys: {expected - body.keys()}")
 
@@ -11128,3 +11129,26 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertIn("internal", body["concentration"])
         self.assertIn("wholesale", body["customers"])
         self.assertIn("internal", body["customers"])
+
+    def test_default_one_week_returns_daily_channel_trend(self):
+        self.client.force_login(self.user)
+        body = self.client.get(self.URL).json()
+        rows = body["daily_trend"]
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(rows[0]["date"], self.wc3.isoformat())
+        self.assertEqual(
+            rows[6]["date"],
+            (self.wc3 + datetime.timedelta(days=6)).isoformat())
+        total = sum(Decimal(str(r["total"])) for r in rows)
+        self.assertEqual(total, Decimal(str(body["totals"]["current"]["total"])))
+        monday = rows[0]
+        self.assertEqual(Decimal(str(monday["wholesale"])), Decimal("10.00"))
+        self.assertEqual(Decimal(str(monday["internal"])), Decimal("5.00"))
+
+    def test_multi_week_keeps_weekly_trend_and_no_daily_trend(self):
+        self.client.force_login(self.user)
+        body = self.client.get(
+            f"{self.URL}?from={self.wc1.isoformat()}&to={self.wc3.isoformat()}"
+        ).json()
+        self.assertEqual(len(body["weekly_trend"]), 3)
+        self.assertEqual(body["daily_trend"], [])

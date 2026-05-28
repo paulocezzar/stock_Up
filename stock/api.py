@@ -39,7 +39,7 @@ from .financials import (
     per_customer_in_channel, per_week_split,
     period_comparison, range_product_revenue, range_totals,
     range_week_stats, recent_order_groups, week_channel_split,
-    week_daily_totals, week_orders_count, week_over_week,
+    week_daily_channel_split, week_daily_totals, week_orders_count, week_over_week,
     week_product_day_matrix, week_top_customers,
 )
 from .models import Customer, Order, OrderLine
@@ -545,6 +545,7 @@ def _empty_bp_payload(from_wc, to_wc):
             "delta": None,
         },
         "weekly_trend": [],
+        "daily_trend": [],
         "best_worst": {
             "best_week": None, "worst_week": None,
             "spread": str(zero), "mean": str(zero),
@@ -840,6 +841,7 @@ def business_performance_summary(request):
 
     comparison = period_comparison(dept, from_wc, to_wc)
     weekly = per_week_split(dept, from_wc, to_wc)
+    daily = week_daily_channel_split(dept, from_wc) if from_wc == to_wc else []
     stats = range_week_stats(dept, from_wc, to_wc)
     wholesale_conc = concentration_metrics(
         dept, Customer.WHOLESALE, from_wc, to_wc)
@@ -882,6 +884,15 @@ def business_performance_summary(request):
                 "total": str(r["total"]),
             }
             for r in weekly
+        ],
+        "daily_trend": [
+            {
+                "date": r["date"].isoformat(),
+                "internal": str(r["internal"]),
+                "wholesale": str(r["wholesale"]),
+                "total": str(r["total"]),
+            }
+            for r in daily
         ],
         "best_worst": _bp_best_worst_payload(stats),
         "concentration": {

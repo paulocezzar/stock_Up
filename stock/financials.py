@@ -261,6 +261,51 @@ def week_daily_totals(dept, week_start):
     return out
 
 
+def week_daily_channel_split(dept, week_start):
+    """7 rows (Mon..Sun) of ``{date, internal, wholesale, total}``.
+
+    Same scope and partition rule as :func:`per_week_split`, but at
+    day grain so a one-week Business Performance chart has seven real
+    points instead of one stretched weekly point.
+    """
+    end = week_start + timedelta(days=6)
+    rows = (OrderLine.objects.filter(
+        order__department=dept,
+        order__order_date__range=(week_start, end),
+        order__customer__is_internal=False,
+    ).values(
+        "order__order_date",
+        "order__customer__customer_type",
+    ).annotate(total=_line_value_expr()))
+
+    by_date = {
+        week_start + timedelta(days=i): {
+            "date": week_start + timedelta(days=i),
+            "internal": Decimal("0"),
+            "wholesale": Decimal("0"),
+        }
+        for i in range(7)
+    }
+
+    for r in rows:
+        bucket = by_date.get(r["order__order_date"])
+        if bucket is None:
+            continue
+        if r["order__customer__customer_type"] == Customer.WHOLESALE:
+            bucket["wholesale"] += r["total"] or Decimal("0")
+        else:
+            bucket["internal"] += r["total"] or Decimal("0")
+
+    out = []
+    for d in sorted(by_date):
+        bucket = by_date[d]
+        bucket["internal"] = _q2(bucket["internal"])
+        bucket["wholesale"] = _q2(bucket["wholesale"])
+        bucket["total"] = _q2(bucket["internal"] + bucket["wholesale"])
+        out.append(bucket)
+    return out
+
+
 def week_channel_split(dept, week_start):
     """``{internal:{total,pct}, wholesale:{total,pct}}`` for one week.
 

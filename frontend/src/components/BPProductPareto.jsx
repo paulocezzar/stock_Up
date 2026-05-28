@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { gbp, pct } from "../lib/format.js";
 
 // Product Pareto: which SKUs carry the period ordered value. Sorted by VALUE
@@ -11,6 +11,10 @@ export default function BPProductPareto({ payload }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? rows : rows.slice(0, INITIAL_VISIBLE);
   const hidden = rows.length - visible.length;
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [payload]);
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -35,7 +39,7 @@ export default function BPProductPareto({ payload }) {
           No products sold in this period.
         </div>
       ) : (
-        <div className="max-h-[620px] overflow-auto rounded-lg border border-slate-100 dark:border-slate-800">
+        <div className="rounded-lg border border-slate-100 dark:border-slate-800">
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900">
             <tr className="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
