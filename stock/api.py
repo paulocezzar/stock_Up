@@ -37,7 +37,7 @@ from .financials import (
     available_week_range, available_weeks,
     concentration_metrics, customer_dynamics,
     per_customer_in_channel, per_week_split,
-    period_comparison, range_product_revenue, range_totals,
+    period_comparison, range_product_bucket_matrix, range_product_revenue, range_totals,
     range_week_stats, recent_order_groups, week_channel_split,
     week_daily_channel_split, week_daily_totals, week_orders_count, week_over_week,
     week_product_day_matrix, week_top_customers,
@@ -568,6 +568,7 @@ def _empty_bp_payload(from_wc, to_wc):
             "top_10_share_pct": "0.0",
         },
         "product_day_matrix": [],
+        "product_week_matrix": None,
         "current_week": None,
     }
 
@@ -862,6 +863,11 @@ def business_performance_summary(request):
         if from_wc == to_wc
         else []
     )
+    product_week_matrix = (
+        range_product_bucket_matrix(dept, from_wc, to_wc, top_n=8)
+        if from_wc != to_wc
+        else None
+    )
 
     payload = {
         "period": {
@@ -926,6 +932,23 @@ def business_performance_summary(request):
             }
             for r in product_day_matrix
         ],
+        "product_week_matrix": (
+            None if not product_week_matrix else {
+                "granularity": product_week_matrix["granularity"],
+                "buckets": [
+                    bucket.isoformat()
+                    for bucket in product_week_matrix["buckets"]
+                ],
+                "rows": [
+                    {
+                        "product": r["product"],
+                        "values": [str(q) for q in r["values"]],
+                        "total_qty": str(r["total_qty"]),
+                    }
+                    for r in product_week_matrix["rows"]
+                ],
+            }
+        ),
     }
     payload["current_week"] = _bp_current_week_payload(
         dept,

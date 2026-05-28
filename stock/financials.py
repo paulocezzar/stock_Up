@@ -439,6 +439,70 @@ def week_product_day_matrix(dept, week_start, top_n=12):
     ]
 
 
+def range_product_bucket_matrix(dept, start_wc, end_wc, top_n=8):
+    """Top products by ordered qty across a range, bucketed by week/month.
+
+    For 2..16 whole weeks, buckets are week-start Mondays. For longer
+    ranges, buckets are calendar-month starts. The frontend only renders
+    this shape; it does not derive or re-bucket the granularity.
+    """
+    n_weeks = ((end_wc - start_wc).days // 7) + 1
+    if n_weeks <= 1:
+        return None
+
+    granularity = "week" if n_weeks <= 16 else "month"
+    if granularity == "week":
+        buckets = [start_wc + timedelta(weeks=i) for i in range(n_weeks)]
+    else:
+        period_end = end_wc + timedelta(days=6)
+        cur = date(start_wc.year, start_wc.month, 1)
+        last = date(period_end.year, period_end.month, 1)
+        buckets = []
+        while cur <= last:
+            buckets.append(cur)
+            if cur.month == 12:
+                cur = date(cur.year + 1, 1, 1)
+            else:
+                cur = date(cur.year, cur.month + 1, 1)
+
+    bucket_index = {bucket: i for i, bucket in enumerate(buckets)}
+    by_product = defaultdict(lambda: [Decimal("0")] * len(buckets))
+    totals = defaultdict(lambda: Decimal("0"))
+    end = end_wc + timedelta(days=6)
+    rows = (OrderLine.objects.filter(
+        order__department=dept,
+        order__order_date__range=(start_wc, end),
+        order__customer__is_internal=False,
+    ).values("product_name", "order__order_date").annotate(
+        qty=Sum("qty_ordered")))
+
+    for r in rows:
+        order_date = r["order__order_date"]
+        bucket = (_monday_of(order_date) if granularity == "week"
+                  else date(order_date.year, order_date.month, 1))
+        idx = bucket_index.get(bucket)
+        if idx is None:
+            continue
+        pname = r["product_name"]
+        qty = r["qty"] or Decimal("0")
+        by_product[pname][idx] += qty
+        totals[pname] += qty
+
+    top = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    return {
+        "granularity": granularity,
+        "buckets": buckets,
+        "rows": [
+            {
+                "product": name,
+                "values": by_product[name],
+                "total_qty": totals[name],
+            }
+            for name, _ in top
+        ],
+    }
+
+
 def recent_order_groups(dept, n=10):
     """The ``n`` most recent customer-day order groups, newest first.
 

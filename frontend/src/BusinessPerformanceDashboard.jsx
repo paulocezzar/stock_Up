@@ -256,12 +256,15 @@ function Body({ data, channel }) {
           mode={isSingleWeek ? "daily" : "weekly"}
         />
         <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
-        {isSingleWeek && (
-          <BPProductDayHeatmap
-            rows={data.product_day_matrix}
-            weekStart={data.period?.from}
-          />
-        )}
+        <BPProductDayHeatmap
+          mode={isSingleWeek ? "day" : "bucket"}
+          weekStart={data.period?.from}
+          rows={isSingleWeek
+            ? data.product_day_matrix
+            : data.product_week_matrix?.rows}
+          buckets={isSingleWeek ? [] : (data.product_week_matrix?.buckets || [])}
+          granularity={data.product_week_matrix?.granularity || "week"}
+        />
         <WatchlistPanel
           customers={customers}
           concentration={concentration}
@@ -280,12 +283,15 @@ function Body({ data, channel }) {
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
           />
-          {isSingleWeek && (
-            <BPProductDayHeatmap
-              rows={data.product_day_matrix}
-              weekStart={data.period?.from}
-            />
-          )}
+          <BPProductDayHeatmap
+            mode={isSingleWeek ? "day" : "bucket"}
+            weekStart={data.period?.from}
+            rows={isSingleWeek
+              ? data.product_day_matrix
+              : data.product_week_matrix?.rows}
+            buckets={isSingleWeek ? [] : (data.product_week_matrix?.buckets || [])}
+            granularity={data.product_week_matrix?.granularity || "week"}
+          />
           <BPCustomersTable
             payload={customers}
             channel={channel}

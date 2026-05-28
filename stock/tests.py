@@ -11168,3 +11168,53 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertEqual(len(body["weekly_trend"]), 3)
         self.assertEqual(body["daily_trend"], [])
         self.assertEqual(body["product_day_matrix"], [])
+        matrix = body["product_week_matrix"]
+        self.assertEqual(matrix["granularity"], "week")
+        self.assertEqual(
+            matrix["buckets"],
+            [self.wc1.isoformat(), self.wc2.isoformat(), self.wc3.isoformat()],
+        )
+        sourdough = next(r for r in matrix["rows"]
+                         if r["product"] == "Sourdough")
+        self.assertEqual(
+            [Decimal(str(q)) for q in sourdough["values"]],
+            [Decimal("10"), Decimal("10"), Decimal("10")],
+        )
+        self.assertEqual(Decimal(str(sourdough["total_qty"])), Decimal("30"))
+
+    def test_product_week_matrix_boundary_switches_after_sixteen_weeks(self):
+        for i in range(17):
+            wc = self.wc1 + datetime.timedelta(weeks=i)
+            order = Order.objects.create(
+                customer=self.teals, department=self.dept, order_date=wc)
+            OrderLine.objects.create(
+                order=order, sale_product=None, product_name="Long Range Bun",
+                unit_price=Decimal("1.00"), qty_ordered=Decimal("100"))
+
+        self.client.force_login(self.user)
+        week_to = self.wc1 + datetime.timedelta(weeks=15)
+        week_body = self.client.get(
+            f"{self.URL}?from={self.wc1.isoformat()}&to={week_to.isoformat()}"
+        ).json()
+        self.assertEqual(week_body["product_week_matrix"]["granularity"], "week")
+        self.assertEqual(len(week_body["product_week_matrix"]["buckets"]), 16)
+
+        to_wc = self.wc1 + datetime.timedelta(weeks=16)
+        body = self.client.get(
+            f"{self.URL}?from={self.wc1.isoformat()}&to={to_wc.isoformat()}"
+        ).json()
+        matrix = body["product_week_matrix"]
+        self.assertEqual(matrix["granularity"], "month")
+        self.assertEqual(
+            matrix["buckets"],
+            ["2026-03-01", "2026-04-01", "2026-05-01",
+             "2026-06-01", "2026-07-01"],
+        )
+        bun = next(r for r in matrix["rows"]
+                   if r["product"] == "Long Range Bun")
+        self.assertEqual(
+            [Decimal(str(q)) for q in bun["values"]],
+            [Decimal("100"), Decimal("400"), Decimal("400"),
+             Decimal("500"), Decimal("300")],
+        )
+        self.assertEqual(Decimal(str(bun["total_qty"])), Decimal("1700"))
