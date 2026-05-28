@@ -33,7 +33,7 @@ export default function BPWeeklyTrendChart({ rows }) {
         <div>
           <div className="flex items-center gap-1.5">
             <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-              Weekly Revenue Trend
+              Weekly Ordered Value
             </h3>
             <span
               title="Ordered value by week. Stacked: wholesale on top of internal."

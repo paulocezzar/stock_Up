@@ -233,7 +233,12 @@ function Body({ data, channel }) {
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BPWeeklyTrendChart rows={data.weekly_trend} />
         <div className="space-y-5">
-          {data.current_week && <CurrentWeekPanel data={data.current_week} />}
+          {data.current_week && (
+            <CurrentWeekPanel
+              data={data.current_week}
+              weekStart={data.period.from}
+            />
+          )}
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
         </div>
       </div>
@@ -346,7 +351,7 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
   );
 }
 
-function CurrentWeekPanel({ data }) {
+function CurrentWeekPanel({ data, weekStart }) {
   const projected = data.projected_total ? gbp(data.projected_total) : "Complete";
   const avg8 = data.avg_8w_total ? gbp(data.avg_8w_total) : "--";
   const vs8 = data.vs_8w_pct != null ? pct(data.vs_8w_pct, { signed: true }) : "--";
@@ -355,10 +360,10 @@ function CurrentWeekPanel({ data }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-            Current Week Pace
+            Selected Week Pace
           </h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Projection and freshness against the recent run rate.
+            w/c {weekLongLabel(weekStart)} against the recent run rate.
           </p>
         </div>
         <LineChart size={18} strokeWidth={1.8} className="text-slate-400 dark:text-slate-500" />

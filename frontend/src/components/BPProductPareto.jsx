@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { gbp, pct } from "../lib/format.js";
 
-// Product Pareto: which SKUs carry the period revenue. Sorted by VALUE
+// Product Pareto: which SKUs carry the period ordered value. Sorted by VALUE
 // descending. Default visible = enough rows to cross 80% cumulative
 // (n_to_80pct from the API), then the rest collapse behind a "Show
 // remaining N" button — so the operator's eye lands on the few SKUs
@@ -19,10 +19,10 @@ export default function BPProductPareto({ payload }) {
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
-            Product Revenue Pareto
+            Product Ordered Value
           </h3>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Sorted by ordered value · cumulative share of period revenue
+            Sorted by ordered value · cumulative share of period
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -65,7 +65,7 @@ export default function BPProductPareto({ payload }) {
                     {inPareto && (
                       <span
                         className="ml-2 inline-block rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-                        title="In the top set that drives 80% of period revenue"
+                        title="In the top set that drives 80% of period ordered value"
                       >
                         80/20
                       </span>
