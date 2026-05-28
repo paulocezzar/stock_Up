@@ -271,6 +271,8 @@ function Body({ data, channel }) {
         <BPWeeklyTrendChart
           rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
           mode={isSingleWeek ? "daily" : "weekly"}
+          productDayRows={data.product_day_matrix}
+          weekStart={data.period?.from}
         />
         <div className="space-y-5">
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
@@ -290,7 +292,7 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-5">
+      <div id="product-ordered-value" className="mt-5 scroll-mt-6">
         <BPProductPareto payload={data.products} />
       </div>
 

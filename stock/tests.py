@@ -11108,7 +11108,8 @@ class BusinessPerformanceEndpointTests(TestCase):
         body = r.json()
         expected = {"period", "available_weeks", "totals", "weekly_trend",
                     "daily_trend", "best_worst", "concentration",
-                    "customers", "products", "current_week"}
+                    "customers", "products", "product_day_matrix",
+                    "current_week"}
         self.assertTrue(expected.issubset(body.keys()),
                         f"Missing keys: {expected - body.keys()}")
 
@@ -11146,6 +11147,19 @@ class BusinessPerformanceEndpointTests(TestCase):
         self.assertEqual(Decimal(str(monday["internal"])), Decimal("5.00"))
         self.assertEqual(Decimal(str(monday["prior_total"])), Decimal("15.00"))
 
+    def test_default_one_week_returns_product_day_matrix(self):
+        self.client.force_login(self.user)
+        body = self.client.get(self.URL).json()
+        matrix = body["product_day_matrix"]
+        self.assertEqual([r["product"] for r in matrix], ["Sourdough", "Cake"])
+        sourdough = matrix[0]
+        self.assertEqual(Decimal(str(sourdough["total_qty"])), Decimal("10"))
+        self.assertEqual(
+            [Decimal(str(q)) for q in sourdough["daily"]],
+            [Decimal("10"), Decimal("0"), Decimal("0"), Decimal("0"),
+             Decimal("0"), Decimal("0"), Decimal("0")],
+        )
+
     def test_multi_week_keeps_weekly_trend_and_no_daily_trend(self):
         self.client.force_login(self.user)
         body = self.client.get(
@@ -11153,3 +11167,4 @@ class BusinessPerformanceEndpointTests(TestCase):
         ).json()
         self.assertEqual(len(body["weekly_trend"]), 3)
         self.assertEqual(body["daily_trend"], [])
+        self.assertEqual(body["product_day_matrix"], [])

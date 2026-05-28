@@ -567,6 +567,7 @@ def _empty_bp_payload(from_wc, to_wc):
             "top_5_share_pct": "0.0",
             "top_10_share_pct": "0.0",
         },
+        "product_day_matrix": [],
         "current_week": None,
     }
 
@@ -856,6 +857,11 @@ def business_performance_summary(request):
     internal_dyn = customer_dynamics(
         dept, Customer.INTERNAL, from_wc, to_wc)
     products = range_product_revenue(dept, from_wc, to_wc)
+    product_day_matrix = (
+        week_product_day_matrix(dept, from_wc, top_n=8)
+        if from_wc == to_wc
+        else []
+    )
 
     payload = {
         "period": {
@@ -912,6 +918,14 @@ def business_performance_summary(request):
             "internal": _bp_customers_payload(internal_dyn),
         },
         "products": _bp_products_payload(products),
+        "product_day_matrix": [
+            {
+                "product": r["product"],
+                "total_qty": str(r["total_qty"]),
+                "daily": [str(q) for q in r["daily"]],
+            }
+            for r in product_day_matrix
+        ],
     }
     payload["current_week"] = _bp_current_week_payload(
         dept,
