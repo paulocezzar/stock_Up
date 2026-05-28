@@ -129,13 +129,14 @@ function Header({
   data, periodKey, onPeriod, onWeek, channel, onChannel, exportHref,
 }) {
   const period = data?.period;
+  const isSingleSelectedWeek = period?.from && period.from === period.to;
   return (
     <header className="mb-5">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
           <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {period
-              ? period.n_weeks === 1
+              ? isSingleSelectedWeek
                 ? businessWeekRangeLabel(period.from, period.to)
                 : weekRangeLabel(period.from, period.to)
               : "Waiting for imported weeks"}
@@ -252,6 +253,7 @@ function Body({ data, channel }) {
   const concentration = data.concentration[channel];
   const hasPrior = !data.period.prior_truncated;
   const isSingleWeek = data.period?.n_weeks === 1;
+  const isSingleSelectedWeek = data.period?.from && data.period.from === data.period.to;
 
   return (
     <>
@@ -292,7 +294,7 @@ function Body({ data, channel }) {
 
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-300">
         <span>
-          Business Performance for {data.period.n_weeks === 1
+          Business Performance for {isSingleSelectedWeek
             ? businessWeekRangeLabel(data.period.from, data.period.to)
             : weekRangeLabel(data.period.from, data.period.to)}
         </span>
