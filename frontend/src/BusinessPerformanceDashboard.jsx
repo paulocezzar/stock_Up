@@ -268,8 +268,8 @@ function Body({ data, channel }) {
       />
       <SignalStrip customers={customers} />
 
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-5">
+      <div className="mt-5 grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="flex min-w-0 flex-col gap-5">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
@@ -286,7 +286,7 @@ function Body({ data, channel }) {
             hasPrior={hasPrior}
           />
         </div>
-        <div className="space-y-5">
+        <div className="flex min-w-0 flex-col gap-5">
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
           <WatchlistPanel
             customers={customers}
