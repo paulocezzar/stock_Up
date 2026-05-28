@@ -274,51 +274,32 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-5 hidden items-start gap-5 xl:grid xl:grid-cols-12">
-        <div className="col-span-8 min-w-0">
+      <div className="mt-5 hidden items-start gap-5 xl:flex">
+        <div className="flex min-w-0 flex-[2] flex-col gap-5">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
           />
-        </div>
-        <div className="col-span-4 min-w-0">
-          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
-        </div>
-
-        {isSingleWeek && (
-          <>
-            <div className="col-span-8 min-w-0">
-              <BPProductDayHeatmap
-                rows={data.product_day_matrix}
-                weekStart={data.period?.from}
-              />
-            </div>
-            <div className="col-span-4 min-w-0">
-              <WatchlistPanel
-                customers={customers}
-                concentration={concentration}
-                channel={channel}
-              />
-            </div>
-          </>
-        )}
-
-        <div className="col-span-8 min-w-0">
+          {isSingleWeek && (
+            <BPProductDayHeatmap
+              rows={data.product_day_matrix}
+              weekStart={data.period?.from}
+            />
+          )}
           <BPCustomersTable
             payload={customers}
             channel={channel}
             hasPrior={hasPrior}
           />
         </div>
-        {!isSingleWeek && (
-          <div className="col-span-4 min-w-0">
-            <WatchlistPanel
-              customers={customers}
-              concentration={concentration}
-              channel={channel}
-            />
-          </div>
-        )}
+        <div className="flex w-1/3 min-w-0 shrink-0 flex-col gap-5">
+          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+          <WatchlistPanel
+            customers={customers}
+            concentration={concentration}
+            channel={channel}
+          />
+        </div>
       </div>
 
       <div id="product-ordered-value" className="mt-5 scroll-mt-6">
