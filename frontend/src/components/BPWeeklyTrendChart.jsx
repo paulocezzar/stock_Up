@@ -6,10 +6,9 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  Legend,
 } from "recharts";
 import { Info } from "lucide-react";
-import { gbp, weekLabel } from "../lib/format.js";
+import { gbp, pct, weekLabel } from "../lib/format.js";
 
 // Two-line ordered value chart over the selected period. Lines make
 // Wholesale vs Internal easier to compare than stacked areas.
@@ -23,14 +22,20 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
   const grain = isDaily ? "Daily" : "Weekly";
   const data = (rows || []).map((r) => ({
     label: isDaily ? dayLabel(r.date) : weekLabel(r.week),
-    tooltipLabel: isDaily ? weekLabel(r.date) : `w/c ${weekLabel(r.week)}`,
+    tooltipLabel: isDaily ? dayTooltipLabel(r.date) : `w/c ${weekLabel(r.week)}`,
     keyDate: isDaily ? r.date : r.week,
     wholesale: Number(r.wholesale),
     internal: Number(r.internal),
     total: Number(r.total),
+    priorTotal: r.prior_total === null || r.prior_total === undefined ? null : Number(r.prior_total),
     wholesaleShare: Number(r.total) ? Number(r.wholesale) / Number(r.total) * 100 : 0,
     internalShare: Number(r.total) ? Number(r.internal) / Number(r.total) * 100 : 0,
   }));
+  const totals = data.reduce((acc, row) => ({
+    wholesale: acc.wholesale + row.wholesale,
+    internal: acc.internal + row.internal,
+    total: acc.total + row.total,
+  }), { wholesale: 0, internal: 0, total: 0 });
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -47,7 +52,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
               <Info size={12} strokeWidth={2} />
             </span>
           </div>
-          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
             Selected {isDaily ? "week" : "period"} by channel, ordered value in GBP.
           </div>
         </div>
@@ -61,7 +66,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
           No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
-      <div className="h-72">
+      <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="2 4" vertical={false} />
@@ -86,36 +91,31 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
               cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "3 3" }}
               content={<BPTrendTooltip />}
             />
-            <Legend
-              verticalAlign="top"
-              align="right"
-              iconType="line"
-              wrapperStyle={{ fontSize: 12, paddingBottom: 8 }}
-            />
             <Line
               type="monotone"
               dataKey="wholesale"
               name="Wholesale"
               stroke="#6d28d9"
-              strokeWidth={3}
+              strokeWidth={2.5}
               dot={{ r: 3, strokeWidth: 2, fill: "#ffffff" }}
-              activeDot={{ r: 4, stroke: "#ffffff", strokeWidth: 2 }}
+              activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2, fill: "#6d28d9" }}
             />
             <Line
               type="monotone"
               dataKey="internal"
               name="Internal"
               stroke="#0284c7"
-              strokeWidth={3}
+              strokeWidth={2.5}
               dot={{ r: 3, strokeWidth: 2, fill: "#ffffff" }}
-              activeDot={{ r: 4, stroke: "#ffffff", strokeWidth: 2 }}
+              activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2, fill: "#0284c7" }}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
       )}
 
-      <div className="mt-3 flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-1 w-4 rounded-sm bg-wholesale" />
           Wholesale
@@ -123,6 +123,10 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-1 w-4 rounded-sm bg-internal" />
           Internal
+        </span>
+        </div>
+        <span className="tabular text-slate-600 dark:text-slate-300">
+          {isDaily ? "Week" : "Period"} total {gbp(totals.total)} · W {gbp(totals.wholesale)} · I {gbp(totals.internal)}
         </span>
       </div>
     </section>
@@ -158,12 +162,45 @@ function BPTrendTooltip({ active, payload }) {
         <span className="font-display font-semibold text-slate-700 dark:text-slate-300">Total</span>
         <span className="tabular font-semibold text-slate-950 dark:text-slate-100">{gbp(row.total)}</span>
       </div>
+      <div className="mt-1 flex items-center justify-between gap-3">
+        <span className="text-slate-500 dark:text-slate-400">Vs prior equivalent day</span>
+        <span className={`tabular font-semibold ${deltaClass(row)}`}>
+          {deltaText(row)}
+        </span>
+      </div>
     </div>
   );
+}
+
+function deltaText(row) {
+  if (row.priorTotal === null || !Number.isFinite(row.priorTotal) || row.priorTotal === 0) {
+    return "No prior";
+  }
+  return pct((row.total - row.priorTotal) / row.priorTotal * 100, { signed: true });
+}
+
+function deltaClass(row) {
+  if (row.priorTotal === null || !Number.isFinite(row.priorTotal) || row.priorTotal === 0) {
+    return "text-slate-500 dark:text-slate-400";
+  }
+  const delta = row.total - row.priorTotal;
+  if (Math.abs(delta) < 0.005) return "text-slate-500 dark:text-slate-400";
+  return delta > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300";
 }
 
 function dayLabel(iso) {
   if (!iso) return "--";
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-GB", { weekday: "short" });
+}
+
+function dayTooltipLabel(iso) {
+  if (!iso) return "--";
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+  });
 }

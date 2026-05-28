@@ -81,9 +81,9 @@ export default function BusinessPerformanceDashboard() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
-      <main className="ml-64 min-h-screen">
+      <main className="min-w-0 flex-1">
         <div className="mx-auto max-w-[1760px] px-8 py-7">
           <Header
             data={data}
@@ -123,8 +123,8 @@ function Header({
   const period = data?.period;
   return (
     <header className="mb-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
           <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {period
               ? weekRangeLabel(period.from, period.to)
@@ -143,17 +143,19 @@ function Header({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <FilterGroup label="Time">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <FilterGroup label="Range">
             <PeriodPicker value={periodKey} onSelect={onPeriod} />
-            {periodKey === "current" && (
+          </FilterGroup>
+          {periodKey === "current" && (
+            <FilterGroup label="Week">
               <WeekSelect
                 value={period?.from}
                 options={data?.available_weeks || []}
                 onSelect={onWeek}
               />
-            )}
-          </FilterGroup>
+            </FilterGroup>
+          )}
           <FilterGroup label="Channel">
             <ChannelToggle value={channel} onSelect={onChannel} />
           </FilterGroup>
@@ -173,7 +175,7 @@ function Header({
 
 function FilterGroup({ label, children }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2.5">
       <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
         {label}
       </span>
@@ -278,7 +280,7 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-500">
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
         <span>
           Business Performance for {weekRangeLabel(data.period.from, data.period.to)}
         </span>
@@ -301,16 +303,22 @@ function InsightStrip({ data, customers, concentration }) {
   const faller = topFaller
     ? `${topFaller.name} ${pct(topFaller.delta_pct, { signed: true })}`
     : "No declining account signal";
+  const insights = [mix, concentrationText, faller].slice(0, 4);
 
   return (
     <section className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-display font-semibold text-slate-950 dark:text-slate-100">
           What changed?
         </span>
-        <span className="text-slate-600 dark:text-slate-300">{mix}</span>
-        <span className="text-slate-600 dark:text-slate-300">{concentrationText}</span>
-        <span className="text-slate-600 dark:text-slate-300">{faller}</span>
+        {insights.map((insight) => (
+          <span
+            key={insight}
+            className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300"
+          >
+            {insight}
+          </span>
+        ))}
       </div>
     </section>
   );
@@ -530,7 +538,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
             Executive Summary
           </h2>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
             {isSingleWeek
               ? "Selected week compared with prior and recent run rate."
               : "Highest, lowest, and dependency signals for this period."}
@@ -556,6 +564,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
               label="Change vs prior"
               value={delta?.total_pct != null ? pct(delta.total_pct, { signed: true }) : "--"}
               sub="Ordered value movement"
+              tone={deltaTone(delta?.total_pct)}
             />
             <SummaryRow
               label="8w average"
@@ -566,6 +575,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
               label="Pace vs 8w average"
               value={currentWeek?.vs_8w_pct != null ? pct(currentWeek.vs_8w_pct, { signed: true }) : "--"}
               sub={`Latest order date: ${currentWeek?.latest_order_date ? weekLabel(currentWeek.latest_order_date) : "--"}`}
+              tone={deltaTone(currentWeek?.vs_8w_pct)}
             />
           </>
         ) : (
@@ -590,7 +600,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
             style={{ width: `${Math.max(0, Math.min(100, Number(concentration?.top_1_pct) || 0))}%` }}
           />
         </div>
-        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
           Top customer share: {concentration?.top_1_name || "none"}
         </p>
       </div>
@@ -598,18 +608,32 @@ function ExecutiveSummary({ data, channel, concentration }) {
   );
 }
 
-function SummaryRow({ label, value, sub }) {
+function SummaryRow({ label, value, sub, tone = "neutral" }) {
+  const valueCls = {
+    positive: "text-emerald-700 dark:text-emerald-300",
+    negative: "text-rose-700 dark:text-rose-300",
+    neutral: "text-slate-950 dark:text-slate-100",
+    muted: "text-slate-500 dark:text-slate-400",
+  }[tone] || "text-slate-950 dark:text-slate-100";
+
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-800">
       <div>
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
         </div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sub}</div>
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">{sub}</div>
       </div>
-      <div className="font-display text-lg font-semibold text-slate-950 dark:text-slate-100">{value}</div>
+      <div className={`font-display text-lg font-semibold ${valueCls}`}>{value}</div>
     </div>
   );
+}
+
+function deltaTone(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "muted";
+  if (Math.abs(n) < 0.05) return "neutral";
+  return n > 0 ? "positive" : "negative";
 }
 
 function WatchlistPanel({ customers, concentration, channel }) {

@@ -842,6 +842,10 @@ def business_performance_summary(request):
     comparison = period_comparison(dept, from_wc, to_wc)
     weekly = per_week_split(dept, from_wc, to_wc)
     daily = week_daily_channel_split(dept, from_wc) if from_wc == to_wc else []
+    prior_daily_by_offset = {}
+    if daily and not comparison["prior_truncated"] and comparison["prior_from"]:
+        prior_rows = week_daily_channel_split(dept, comparison["prior_from"])
+        prior_daily_by_offset = {i: r for i, r in enumerate(prior_rows)}
     stats = range_week_stats(dept, from_wc, to_wc)
     wholesale_conc = concentration_metrics(
         dept, Customer.WHOLESALE, from_wc, to_wc)
@@ -891,8 +895,12 @@ def business_performance_summary(request):
                 "internal": str(r["internal"]),
                 "wholesale": str(r["wholesale"]),
                 "total": str(r["total"]),
+                "prior_total": (
+                    None if i not in prior_daily_by_offset
+                    else str(prior_daily_by_offset[i]["total"])
+                ),
             }
-            for r in daily
+            for i, r in enumerate(daily)
         ],
         "best_worst": _bp_best_worst_payload(stats),
         "concentration": {

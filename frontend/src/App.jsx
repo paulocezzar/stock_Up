@@ -50,9 +50,9 @@ export default function App() {
   }, [data]);
 
   return (
-    <div className="min-h-screen bg-page text-slate-100">
+    <div className="flex min-h-screen bg-page text-slate-100">
       <Sidebar />
-      <main className="ml-64 p-6">
+      <main className="min-w-0 flex-1 p-6">
         <div className="max-w-[1900px] mx-auto">
           <Header
             data={data}

@@ -1,4 +1,3 @@
-import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
@@ -33,17 +32,14 @@ const NAV = [
 
 // Every layout-critical property is inlined so Tailwind purge, CSS
 // cascade order, or any future global rule can't silently break the
-// rail's positioning. Previous attempt used `bottom:0 + height:100vh`
-// together — this drops `bottom` to avoid any chance of the browser
-// preferring the bottom anchor. The footer block uses an inline
-// `marginTop:auto` to bottom-pin itself rather than relying on
-// `flex-1` on the nav.
+// rail's positioning. The rail participates in the app flex layout,
+// then sticks to the viewport while the dashboard content scrolls.
 const BASE_ASIDE_STYLE = {
-  position: "fixed",
+  position: "sticky",
   top: 0,
-  left: 0,
   width: "16rem",
   height: "100vh",
+  flex: "0 0 16rem",
   zIndex: 50,
   display: "flex",
   flexDirection: "column",
@@ -57,12 +53,6 @@ const HEADER_STYLE = { flex: "0 0 auto" };
 const NAV_STYLE    = { flex: "1 1 auto", overflowY: "auto", minHeight: 0 };
 const FOOTER_STYLE = { flex: "0 0 auto", marginTop: "auto" };
 
-// Rendered via createPortal into document.body so the aside is a
-// direct child of <body> at the DOM level. With position:fixed +
-// top:0, this guarantees the rail anchors to the viewport regardless
-// of any React-managed wrapper above (a transformed/filtered/contained
-// ancestor would otherwise become the containing block per CSS spec
-// and produce exactly the "sidebar at bottom-left" symptom we hit).
 export default function Sidebar() {
   if (typeof document === "undefined") return null;  // SSR safety; harmless here
   const path = window.location.pathname;
@@ -83,7 +73,7 @@ export default function Sidebar() {
     borderRight: dark ? "1px solid rgb(30 41 59)" : "1px solid rgb(226 232 240)",
   };
 
-  return createPortal(
+  return (
     <aside style={asideStyle}>
       <div style={HEADER_STYLE} className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
         <div className="flex items-center gap-3">
@@ -169,7 +159,6 @@ export default function Sidebar() {
           <LogOut size={14} strokeWidth={1.75} className="shrink-0 text-slate-400" />
         </a>
       </div>
-    </aside>,
-    document.body,
+    </aside>
   );
 }

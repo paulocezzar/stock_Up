@@ -47,7 +47,7 @@ export function weekRangeLabel(fromIso, toIso = fromIso) {
   const start = new Date(`${fromIso}T00:00:00Z`);
   const end = new Date(`${toIso || fromIso}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 6);
-  return `${formatLongDate(start)} to ${formatLongDate(end)}`;
+  return `${formatLongDate(start)} - ${formatLongDate(end)}`;
 }
 
 export function weekdayShort(iso) {

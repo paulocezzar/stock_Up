@@ -11144,6 +11144,7 @@ class BusinessPerformanceEndpointTests(TestCase):
         monday = rows[0]
         self.assertEqual(Decimal(str(monday["wholesale"])), Decimal("10.00"))
         self.assertEqual(Decimal(str(monday["internal"])), Decimal("5.00"))
+        self.assertEqual(Decimal(str(monday["prior_total"])), Decimal("15.00"))
 
     def test_multi_week_keeps_weekly_trend_and_no_daily_trend(self):
         self.client.force_login(self.user)

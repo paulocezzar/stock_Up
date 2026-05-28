@@ -58,7 +58,7 @@ export default function BPCustomersTable({ payload, channel, hasPrior }) {
               return (
                 <tr
                   key={r.customer_id ?? `${r.name}-${i}`}
-                  className="border-b border-slate-100 transition last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/70"
+                  className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50"
                 >
                   <td className="py-2.5 pr-2 text-right tabular text-slate-400 dark:text-slate-500">
                     {i + 1}
