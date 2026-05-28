@@ -21,7 +21,7 @@ import {
   businessPerformanceExportUrl,
   fetchBusinessPerformance,
 } from "./lib/api.js";
-import { gbp, pct, weekLabel, weekLongLabel } from "./lib/format.js";
+import { gbp, pct, weekLabel, weekLongLabel, weekRangeLabel } from "./lib/format.js";
 
 const PERIOD_OPTIONS = [
   { key: "current", label: "Current", weeks: 1 },
@@ -127,7 +127,7 @@ function Header({
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {period
-              ? `w/c ${weekLongLabel(period.from)} to w/c ${weekLongLabel(period.to)}`
+              ? weekRangeLabel(period.from, period.to)
               : "Waiting for imported weeks"}
           </span>
           {period && (
@@ -280,8 +280,7 @@ function Body({ data, channel }) {
 
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-500">
         <span>
-          Business Performance for w/c {weekLongLabel(data.period.from)} to
-          {" "}w/c {weekLongLabel(data.period.to)}
+          Business Performance for {weekRangeLabel(data.period.from, data.period.to)}
         </span>
         <span>Ordered value · excl. VAT · external customers only</span>
       </footer>

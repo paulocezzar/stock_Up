@@ -42,11 +42,28 @@ export function weekLongLabel(iso) {
   });
 }
 
+export function weekRangeLabel(fromIso, toIso = fromIso) {
+  if (!fromIso) return "—";
+  const start = new Date(`${fromIso}T00:00:00Z`);
+  const end = new Date(`${toIso || fromIso}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 6);
+  return `${formatLongDate(start)} to ${formatLongDate(end)}`;
+}
+
 export function weekdayShort(iso) {
   if (!iso) return "—";
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-GB", {
     weekday: "short",
+    timeZone: "UTC",
+  });
+}
+
+function formatLongDate(date) {
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
     timeZone: "UTC",
   });
 }
