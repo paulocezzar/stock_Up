@@ -17,6 +17,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import BPWeeklyTrendChart from "./components/BPWeeklyTrendChart.jsx";
 import BPCustomersTable from "./components/BPCustomersTable.jsx";
 import BPProductPareto from "./components/BPProductPareto.jsx";
+import BPProductDayHeatmap from "./components/BPProductDayHeatmap.jsx";
 import {
   businessPerformanceExportUrl,
   fetchBusinessPerformance,
@@ -271,26 +272,49 @@ function Body({ data, channel }) {
         <BPWeeklyTrendChart
           rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
           mode={isSingleWeek ? "daily" : "weekly"}
-          productDayRows={data.product_day_matrix}
-          weekStart={data.period?.from}
         />
         <div className="space-y-5">
           <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <BPCustomersTable
-          payload={customers}
-          channel={channel}
-          hasPrior={hasPrior}
-        />
-        <WatchlistPanel
-          customers={customers}
-          concentration={concentration}
-          channel={channel}
-        />
-      </div>
+      {isSingleWeek ? (
+        <>
+          <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <BPProductDayHeatmap
+              rows={data.product_day_matrix}
+              weekStart={data.period?.from}
+            />
+            <WatchlistPanel
+              customers={customers}
+              concentration={concentration}
+              channel={channel}
+            />
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <BPCustomersTable
+              payload={customers}
+              channel={channel}
+              hasPrior={hasPrior}
+            />
+            <div aria-hidden="true" />
+          </div>
+        </>
+      ) : (
+        <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <BPCustomersTable
+            payload={customers}
+            channel={channel}
+            hasPrior={hasPrior}
+          />
+          <WatchlistPanel
+            customers={customers}
+            concentration={concentration}
+            channel={channel}
+          />
+        </div>
+      )}
 
       <div id="product-ordered-value" className="mt-5 scroll-mt-6">
         <BPProductPareto payload={data.products} />
