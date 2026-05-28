@@ -17,7 +17,7 @@ export default function BPProductPareto({ payload }) {
   }, [payload]);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">

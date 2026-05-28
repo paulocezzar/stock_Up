@@ -38,7 +38,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
   }), { wholesale: 0, internal: 0, total: 0 });
 
   return (
-    <section className="self-start rounded-xl border border-slate-200 bg-white px-5 pb-2.5 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="w-full rounded-xl border border-slate-200 bg-white px-5 pb-2.5 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5">

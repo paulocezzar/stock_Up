@@ -352,7 +352,7 @@ function InsightStrip({ data, customers, concentration }) {
   const insights = [mix, concentrationText, faller].slice(0, 4);
 
   return (
-    <section className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="mt-5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="mr-1 text-xs font-semibold tracking-normal text-slate-500 dark:text-slate-400">
           What changed?
@@ -404,7 +404,7 @@ function SignalStrip({ customers }) {
     .sort((a, b) => Number(a.delta_pct) - Number(b.delta_pct))[0];
 
   return (
-    <section className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+    <section className="mt-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2">
       <SignalCard
         icon={ArrowUpRight}
         label="Top Riser"
@@ -431,7 +431,7 @@ function SignalCard({ icon: Icon, label, value, subline, tone = "neutral" }) {
   }[tone];
 
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${toneCls}`}>
         <Icon size={17} strokeWidth={1.9} />
       </div>
@@ -455,7 +455,7 @@ function KpiRow({ data, channel, concentration }) {
   const cur = t.current;
   const delta = t.delta;
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
       <KpiTile
         icon={CircleDollarSign}
         label="Period Ordered"
@@ -484,7 +484,7 @@ function KpiRow({ data, channel, concentration }) {
 
 function KpiTile({ icon: Icon, label, value, deltaPct, deltaPp, subline }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -536,7 +536,7 @@ function ConcentrationTile({ concentration, channel }) {
   }[band];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -578,7 +578,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
       ? "Complete week"
       : "No projection yet";
   return (
-    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <section className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -739,7 +739,7 @@ function WatchlistPanel({ customers, concentration, channel }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <section className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
