@@ -93,7 +93,7 @@ export default function BusinessPerformanceDashboard() {
     <div className="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
       <main className="ml-64 min-w-0">
-        <div className="mx-auto max-w-[1760px] px-8 py-7">
+        <div className="mx-auto w-full max-w-[1760px] px-8 py-7">
           <Header
             data={data}
             periodKey={periodKey}
@@ -132,8 +132,8 @@ function Header({
   const period = data?.period;
   const isSingleSelectedWeek = period?.from && period.from === period.to;
   return (
-    <header className="mb-5">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+    <header className="mb-5 w-full">
+      <div className="flex w-full flex-wrap items-center gap-x-5 gap-y-3">
         <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
           <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {period
@@ -157,7 +157,7 @@ function Header({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-l border-slate-200 pl-5 dark:border-slate-800">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 border-l border-slate-200 pl-5 dark:border-slate-800">
           <FilterGroup label="Range">
             <PeriodPicker value={periodKey} onSelect={onPeriod} />
           </FilterGroup>
@@ -259,7 +259,7 @@ function Body({ data, channel }) {
   const isSingleSelectedWeek = data.period?.from && data.period.from === data.period.to;
 
   return (
-    <>
+    <div className="w-full">
       <KpiRow data={data} channel={channel} concentration={concentration} />
       <InsightStrip
         data={data}
@@ -324,7 +324,7 @@ function Body({ data, channel }) {
         <BPProductPareto payload={data.products} />
       </div>
 
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200">
+      <footer className="mt-8 flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200">
         <span>
           Business Performance for {isSingleSelectedWeek
             ? businessWeekRangeLabel(data.period.from, data.period.to)
@@ -332,7 +332,7 @@ function Body({ data, channel }) {
         </span>
         <span className="text-slate-600 dark:text-slate-300">Ordered value · excl. VAT · external customers only</span>
       </footer>
-    </>
+    </div>
   );
 }
 
