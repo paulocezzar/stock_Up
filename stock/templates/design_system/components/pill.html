@@ -1,3 +1,13 @@
-<span class="bp-pill {% if tone == 'positive' %}bp-pill-positive{% elif tone == 'negative' %}bp-pill-negative{% elif tone == 'amber' %}bp-pill-amber{% endif %}">
-  {{ label }}
+{# Delta pill — mirrors BP's DeltaPill (arrow + signed value, emerald/rose,
+   DM Mono tabular). Slots: value (number), suffix (default "%"). BP uses
+   no dark variant here, so neither do we — faithful to the reference. #}
+{% with up=value|floatformat:1|slice:":1" %}
+<span class="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold tabular {% if up == '-' %}border-rose-200 bg-rose-50 text-rose-700{% else %}border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+  {% if up == '-' %}
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>
+  {% else %}
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+  {% endif %}
+  {% if up != '-' %}+{% endif %}{{ value|floatformat:1 }}{{ suffix|default:"%" }}
 </span>
+{% endwith %}

@@ -1,6 +1,13 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./index.html", "./src/**/*.{js,jsx}"],
+  // Scans the React SPA (BP reference) AND the Django templates so the
+  // rebuilt non-BP pages can use BP's real Tailwind classes/tokens — one
+  // config, one source of truth, no parallel bespoke CSS that can drift.
+  content: [
+    "./index.html",
+    "./src/**/*.{js,jsx}",
+    "../stock/templates/**/*.html",
+  ],
   darkMode: "class",
   theme: {
     extend: {

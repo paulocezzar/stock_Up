@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockUp — Design System Preview (compare with Business Performance)</title>
+<script>
+  // Same theme mechanism as BP: .dark class on <html>, key "stockup-theme".
+  (function () { try { if (localStorage.getItem("stockup-theme") === "dark") document.documentElement.classList.add("dark"); } catch (e) {} })();
+</script>
+<!-- The very CSS the rebuilt Django pages ship (compiled from BP's tailwind.config). -->
+<link rel="stylesheet" href="../stock/static/stockup/app.css">
+</head>
+<body class="antialiased">
+<!--
+  VERIFICATION ARTIFACT — not a route. Open this file beside the live
+  Business Performance dashboard and confirm fonts (Space Grotesk display
+  + body, DM Mono only on tabular numerals), card shadow/border/radius,
+  KPI tiles, delta pills, table rows, state badges, and the sidebar are
+  visually identical. The markup below is copied verbatim from BP's React
+  components so any pixel difference is a CSS-build problem, not a markup
+  one. Toggle dark mode with the sidebar switch.
+-->
+<div class="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+
+  <!-- ===== Sidebar (mirrors design_system/sidebar.html) ===== -->
+  <aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+    <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">SU</div>
+        <div>
+          <div class="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">StockUp</div>
+          <div class="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Bakery</div>
+        </div>
+      </div>
+    </div>
+    <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+      <a href="#" class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg><span class="flex-1">Dashboard</span></a>
+      <a href="#" class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="flex-1">Business Performance</span></a>
+      <a href="#" class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium bg-amber-50 text-slate-950 ring-1 ring-amber-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"><span aria-hidden="true" class="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-amber-500"></span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg><span class="flex-1">Orders</span></a>
+      <a href="#" class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg><span class="flex-1">Financials</span></a>
+      <a href="#" class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/></svg><span class="flex-1">Products</span></a>
+    </nav>
+    <div class="shrink-0 space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+      <div class="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+        <span class="flex items-center gap-3">
+          <span id="su-theme-icon" aria-hidden="true">
+            <svg data-icon="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            <svg data-icon="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          </span>
+          Dark mode
+        </span>
+        <button id="su-theme-toggle" type="button" class="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition dark:bg-amber-500" title="Toggle light/dark">
+          <span id="su-theme-knob" aria-hidden="true" class="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"></span>
+        </button>
+      </div>
+      <a href="#" class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-900">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">B</span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-display text-sm leading-tight text-slate-950 dark:text-slate-100">Bakery account</span>
+          <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">Sign out</span>
+        </span>
+        <svg class="shrink-0 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      </a>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="ml-64 min-w-0">
+    <div class="mx-auto w-full max-w-[1760px] px-8 py-7">
+
+      <!-- Header with segmented controls + export, mirroring BP -->
+      <header class="mb-5 w-full">
+        <div class="flex w-full flex-wrap items-center gap-x-5 gap-y-3">
+          <div class="flex items-center gap-2.5">
+            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Range</span>
+            <div class="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <button class="h-8 rounded-md bg-slate-200 px-3 text-sm font-medium text-slate-950 shadow-sm dark:bg-slate-700 dark:text-white">Current</button>
+              <button class="h-8 rounded-md px-3 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white">4w</button>
+              <button class="h-8 rounded-md px-3 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white">8w</button>
+            </div>
+          </div>
+          <a href="#" class="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            Export
+          </a>
+        </div>
+      </header>
+
+      <!-- KPI row -->
+      <div class="grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <div class="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Period Ordered</div>
+              <div class="mt-2 break-words font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£48,210</div>
+            </div>
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+            </div>
+          </div>
+          <div class="mt-4 flex min-h-6 items-center justify-between gap-3">
+            <span class="truncate text-xs text-slate-500 dark:text-slate-400">Prior £44,980</span>
+            <span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold tabular text-emerald-700"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>+7.2%</span>
+          </div>
+        </div>
+        <div class="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Weekly Run Rate</div>
+              <div class="mt-2 break-words font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£6,030/wk</div>
+            </div>
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+            </div>
+          </div>
+          <div class="mt-4 flex min-h-6 items-center justify-between gap-3">
+            <span class="truncate text-xs text-slate-500 dark:text-slate-400">38 orders · 21 active customers</span>
+            <span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold tabular text-rose-700"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>3.1%</span>
+          </div>
+        </div>
+        <div class="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Wholesale Share</div>
+              <div class="mt-2 break-words font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">63%</div>
+            </div>
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+            </div>
+          </div>
+          <div class="mt-4 flex min-h-6 items-center justify-between gap-3">
+            <span class="truncate text-xs text-slate-500 dark:text-slate-400">37% internal · £30,372 / £17,838</span>
+          </div>
+        </div>
+        <div class="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Concentration</div>
+              <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">41%<span class="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400">top 5</span></div>
+            </div>
+            <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+            </div>
+          </div>
+          <div class="mt-4 flex items-center justify-between gap-3">
+            <span class="truncate text-xs text-slate-500 dark:text-slate-400">Wholesale · top account: Garden Cafe</span>
+            <span class="shrink-0 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">Healthy</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Insight chips -->
+      <section class="mt-5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="mr-1 text-xs font-semibold tracking-normal text-slate-500 dark:text-slate-400">What changed?</span>
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">Wholesale +2.4pp</span>
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">Top 5 customers drive 41%</span>
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">Riverside Deli −18.0%</span>
+        </div>
+      </section>
+
+      <!-- Customer Performance table (mirrors BPCustomersTable) -->
+      <section class="mt-5 flex w-full flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Customer Performance</h3>
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Wholesale · 4 active · ordered value vs prior period</div>
+          </div>
+        </div>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <th class="w-8 py-2.5 pr-2 text-right">#</th>
+              <th class="py-2.5 px-2">Customer</th>
+              <th class="py-2.5 px-2 text-right">Value</th>
+              <th class="py-2.5 px-2 text-right">Share</th>
+              <th class="py-2.5 px-2 text-right">Δ vs prior</th>
+              <th class="py-2.5 pl-2 text-right">State</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+              <td class="py-2.5 pr-2 text-right tabular text-slate-400 dark:text-slate-500">1</td>
+              <td class="py-2.5 px-2 font-medium text-slate-800 dark:text-slate-200">Garden Cafe</td>
+              <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-950 whitespace-nowrap dark:text-slate-100">£8,420</td>
+              <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">17%</td>
+              <td class="py-2.5 px-2 text-right"><span class="inline-flex items-center justify-end gap-1 tabular font-semibold text-emerald-700"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>+9.4%</span></td>
+              <td class="py-2.5 pl-2 text-right"><span class="inline-block rounded-full border px-2 py-0.5 text-xs font-semibold border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">Growing</span></td>
+            </tr>
+            <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+              <td class="py-2.5 pr-2 text-right tabular text-slate-400 dark:text-slate-500">2</td>
+              <td class="py-2.5 px-2 font-medium text-slate-800 dark:text-slate-200">Riverside Deli</td>
+              <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-950 whitespace-nowrap dark:text-slate-100">£5,110</td>
+              <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">11%</td>
+              <td class="py-2.5 px-2 text-right"><span class="inline-flex items-center justify-end gap-1 tabular font-semibold text-rose-700"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>-18.0%</span></td>
+              <td class="py-2.5 pl-2 text-right"><span class="inline-block rounded-full border px-2 py-0.5 text-xs font-semibold border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">Declining</span></td>
+            </tr>
+            <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+              <td class="py-2.5 pr-2 text-right tabular text-slate-400 dark:text-slate-500">3</td>
+              <td class="py-2.5 px-2 font-medium text-slate-800 dark:text-slate-200">Hill Bakery Co</td>
+              <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-950 whitespace-nowrap dark:text-slate-100">£3,980</td>
+              <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">8%</td>
+              <td class="py-2.5 px-2 text-right"><span class="text-xs font-semibold text-slate-500">New</span></td>
+              <td class="py-2.5 pl-2 text-right"><span class="inline-block rounded-full border px-2 py-0.5 text-xs font-semibold border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">New</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <button type="button" class="mt-3 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-white">Show 1 more</button>
+      </section>
+
+      <footer class="mt-8 flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200">
+        <span>Design-system preview — compare with Business Performance</span>
+        <span class="text-slate-600 dark:text-slate-300">Ordered value · excl. VAT · external customers only</span>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+  function stockupToggleTheme() {
+    var dark = document.documentElement.classList.toggle("dark");
+    try { localStorage.setItem("stockup-theme", dark ? "dark" : "light"); } catch (e) {}
+    return dark;
+  }
+  function stockupSyncThemeUI() {
+    var dark = document.documentElement.classList.contains("dark");
+    var knob = document.getElementById("su-theme-knob");
+    if (knob) { knob.classList.toggle("translate-x-[18px]", dark); knob.classList.toggle("translate-x-1", !dark); }
+    var icon = document.getElementById("su-theme-icon");
+    if (icon) {
+      var moon = icon.querySelector('[data-icon="moon"]'), sun = icon.querySelector('[data-icon="sun"]');
+      if (moon) moon.style.display = dark ? "none" : "";
+      if (sun) sun.style.display = dark ? "" : "none";
+    }
+  }
+  document.getElementById("su-theme-toggle").addEventListener("click", function () { stockupToggleTheme(); stockupSyncThemeUI(); });
+  stockupSyncThemeUI();
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:css": "tailwindcss -c tailwind.config.js -i stockup.css -o ../stock/static/stockup/app.css --minify",
     "preview": "vite preview"
   },
   "dependencies": {

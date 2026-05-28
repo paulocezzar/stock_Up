@@ -1,125 +1,59 @@
-{% load static %}
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}StockUp{% endblock %}</title>
+
+{# Pre-paint theme: same mechanism as the Business Performance SPA —
+   Tailwind darkMode:"class" toggling a `.dark` class on <html>, keyed on
+   the SAME localStorage entry ("stockup-theme") so the theme is shared
+   across the React dashboard and these rebuilt pages without a flash. #}
 <script>
-  (function(){
+  (function () {
     try {
-      var t = localStorage.getItem("stockup-theme");
-      if (t === "dark") document.documentElement.setAttribute("data-theme", "dark");
-    } catch(e) {}
+      if (localStorage.getItem("stockup-theme") === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    } catch (e) {}
   })();
 </script>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bp-page:#f5f7fb;--bp-card:#ffffff;--bp-muted-card:rgba(248,250,252,.7);
-    --bp-inner:#ffffff;--bp-border:#e2e8f0;--bp-border-soft:#f1f5f9;
-    --bp-ink:#020617;--bp-text:#334155;--bp-muted:#64748b;--bp-faint:#94a3b8;
-    --bp-amber-50:#fffbeb;--bp-amber-100:#fef3c7;--bp-amber-500:#f59e0b;
-    --bp-amber-700:#b45309;--bp-amber-800:#92400e;--bp-amber-900:#78350f;
-    --bp-emerald-50:#ecfdf5;--bp-emerald-700:#047857;
-    --bp-rose-50:#fff1f2;--bp-rose-700:#be123c;
-    --bp-shadow:0 1px 2px rgba(15,23,42,.05);
-    --bp-font:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    --bp-mono:"DM Mono",ui-monospace,Menlo,monospace;
-  }
-  html[data-theme="dark"]{
-    --bp-page:#020617;--bp-card:#0f172a;--bp-muted-card:rgba(15,23,42,.6);
-    --bp-inner:rgba(2,6,23,.5);--bp-border:#1e293b;--bp-border-soft:#1e293b;
-    --bp-ink:#f1f5f9;--bp-text:#cbd5e1;--bp-muted:#94a3b8;--bp-faint:#64748b;
-    --bp-amber-50:rgba(245,158,11,.10);--bp-amber-100:rgba(245,158,11,.15);
-    --bp-amber-700:#fcd34d;--bp-amber-800:#fde68a;--bp-amber-900:#fde68a;
-    --bp-emerald-50:rgba(16,185,129,.10);--bp-emerald-700:#6ee7b7;
-    --bp-rose-50:rgba(244,63,94,.10);--bp-rose-700:#fda4af;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;background:var(--bp-page);color:var(--bp-ink);font-family:var(--bp-font);font-feature-settings:"tnum" 1}
-  a{color:inherit;text-decoration:none}
-  .bp-shell{min-height:100vh;background:var(--bp-page);color:var(--bp-ink)}
-  .bp-main{margin-left:16rem;min-width:0}
-  .bp-container{width:100%;max-width:1760px;margin:0 auto;padding:28px 32px}
-  .bp-sidebar{position:fixed;inset:0 auto 0 0;z-index:50;width:16rem;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bp-card);border-right:1px solid var(--bp-border)}
-  .bp-sidebar-head{border-bottom:1px solid var(--bp-border);padding:20px}
-  .bp-logo{display:flex;align-items:center;gap:12px}
-  .bp-logo-mark{display:flex;height:40px;width:40px;align-items:center;justify-content:center;border-radius:12px;background:#020617;color:#fff;font-size:14px;font-weight:700}
-  html[data-theme="dark"] .bp-logo-mark{background:#fff;color:#020617}
-  .bp-logo-title{font-size:18px;font-weight:600;color:var(--bp-ink)}
-  .bp-logo-subtitle{margin-top:2px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--bp-amber-700)}
-  .bp-nav{flex:1 1 auto;min-height:0;overflow-y:auto;padding:16px 12px}
-  .bp-nav-link{position:relative;display:flex;align-items:center;gap:12px;border-radius:8px;padding:10px 12px;color:var(--bp-muted);font-size:14px;font-weight:500;transition:background .15s,color .15s}
-  .bp-nav-link:hover{background:#f1f5f9;color:var(--bp-ink)}
-  html[data-theme="dark"] .bp-nav-link:hover{background:#0f172a;color:var(--bp-ink)}
-  .bp-nav-link.is-active{background:var(--bp-amber-50);color:var(--bp-ink);box-shadow:inset 0 0 0 1px #fde68a}
-  html[data-theme="dark"] .bp-nav-link.is-active{background:#0f172a;box-shadow:inset 0 0 0 1px #334155}
-  .bp-nav-link.is-active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 4px 4px 0;background:var(--bp-amber-500)}
-  .bp-sidebar-foot{margin-top:auto;border-top:1px solid var(--bp-border);padding:12px}
-  .bp-card{width:100%;border-radius:12px;border:1px solid var(--bp-border);background:var(--bp-card);padding:20px;box-shadow:var(--bp-shadow)}
-  .bp-card-muted{width:100%;border-radius:12px;border:1px solid var(--bp-border);background:var(--bp-muted-card);padding:20px}
-  .bp-inner-surface{border-radius:8px;border:1px solid var(--bp-border);background:var(--bp-inner);padding:16px}
-  .bp-section-title{font-size:16px;font-weight:600;color:var(--bp-ink)}
-  .bp-label{font-size:12px;font-weight:500;color:var(--bp-muted)}
-  .bp-subtext{margin-top:4px;font-size:12px;color:var(--bp-muted)}
-  .bp-value{font-size:24px;font-weight:600;letter-spacing:0;color:var(--bp-ink)}
-  .bp-tabular{font-family:var(--bp-mono);font-variant-numeric:tabular-nums}
-  .bp-chip{display:inline-flex;align-items:center;border-radius:6px;border:1px solid var(--bp-border);background:#f8fafc;padding:2px 8px;font-size:12px;font-weight:600;color:var(--bp-muted)}
-  html[data-theme="dark"] .bp-chip{background:rgba(2,6,23,.6)}
-  .bp-pill{display:inline-flex;align-items:center;gap:4px;border-radius:6px;border:1px solid var(--bp-border);padding:4px 8px;font-size:12px;font-weight:700}
-  .bp-pill-amber{border-color:#fde68a;background:var(--bp-amber-50);color:var(--bp-amber-800)}
-  .bp-pill-positive{border-color:#a7f3d0;background:var(--bp-emerald-50);color:var(--bp-emerald-700)}
-  .bp-pill-negative{border-color:#fecdd3;background:var(--bp-rose-50);color:var(--bp-rose-700)}
-  .bp-control{height:40px;border-radius:8px;border:1px solid var(--bp-border);background:var(--bp-card);padding:0 12px;color:var(--bp-text);font:inherit;font-size:14px;font-weight:500;box-shadow:var(--bp-shadow)}
-  .bp-segmented{display:inline-flex;height:40px;align-items:center;border-radius:8px;border:1px solid var(--bp-border);background:var(--bp-card);padding:4px;box-shadow:var(--bp-shadow)}
-  .bp-segment{height:32px;border:0;border-radius:6px;background:transparent;padding:0 12px;color:var(--bp-muted);font:inherit;font-size:14px;font-weight:500;cursor:pointer}
-  .bp-segment:hover{background:#f1f5f9;color:var(--bp-ink)}
-  html[data-theme="dark"] .bp-segment:hover{background:#1e293b}
-  .bp-segment.is-active{background:#e2e8f0;color:var(--bp-ink);box-shadow:var(--bp-shadow)}
-  html[data-theme="dark"] .bp-segment.is-active{background:#334155;color:#fff}
-  .bp-btn{display:inline-flex;height:40px;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--bp-border);background:var(--bp-card);padding:0 12px;color:var(--bp-text);font:inherit;font-size:14px;font-weight:600;box-shadow:var(--bp-shadow);cursor:pointer;transition:border-color .15s,color .15s,background .15s}
-  .bp-btn:hover{border-color:#cbd5e1;color:var(--bp-ink)}
-  .bp-btn-primary{background:#020617;color:#fff}
-  html[data-theme="dark"] .bp-btn-primary{background:#fff;color:#020617}
-  .bp-table-wrap{overflow:hidden;border-radius:8px;border:1px solid var(--bp-border-soft)}
-  .bp-table{width:100%;border-collapse:collapse;background:var(--bp-card);font-size:14px}
-  .bp-table th{border-bottom:1px solid var(--bp-border);padding:10px 8px;text-align:left;font-size:12px;font-weight:600;color:var(--bp-muted)}
-  .bp-table td{border-bottom:1px solid var(--bp-border-soft);padding:10px 8px;color:var(--bp-text)}
-  .bp-table tr:last-child td{border-bottom:0}
-  .bp-table tbody tr{transition:background .15s}
-  .bp-table tbody tr:hover{background:#f8fafc}
-  html[data-theme="dark"] .bp-table tbody tr:hover{background:rgba(30,41,59,.5)}
-  .bp-empty{border-radius:8px;border:1px dashed var(--bp-border);padding:16px 12px;color:var(--bp-muted);font-size:14px}
-  @media (max-width:1024px){
-    .bp-sidebar{position:static;width:auto;height:auto}
-    .bp-nav{display:flex;flex-wrap:wrap;gap:4px}
-    .bp-sidebar-foot{display:flex;flex-wrap:wrap;gap:8px}
-    .bp-main{margin-left:0}
-    .bp-container{padding:20px}
-  }
-</style>
+
+{# Compiled Tailwind built from the BP config (frontend/tailwind.config.js)
+   scanning these templates. Same tokens, fonts and dark variants as BP. #}
+<link rel="stylesheet" href="{% static 'stockup/app.css' %}">
 {% block head %}{% endblock %}
 </head>
-<body>
-<div class="bp-shell">
+<body class="antialiased">
+<div class="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
   {% include "design_system/sidebar.html" %}
-  <main class="bp-main">
-    <div class="bp-container">
+  <main class="ml-64 min-w-0">
+    <div class="mx-auto w-full max-w-[1760px] px-8 py-7">
+      {% if messages %}
+        <div class="mb-5 space-y-2">
+          {% for m in messages %}
+            <div class="rounded-lg border px-4 py-3 text-sm
+              {% if m.tags == 'error' %}border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200
+              {% else %}border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300{% endif %}">
+              {{ m }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
       {% block body %}{% endblock %}
     </div>
   </main>
 </div>
+
 <script>
-  function bpToggleTheme(){
-    var dark = document.documentElement.getAttribute("data-theme") === "dark";
-    if (dark) {
-      document.documentElement.removeAttribute("data-theme");
-      try { localStorage.setItem("stockup-theme", "light"); } catch(e) {}
-    } else {
-      document.documentElement.setAttribute("data-theme", "dark");
-      try { localStorage.setItem("stockup-theme", "dark"); } catch(e) {}
-    }
+  // Toggle .dark on <html> and persist under the BP-shared key. The
+  // sidebar switch reads/writes through this single helper.
+  function stockupToggleTheme() {
+    var root = document.documentElement;
+    var dark = root.classList.toggle("dark");
+    try { localStorage.setItem("stockup-theme", dark ? "dark" : "light"); } catch (e) {}
+    document.dispatchEvent(new CustomEvent("stockup:theme", { detail: { dark: dark } }));
+    return dark;
   }
 </script>
 {% block scripts %}{% endblock %}

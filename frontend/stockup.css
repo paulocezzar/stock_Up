@@ -1,0 +1,28 @@
+/* Tailwind input for the Django-template pages (non-BP). Compiled by the
+   `build:css` npm script into stock/static/stockup/app.css, which is
+   committed and served via {% static %} on every rebuilt page. The font
+   load + .tabular helper are byte-for-byte the same as the SPA's
+   frontend/src/index.css so the rebuilt pages and Business Performance
+   share identical typography (Space Grotesk display/body, DM Mono only
+   for tabular accents). */
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
+}
+
+.font-mono,
+.tabular {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}

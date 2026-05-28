@@ -1,50 +1,86 @@
-<aside class="bp-sidebar">
-  <div class="bp-sidebar-head">
-    <a class="bp-logo" href="{% url 'home' %}">
-      <span class="bp-logo-mark">SU</span>
-      <span>
-        <span class="bp-logo-title">StockUp</span>
-        <span class="bp-logo-subtitle">Bakery</span>
-      </span>
+{# Left rail — a faithful HTML/Tailwind reproduction of the Business
+   Performance React rail (frontend/src/components/Sidebar.jsx): same
+   fixed 16rem rail, logo, lucide icons, active-item style (amber-50 +
+   ring + 3px amber bar), dark-mode toggle SWITCH, and the
+   "Bakery account / Sign out" footer. Differences from the JSX, both
+   deliberate: dark surfaces come from the `.dark` class (not JS-driven
+   inline styles), and Sign out posts a form (Django 5 LogoutView is
+   POST-only) instead of a GET <a href="/logout/">. #}
+<aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+
+  <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
+    <a href="{% url 'home' %}" class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">SU</div>
+      <div>
+        <div class="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">StockUp</div>
+        <div class="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Bakery</div>
+      </div>
     </a>
   </div>
 
-  <nav class="bp-nav">
-    <a class="bp-nav-link {% if request.path == '/dashboard/' %}is-active{% endif %}" href="/dashboard/">Dashboard</a>
-    <a class="bp-nav-link {% if request.path|slice:':32' == '/business-performance-dashboard/' %}is-active{% endif %}" href="/business-performance-dashboard/">Business Performance</a>
-    <a class="bp-nav-link {% if request.path|slice:':8' == '/orders/' %}is-active{% endif %}" href="{% url 'orders' %}">Orders</a>
-    <a class="bp-nav-link {% if request.path|slice:':12' == '/financials/' %}is-active{% endif %}" href="/financials/">Financials</a>
-    <a class="bp-nav-link {% if request.path|slice:':10' == '/products/' %}is-active{% endif %}" href="/products/">Products</a>
-    <a class="bp-nav-link {% if request.path|slice:':9' == '/recipes/' %}is-active{% endif %}" href="/recipes/">Recipes</a>
-    <a class="bp-nav-link {% if request.path|slice:':7' == '/stock/' %}is-active{% endif %}" href="/stock/">Stock</a>
-    <a class="bp-nav-link {% if request.path|slice:':12' == '/deliveries/' %}is-active{% endif %}" href="/deliveries/">Deliveries</a>
-    <a class="bp-nav-link {% if request.path|slice:':11' == '/customers/' %}is-active{% endif %}" href="/customers/">Customers</a>
+  <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+    {% include "design_system/_nav_link.html" with href="/dashboard/" prefix="/dashboard/" label="Dashboard" icon="dashboard" %}
+    {% include "design_system/_nav_link.html" with href="/business-performance-dashboard/" prefix="/business-performance-dashboard/" label="Business Performance" icon="barchart" %}
+    {% include "design_system/_nav_link.html" with href="/orders/" prefix="/orders/" label="Orders" icon="scroll" %}
+    {% include "design_system/_nav_link.html" with href="/financials/" prefix="/financials/" label="Financials" icon="linechart" %}
+    {% include "design_system/_nav_link.html" with href="/products/" prefix="/products/" label="Products" icon="package" %}
+    {% include "design_system/_nav_link.html" with href="/recipes/" prefix="/recipes/" label="Recipes" icon="chef" %}
+    {% include "design_system/_nav_link.html" with href="/stock/" prefix="/stock/" label="Stock" icon="boxes" %}
+    {% include "design_system/_nav_link.html" with href="/deliveries/" prefix="/deliveries/" label="Deliveries" icon="truck" %}
+    {% include "design_system/_nav_link.html" with href="/customers/" prefix="/customers/" label="Customers" icon="users" %}
   </nav>
 
-  <div class="bp-sidebar-foot">
-    {% if departments %}
-      <label class="bp-label" for="bp-dept-select">Department</label>
-      <select
-        id="bp-dept-select"
-        class="bp-control"
-        onchange="location.href='{% url 'switch_department' 0 %}'.replace('0',this.value)+'?next='+location.pathname"
-      >
-        {% for d in departments %}
-          <option value="{{ d.pk }}" {% if d.pk == current_dept.pk %}selected{% endif %}>{{ d.name }}</option>
-        {% endfor %}
-      </select>
-    {% endif %}
-
-    <button type="button" class="bp-btn" onclick="bpToggleTheme()">Dark mode</button>
-
-    <div class="bp-inner-surface" style="padding:10px 12px">
-      <div class="bp-section-title" style="font-size:14px">{{ user.username }}</div>
-      <div class="bp-subtext">Signed in</div>
+  <div class="shrink-0 space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+    <div class="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+      <span class="flex items-center gap-3">
+        <span id="su-theme-icon" aria-hidden="true">
+          {# Moon (light mode) / Sun (dark mode); swapped by script below. #}
+          <svg data-icon="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg data-icon="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </span>
+        Dark mode
+      </span>
+      <button id="su-theme-toggle" type="button" onclick="stockupToggleTheme(); stockupSyncThemeUI();"
+        class="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition dark:bg-amber-500"
+        title="Toggle light/dark" aria-label="Toggle light/dark">
+        <span id="su-theme-knob" aria-hidden="true"
+          class="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"></span>
+      </button>
     </div>
 
     <form method="post" action="{% url 'logout' %}">
       {% csrf_token %}
-      <button type="submit" class="bp-btn" style="width:100%">Log out</button>
+      <button type="submit"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-900">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">B</span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-display text-sm leading-tight text-slate-950 dark:text-slate-100">Bakery account</span>
+          <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">Sign out</span>
+        </span>
+        <svg class="shrink-0 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      </button>
     </form>
   </div>
 </aside>
+
+<script>
+  // Reflect the live `.dark` state in the toggle knob/track + moon/sun
+  // icon. The track itself uses dark: variants (bg-slate-200 →
+  // dark:bg-amber-500), so only the knob position and icon need syncing.
+  function stockupSyncThemeUI() {
+    var dark = document.documentElement.classList.contains("dark");
+    var knob = document.getElementById("su-theme-knob");
+    if (knob) {
+      knob.classList.toggle("translate-x-[18px]", dark);
+      knob.classList.toggle("translate-x-1", !dark);
+    }
+    var icon = document.getElementById("su-theme-icon");
+    if (icon) {
+      var moon = icon.querySelector('[data-icon="moon"]');
+      var sun = icon.querySelector('[data-icon="sun"]');
+      if (moon) moon.style.display = dark ? "none" : "";
+      if (sun) sun.style.display = dark ? "" : "none";
+    }
+  }
+  stockupSyncThemeUI();
+</script>
