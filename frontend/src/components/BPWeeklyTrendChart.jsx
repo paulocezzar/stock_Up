@@ -16,7 +16,7 @@ import { gbp, pct, weekLabel } from "../lib/format.js";
 // No "previous period" overlay here — period-over-period comparison is
 // handled by the KPI tiles. A second area for the prior period would
 // clutter a multi-week chart with limited width.
-export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
+export default function BPWeeklyTrendChart({ rows, mode = "weekly", className = "" }) {
   const isDaily = mode === "daily";
   const title = isDaily ? "Daily Ordered Value" : "Weekly Ordered Value";
   const grain = isDaily ? "Daily" : "Weekly";
@@ -38,7 +38,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
   }), { wholesale: 0, internal: 0, total: 0 });
 
   return (
-    <section className="w-full rounded-xl border border-slate-200 bg-white px-5 pb-2.5 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className={`flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white px-5 pb-2.5 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${className}`}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5">
@@ -62,11 +62,11 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
       </div>
 
       {data.length === 0 ? (
-        <div className={`flex ${isDaily ? "h-44" : "h-72"} items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400`}>
+        <div className={`flex ${isDaily ? "min-h-44" : "min-h-72"} flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400`}>
           No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
-      <div className={isDaily ? "h-44" : "h-52"}>
+      <div className={`${isDaily ? "min-h-44" : "min-h-52"} flex-1`}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="2 4" vertical={false} />

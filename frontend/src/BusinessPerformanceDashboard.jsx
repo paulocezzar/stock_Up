@@ -277,12 +277,24 @@ function Body({ data, channel }) {
         />
       </div>
 
-      <div className="mt-5 hidden items-start gap-5 xl:flex">
-        <div className="flex min-w-0 flex-[2] flex-col gap-5">
+      <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-12 xl:items-stretch">
+        <div className="col-span-8 min-w-0">
           <BPWeeklyTrendChart
             rows={isSingleWeek ? data.daily_trend : data.weekly_trend}
             mode={isSingleWeek ? "daily" : "weekly"}
+            className="h-full"
           />
+        </div>
+        <div className="col-span-4 min-w-0">
+          <ExecutiveSummary
+            data={data}
+            channel={channel}
+            concentration={concentration}
+            className="h-full"
+          />
+        </div>
+
+        <div className="col-span-8 flex min-w-0 flex-col gap-5">
           <BPProductDayHeatmap
             mode={isSingleWeek ? "day" : "bucket"}
             weekStart={data.period?.from}
@@ -298,8 +310,7 @@ function Body({ data, channel }) {
             hasPrior={hasPrior}
           />
         </div>
-        <div className="flex w-1/3 min-w-0 shrink-0 flex-col gap-5">
-          <ExecutiveSummary data={data} channel={channel} concentration={concentration} />
+        <div className="col-span-4 min-w-0">
           <WatchlistPanel
             customers={customers}
             concentration={concentration}
@@ -552,7 +563,7 @@ function ConcentrationTile({ concentration, channel }) {
   );
 }
 
-function ExecutiveSummary({ data, channel, concentration }) {
+function ExecutiveSummary({ data, channel, concentration, className = "" }) {
   const isSingleWeek = data.period?.n_weeks === 1;
   const current = data.totals?.current;
   const prior = data.totals?.prior;
@@ -566,7 +577,7 @@ function ExecutiveSummary({ data, channel, concentration }) {
       ? "Complete week"
       : "No projection yet";
   return (
-    <section className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <section className={`flex h-full w-full flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
@@ -716,7 +727,7 @@ function deltaTone(value) {
   return n > 0 ? "positive" : "negative";
 }
 
-function WatchlistPanel({ customers, concentration, channel }) {
+function WatchlistPanel({ customers, concentration, channel, className = "" }) {
   const rows = customers?.rows || [];
   const newCustomers = rows.filter((r) => r.state === "new").slice(0, 4);
   const declining = rows
@@ -727,7 +738,7 @@ function WatchlistPanel({ customers, concentration, channel }) {
   const band = concentration?.band || "healthy";
 
   return (
-    <section className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <section className={`w-full rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/60 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-950 dark:text-slate-100">
