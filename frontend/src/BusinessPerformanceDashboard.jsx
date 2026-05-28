@@ -143,7 +143,9 @@ function Header({
           </span>
           {period && (
             <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              {period.n_weeks} week{period.n_weeks === 1 ? "" : "s"}
+              {isSingleSelectedWeek
+                ? businessWeekLabel(period.from)
+                : `${period.n_weeks} week${period.n_weeks === 1 ? "" : "s"}`}
             </span>
           )}
           {period?.prior_truncated && (

@@ -38,7 +38,7 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
   }), { wholesale: 0, internal: 0, total: 0 });
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-5 pb-3 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="self-start rounded-xl border border-slate-200 bg-white px-5 pb-2.5 pt-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5">
@@ -62,11 +62,11 @@ export default function BPWeeklyTrendChart({ rows, mode = "weekly" }) {
       </div>
 
       {data.length === 0 ? (
-        <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <div className={`flex ${isDaily ? "h-44" : "h-72"} items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400`}>
           No {isDaily ? "daily" : "weekly"} ordered value in this period.
         </div>
       ) : (
-      <div className="h-52">
+      <div className={isDaily ? "h-44" : "h-52"}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="2 4" vertical={false} />
