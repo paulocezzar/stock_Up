@@ -213,11 +213,11 @@ def fetch_weather(lat=51.1485, lon=-2.7137, timeout=3.0):
 
 @login_required
 def home(request):
-    """Dashboard-style landing page — the post-login destination.
+    """Merged design-system landing page — the post-login destination.
 
-    Top row: welcome + weather + urgent tasks cards. Below: per-ingredient
-    stock alerts table. Weather is fetched live via Open-Meteo (no API key)
-    and falls back gracefully when the request fails.
+    Renders stock/home_bp.html: greeting, the four stock KPI tiles, a
+    staff-on-shift shell, the stock alerts table and the urgent tasks list.
+    (The old weather card was dropped in the design-system cutover.)
     """
     dept = current_department(request)
     today = datetime.date.today()
@@ -275,11 +275,6 @@ def home(request):
     # sources (e.g. manual user-added tasks) can be appended here later.
     urgent_tasks = _stock_tasks_for_home(dept, today)
 
-    try:
-        weather = fetch_weather()
-    except Exception:
-        weather = None
-
     # KPI tiles — the same four metrics as the (retired) root dashboard()
     # view: ingredient count / below-minimum count / stock value / last
     # count date. Merged here so /home/ is the single landing page.
@@ -302,7 +297,6 @@ def home(request):
         "urgent_count": len(urgent_tasks),
         "stock_alerts": stock_alerts,
         "has_dept": dept is not None,
-        "weather": weather,
         "n_ingredients": n_ingredients,
         "below_min": below_min,
         "stock_value": stock_value,
