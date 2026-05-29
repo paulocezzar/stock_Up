@@ -9,6 +9,7 @@ links, filters, week navigation, drilldowns, and number formats.
 
 NOT wired to the /orders/ route yet (parallel build pending approval).
 {% endcomment %}
+{% load humanize design_nav %}
 {% block title %}Orders · StockUp{% endblock %}
 
 {% block body %}
@@ -73,28 +74,23 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
   </div>
 </form>
 
-{# ---- Per-day totals strip (external revenue) + week total tile ---- #}
-<div class="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
+{# ---- Per-day totals strip + week total — BP KPI tiles (shared partial,
+       BP's 4-up KpiRow grid so each tile is BP-width and never clips) ---- #}
+<div class="mb-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
   {% for day in days %}
+    {% with abbr=day.label|slice:":3" dstr=day.date|date:"d M" %}
     <a href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}"
-       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60{% if not day.count %} opacity-60 hover:opacity-100{% endif %}">
-      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ day.label|slice:":3" }}</div>
-      <div class="text-xs text-slate-400 dark:text-slate-500">{{ day.date|date:"d M" }}</div>
-      <div class="mt-2 font-display text-2xl font-semibold tracking-normal {% if day.total %}text-slate-950 dark:text-slate-100{% else %}text-slate-400 dark:text-slate-500{% endif %}">{% if day.total %}£{{ day.total }}{% else %}—{% endif %}</div>
-      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if day.count %}{{ day.count }} order{{ day.count|pluralize }}{% else %}—{% endif %}</div>
+       class="block{% if not day.count %} opacity-60 transition hover:opacity-100{% endif %}">
+      {% include "design_system/components/kpi_tile.html" with label=abbr|add:" · "|add:dstr value=day.total|gbp subline=day.count|order_count %}
     </a>
+    {% endwith %}
   {% endfor %}
-  <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
-    <div class="text-xs font-medium text-amber-800 dark:text-amber-200">Week</div>
-    <div class="text-xs text-amber-700/70 dark:text-amber-200/60">Total</div>
-    <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£{{ week_total_value }}</div>
-    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ week_total_orders }} order{{ week_total_orders|pluralize }}</div>
-  </div>
+  {% include "design_system/components/kpi_tile.html" with label="Week · total" value=week_total_value|gbp subline=week_total_orders|order_count icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>' %}
 </div>
 {% if week_total_internal %}
   <div class="-mt-2 mb-5 flex items-baseline justify-end gap-2.5 text-xs text-slate-500 dark:text-slate-400">
     <span>Internal use (excluded from week total)</span>
-    <span class="tabular font-semibold text-slate-700 dark:text-slate-300">£{{ week_total_internal }}</span>
+    <span class="tabular font-semibold text-slate-700 dark:text-slate-300">£{{ week_total_internal|floatformat:2|intcomma }}</span>
   </div>
 {% endif %}
 
@@ -126,7 +122,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
             {% endif %}
           </td>
           <td class="py-2.5 pl-2 text-right tabular whitespace-nowrap {% if cl.active %}font-semibold text-slate-900 dark:text-slate-100{% else %}text-slate-400 dark:text-slate-500{% endif %}">
-            {% if cl.active %}{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}{% else %}no orders this week{% endif %}
+            {% if cl.active %}{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value|floatformat:2|intcomma }}{% else %}no orders this week{% endif %}
           </td>
         </tr>
       {% endfor %}
@@ -167,12 +163,12 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
                 <span title="{{ row.product.name }} — discontinued / not in current catalogue" class="text-slate-400 dark:text-slate-500">{{ row.product.name }}</span>
               {% endif %}
             </td>
-            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.price is not None %}£{{ row.product.price|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
             {% for cell in row.cells %}
               <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 {% if cell.qty is not None %}text-slate-700 dark:text-slate-300{% else %}text-slate-300 dark:text-slate-600{% endif %}">{% if cell.qty is not None %}{{ cell.qty|floatformat:"-3" }}{% endif %}</td>
             {% endfor %}
             <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">{{ row.total_qty|floatformat:"-3" }}</td>
-            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">{% if row.total_value is not None %}£{{ row.total_value }}{% else %}—{% endif %}</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">{% if row.total_value is not None %}£{{ row.total_value|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="12" class="px-2.5 py-4 text-sm text-slate-500 dark:text-slate-400">No orders for {{ selected_customer.name }} this week. <a href="{% url 'order_new' %}" class="font-medium text-slate-700 underline dark:text-slate-200">+ New order</a>.</td></tr>
@@ -186,15 +182,15 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
             <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">{% if t %}{{ t|floatformat:"-3" }}{% else %}—{% endif %}</td>
           {% endfor %}
           <td class="sticky right-[90px] z-20 w-[70px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">{{ grid.grand_total|floatformat:"-3" }}</td>
-          <td class="sticky right-0 z-20 w-[90px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">£{{ grid.grand_value }}</td>
+          <td class="sticky right-0 z-20 w-[90px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">£{{ grid.grand_value|floatformat:2|intcomma }}</td>
         </tr>
         <tr class="font-semibold text-slate-900 dark:text-slate-100">
           <td colspan="3" class="sticky left-0 z-20 w-[520px] border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (£)</td>
           {% for v in grid.day_values %}
-            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">{% if v %}£{{ v }}{% else %}—{% endif %}</td>
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">{% if v %}£{{ v|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
           {% endfor %}
           <td class="sticky right-[90px] z-20 w-[70px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950"></td>
-          <td class="sticky right-0 z-20 w-[90px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£{{ grid.grand_value }}</td>
+          <td class="sticky right-0 z-20 w-[90px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£{{ grid.grand_value|floatformat:2|intcomma }}</td>
         </tr>
       </tfoot>
       {% endif %}
@@ -209,7 +205,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
   <div class="mb-3 flex flex-wrap items-baseline gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
     <span class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">{{ filtered_day.label }}</span>
     <span class="text-xs text-slate-500 dark:text-slate-400">{{ filtered_day.date|date:"d M Y" }}</span>
-    <span class="ml-auto text-xs tabular text-slate-500 dark:text-slate-400">{{ filtered_day.count }} order{{ filtered_day.count|pluralize }} · £{{ filtered_day.total }}</span>
+    <span class="ml-auto text-xs tabular text-slate-500 dark:text-slate-400">{{ filtered_day.count }} order{{ filtered_day.count|pluralize }} · £{{ filtered_day.total|floatformat:2|intcomma }}</span>
   </div>
   {% if filtered_day.orders %}
   <table class="w-full text-sm">
@@ -230,7 +226,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
             {% if o.note %}<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">· {{ o.note }}</span>{% endif %}
           </td>
           <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">{{ o.lines.count }}</td>
-          <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-900 dark:text-slate-100">£{{ o.total_value }}</td>
+          <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-900 dark:text-slate-100">£{{ o.total_value|floatformat:2|intcomma }}</td>
           <td class="py-2.5 px-2 text-right"><a href="{% url 'order_edit' o.pk %}" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit →</a></td>
           <td class="py-2.5 pl-2 text-right">
             <form method="post" action="{% url 'order_delete' o.pk %}" class="inline"
