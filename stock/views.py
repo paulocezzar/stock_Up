@@ -212,7 +212,7 @@ def fetch_weather(lat=51.1485, lon=-2.7137, timeout=3.0):
 
 
 @login_required
-def home(request, template_name="stock/home.html"):
+def home(request):
     """Dashboard-style landing page — the post-login destination.
 
     Top row: welcome + weather + urgent tasks cards. Below: per-ingredient
@@ -295,7 +295,7 @@ def home(request, template_name="stock/home.html"):
     # widget renders its empty-state. Do NOT fabricate names here.
     staff_on_shift = []
 
-    return render(request, template_name, {
+    return render(request, "stock/home_bp.html", {
         "greeting": greeting,
         "today": today,
         "urgent_tasks": urgent_tasks,
@@ -310,15 +310,6 @@ def home(request, template_name="stock/home.html"):
         "staff_on_shift": staff_on_shift,
         "staff_count": len(staff_on_shift),
     })
-
-
-@login_required
-def home_preview(request):
-    """TEMPORARY live preview of the merged /home/ rebuilt on the shared
-    design system (KPI tiles + staff-on-shift shell + stock alerts + urgent
-    tasks). Reuses home()'s full context, swapping only the template.
-    Remove this view + its URL on cutover to home_bp.html."""
-    return home(request, template_name="stock/home_bp.html")
 
 
 @login_required
@@ -1082,7 +1073,7 @@ def profile(request):
 def switch_department(request, pk):
     if user_departments(request.user).filter(pk=pk).exists():
         request.session["dept_id"] = pk
-    return redirect(request.GET.get("next") or "dashboard")
+    return redirect(request.GET.get("next") or "home")
 
 
 @login_required
@@ -1400,7 +1391,7 @@ def reorder_csv(request):
     from .templatetags.pack_format import pack_size as fmt_pack
     dept = current_department(request)
     if dept is None:
-        return redirect("dashboard")
+        return redirect("home")
     rows = _reorder_rows(dept)
     # POST may carry per-line overrides as qty_<product_id>; fall back to
     # the suggested order qty when missing or unparseable.

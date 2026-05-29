@@ -1015,11 +1015,11 @@ class HomeRebuildTests(TestCase):
     """The merged /home/ rebuilt on the design system: KPI tiles (from the
     retired root dashboard) + staff-on-shift shell + stock alerts + urgent
     tasks, with the weather card and the per-ingredient inventory table
-    dropped. Exercised via the temporary /home-preview/ route until cutover
-    (retarget the URL to /home/ then).
+    dropped. /home/ now serves this rebuilt template (the old home.html and
+    the root / stock dashboard are retired; / redirects to /home/).
     """
 
-    PREVIEW_URL = "/home-preview/"
+    PREVIEW_URL = "/home/"
 
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
@@ -1091,13 +1091,12 @@ class SectionNavigationTests(TestCase):
         r = self.client.get("/home/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        # Welcome / weather / urgent hero cards
+        # /home/ now serves the merged design-system landing (no weather card).
+        self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("alice", body)
-        self.assertIn("Welcome to your dashboard", body)
-        self.assertIn("Glastonbury", body)
-        self.assertIn("Urgent Tasks", body)
-        # Stock alerts card below
+        self.assertIn("Staff on shift today", body)
         self.assertIn("Stock alerts", body)
+        self.assertIn("Urgent tasks", body)
 
     def test_home_below_minimum_appears_in_urgent_card_and_alerts_table(self):
         # An ingredient counted below its minimum should:
@@ -1115,70 +1114,29 @@ class SectionNavigationTests(TestCase):
         r = self.client.get("/home/")
         body = r.content.decode()
 
-        urgent = body[body.index('class="panel strip urgent"'):body.index('id="stock-alerts"')]
-        # Below-minimum stock now surfaces as an actionable "Ordering" task
-        # with the item count, linking to /reorder/
+        # BP layout: stock alerts (row 3) precede urgent tasks (row 4).
+        urgent = body[body.index('data-testid="urgent-tasks"'):]
+        # Below-minimum stock surfaces as an actionable "Ordering" task with
+        # the item count, linking to /reorder/.
         self.assertIn("Ordering", urgent)
         self.assertIn("1 item", urgent)
         self.assertIn('href="/reorder/"', urgent)
-        # Badge shows the urgent count
-        self.assertRegex(urgent, r'class="badge">\s*1\s*<')
 
-        table = body[body.index('id="stock-alerts"'):]
+        alerts = body[body.index('data-testid="stock-alerts"'):body.index('data-testid="urgent-tasks"')]
         # Per-ingredient row with the ingredient name, alert label, detail
-        # and Reorder action
-        self.assertIn("Flour", table)
-        self.assertIn("Below minimum", table)
-        self.assertIn("2 / 10 packs", table)
-        self.assertIn("Reorder", table)
-
-    def test_home_renders_when_weather_fetch_fails(self):
-        # Stop the default None-mock and replace with one that raises;
-        # fetch_weather catches it and returns None, the page must still
-        # render with a "weather unavailable" placeholder.
-        self._weather_patch.stop()
-        with patch("stock.views.fetch_weather", side_effect=RuntimeError("nope")) as p:
-            try:
-                r = self.client.get("/home/")
-            except RuntimeError:
-                self.fail("home view propagated weather error")
-            else:
-                # If side_effect doesn't get suppressed inside the view, the
-                # request raises. Otherwise the fall-through is None, which
-                # we want.
-                self.assertEqual(r.status_code, 200)
-                body = r.content.decode()
-                self.assertIn("weather unavailable", body)
-                self.assertIn("Glastonbury", body)
-        # Restart the default patch so addCleanup's stop() still pairs.
-        self._weather_patch.start()
-
-    def test_home_renders_weather_card_when_fetch_succeeds(self):
-        self._weather_patch.stop()
-        weather = {
-            "temperature": 12.4,
-            "code": 1,
-            "condition": "Partly cloudy",
-            "icon": "◐",
-            "time": "2026-05-22T15:00",
-        }
-        with patch("stock.views.fetch_weather", return_value=weather):
-            r = self.client.get("/home/")
-        self.assertEqual(r.status_code, 200)
-        body = r.content.decode()
-        self.assertIn("12°C", body)
-        self.assertIn("Partly cloudy", body)
-        self.assertIn("Live", body)
-        self.assertIn("15:00", body)
-        self._weather_patch.start()
+        # and Reorder action.
+        self.assertIn("Flour", alerts)
+        self.assertIn("Below minimum", alerts)
+        self.assertIn("2 / 10 packs", alerts)
+        self.assertIn("Reorder", alerts)
 
     def test_home_calm_state_when_nothing_is_urgent(self):
         r = self.client.get("/home/")
         body = r.content.decode()
-        urgent = body[body.index("Urgent Tasks"):body.index('id="stock-alerts"')]
+        urgent = body[body.index('data-testid="urgent-tasks"'):]
         self.assertIn("All caught up", urgent)
-        table = body[body.index('id="stock-alerts"'):]
-        self.assertIn("Stock looks healthy", table)
+        alerts = body[body.index('data-testid="stock-alerts"'):body.index('data-testid="urgent-tasks"')]
+        self.assertIn("Stock looks healthy", alerts)
 
     def test_home_urgent_tasks_use_action_labels(self):
         # Expiring batch + overdue stocktake should produce "Use expiring
@@ -1201,15 +1159,13 @@ class SectionNavigationTests(TestCase):
 
         r = self.client.get("/home/")
         body = r.content.decode()
-        urgent = body[body.index('class="panel strip urgent"'):body.index('id="stock-alerts"')]
+        urgent = body[body.index('data-testid="urgent-tasks"'):]
         # Action labels, not status observations
         self.assertIn("Use expiring stock", urgent)
         self.assertIn("Stocktake due", urgent)
         # Links to where the user does the work
         self.assertIn('href="/deliveries/"', urgent)
         self.assertIn('href="/stocktakes/"', urgent)
-        # Badge counts both
-        self.assertRegex(urgent, r'class="badge">\s*2\s*<')
 
     def test_urgent_task_helper_returns_extendable_list(self):
         # _stock_tasks_for_home returns a list of {label, count, url} dicts
@@ -1276,22 +1232,22 @@ class SectionNavigationTests(TestCase):
         nav = body[body.index("<nav>"):body.index("</nav>")]
         return nav, [m.group(1) for m in re.finditer(r">([A-Za-z]+)<", nav)]
 
-    def test_home_navbar_shows_seven_top_sections(self):
-        # Home's contextual navbar is the section picker:
-        # Home | Stock | Recipes | Production | Rota | Notes | Profile,
-        # with Home itself marked active.
+    def test_home_renders_on_the_design_system_rail(self):
+        # /home/ now renders the shared BP shell; the old top section-picker
+        # navbar is replaced by the design-system left rail with its section
+        # links. (The rail itself is covered in depth elsewhere.)
         r = self.client.get("/home/")
-        nav, labels = self._nav(r.content.decode())
-        for top in ("Home", "Stock", "Recipes", "Production",
-                    "Rota", "Notes", "Profile"):
-            self.assertIn(top, labels)
-        self.assertRegex(nav, r'href="/home/"\s+class="on"')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        for href in ('href="/orders/"', 'href="/products/"', 'href="/financials/"'):
+            self.assertIn(href, body)
 
     def test_stock_section_nav_shows_sub_items(self):
-        # Any Stock page (e.g. the dashboard) renders the Stock contextual
+        # Any Stock page (e.g. stocktakes) renders the Stock contextual
         # sub-menu in the top nav: Home + Dashboard / Stocktakes / Deliveries
         # / Adjustments / Reorder / Ingredients / Suppliers.
-        r = self.client.get("/")
+        r = self.client.get("/stocktakes/")
         body = r.content.decode()
         nav = body[body.index("<nav>"):body.index("</nav>")]
         for label in (">Home<", ">Dashboard<", ">Stocktakes<", ">Deliveries<",
@@ -1305,7 +1261,6 @@ class SectionNavigationTests(TestCase):
         # section is marked on the left rail (amber ring), not the old
         # `class="on"` nav — see test_products_highlights_itself_on_bp_rail.
         for path, link in (
-            ("/", '/'),
             ("/stocktakes/", '/stocktakes/'),
             ("/deliveries/", '/deliveries/'),
             ("/adjustments/", '/adjustments/'),
@@ -1352,17 +1307,17 @@ class SectionNavigationTests(TestCase):
         self.assertIn("Profile", labels)
 
     def test_admin_link_in_header_only_for_superusers(self):
-        # The Admin link lives in the header's right cluster (not the
-        # contextual navbar), so superusers see it from every section.
-        r = self.client.get("/home/")
+        # The Admin link lives in the old-shell header's right cluster, so
+        # superusers see it from old-shell sections. (/home/ now renders the
+        # BP shell, which has no header admin link, so it's excluded here.)
+        r = self.client.get("/profile/")
         self.assertNotIn('href="/admin/"', r.content.decode())
 
         U = get_user_model()
         boss = U.objects.create_superuser("boss", password="pw")
         c = Client()
         c.login(username="boss", password="pw")
-        # Visible on home, profile and a stock page alike
-        for path in ("/home/", "/profile/", "/"):
+        for path in ("/profile/", "/stocktakes/"):
             self.assertIn('href="/admin/"', c.get(path).content.decode(),
                           f"{path} should expose /admin/ to a superuser")
 
@@ -1374,10 +1329,17 @@ class SectionNavigationTests(TestCase):
 
     def test_existing_urls_still_work(self):
         # Sanity: the existing stock pages keep their URLs and views.
-        for path in ("/", "/stocktakes/", "/deliveries/", "/adjustments/",
+        for path in ("/stocktakes/", "/deliveries/", "/adjustments/",
                      "/reorder/", "/products/", "/suppliers/"):
             r = self.client.get(path)
             self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
+
+    def test_root_redirects_to_home(self):
+        # The old root stock dashboard is retired; / now 302-redirects to
+        # /home/ (the merged landing page).
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/home/")
 
     def test_stock_card_links_into_section(self):
         # Home's Stock card should land the user inside the Stock section.
@@ -3603,7 +3565,9 @@ class PackagingViewTests(TestCase):
         self.assertNotIn("NPD-P999", body)
 
     def test_stock_navbar_has_packaging_link(self):
-        r = self.client.get("/")
+        # Root / now redirects to /home/; use a stock page to read the
+        # contextual nav (the Stock sub-menu is identical across them).
+        r = self.client.get("/stocktakes/")
         body = r.content.decode()
         nav = body[body.index("<nav>"):body.index("</nav>")]
         self.assertIn(">Packaging<", nav)
@@ -4101,11 +4065,10 @@ class CustomersViewTests(TestCase):
         self.assertRegex(nav, r'class="on"[^>]*>Internal Customers')
 
     def test_home_top_nav_includes_customers_link(self):
-        r = self.client.get("/home/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertIn(">Customers<", nav)
-        self.assertIn('href="/customers/"', nav)
+        # /home/ now renders the design-system shell; its left rail carries
+        # the Customers link (it replaced the old top section-picker).
+        body = self.client.get("/home/").content.decode()
+        self.assertIn('href="/customers/"', body)
 
 
 class CustomersCRUDTests(TestCase):
@@ -6033,19 +5996,10 @@ class SaleProductsViewsTests(TestCase):
             department=self.dept)
 
     def test_home_page_top_nav_lists_products(self):
-        # The Products link sits between Customers and Production in
-        # the top-level nav rendered on the Home page.
-        r = self.client.get("/home/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        cust_pos = nav.find(">Customers<")
-        prod_pos = nav.find(">Products<")
-        prodn_pos = nav.find(">Production<")
-        self.assertGreater(prod_pos, -1, "Products link missing from nav")
-        self.assertGreater(cust_pos, -1)
-        self.assertGreater(prodn_pos, -1)
-        self.assertLess(cust_pos, prod_pos)
-        self.assertLess(prod_pos, prodn_pos)
+        # /home/ now renders the design-system shell; its left rail carries
+        # the Products link (the old ordered top section-picker is gone).
+        body = self.client.get("/home/").content.decode()
+        self.assertIn('href="/products/"', body)
 
     def test_products_list_renders_with_filter_and_actions(self):
         SaleProduct.objects.create(
@@ -6915,14 +6869,10 @@ class OrdersTests(TestCase):
     # ---- nav ----
 
     def test_top_nav_lists_orders_between_products_and_production(self):
+        # /home/ now renders the design-system shell; its left rail carries
+        # the Orders link (the old ordered top section-picker is gone).
         body = self.client.get("/home/").content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        prod_pos = nav.find(">Products<")
-        ord_pos = nav.find(">Orders<")
-        prodn_pos = nav.find(">Production<")
-        self.assertGreater(ord_pos, -1, "Orders link missing from nav")
-        self.assertLess(prod_pos, ord_pos)
-        self.assertLess(ord_pos, prodn_pos)
+        self.assertIn('href="/orders/"', body)
 
     # ---- model helpers ----
 
@@ -7474,11 +7424,11 @@ class OrdersTests(TestCase):
 
     def test_other_pages_do_not_opt_into_wide_layout(self):
         # The wide layout is scoped to the orders weekly view ONLY —
-        # other still-old-shell pages (Home, New order form, Recipes) keep
-        # the default centred 1100px container. Assert their <main> carries
-        # an empty class attribute (no `wide`). Products has since moved to
-        # the design-system shell, so it's covered by the Ingredients tests.
-        for path in ("/home/", "/orders/new/", "/recipes/"):
+        # other still-old-shell pages (New order form, Recipes) keep the
+        # default centred 1100px container. Assert their <main> carries an
+        # empty class attribute (no `wide`). Products and Home have since
+        # moved to the design-system shell, covered by their own tests.
+        for path in ("/orders/new/", "/recipes/"):
             body = self.client.get(path).content.decode()
             self.assertIn('<main class="">', body,
                           f"{path} should not opt into the wide layout")

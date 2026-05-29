@@ -64,7 +64,7 @@ not fabricate names here.
 </div>
 
 {% comment %} Row 3 — Stock alerts (kept from the old /home/, BP table styling) {% endcomment %}
-<div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+<div data-testid="stock-alerts" class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
   <div class="mb-1 flex flex-wrap items-center justify-between gap-3">
     <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Stock alerts</h3>
   </div>
@@ -108,7 +108,7 @@ not fabricate names here.
 </div>
 
 {% comment %} Row 4 — Urgent tasks (kept from the old /home/) {% endcomment %}
-<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+<div data-testid="urgent-tasks" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
   <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
     <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Urgent tasks</h3>
     <span class="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/30">{{ urgent_count }}</span>

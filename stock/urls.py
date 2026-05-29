@@ -1,5 +1,6 @@
 from django.urls import path, re_path
 from django.contrib.auth import views as auth_views
+from django.views.generic import RedirectView
 from . import views
 from .api import (
     business_performance_export_csv, business_performance_summary,
@@ -9,10 +10,10 @@ from .api import (
 urlpatterns = [
     path("login/", auth_views.LoginView.as_view(template_name="stock/login.html"), name="login"),
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
-    path("", views.dashboard, name="dashboard"),
+    # Root retired: / now redirects to /home/ (the merged landing page). The
+    # dashboard view + stock/dashboard.html stay in the tree for now, unused.
+    path("", RedirectView.as_view(pattern_name="home", permanent=False), name="dashboard"),
     path("home/", views.home, name="home"),
-    # TEMP: live preview of the design-system /home/ rebuild. Remove on cutover.
-    path("home-preview/", views.home_preview, name="home_preview"),
     path("stock/", views.stock_home, name="stock_home"),
     path("recipes/", views.recipes_home, name="recipes"),
     path("recipes/upload/", views.recipe_upload, name="recipe_upload"),
