@@ -1240,7 +1240,7 @@ class SectionNavigationTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
-        for href in ('href="/orders/"', 'href="/products/"', 'href="/financials/"'):
+        for href in ('href="/orders/"', 'href="/products/"', 'href="/customers/"'):
             self.assertIn(href, body)
 
     def test_stock_section_nav_shows_sub_items(self):
@@ -9991,9 +9991,12 @@ class WeekProductDayMatrixTests(TestCase):
 
 
 class FinancialsViewTests(TestCase):
-    """The /financials/ page renders the channel split, weekly trend
-    and per-customer breakdowns. Smoke-level checks: status code +
-    expected sections + sane defaults."""
+    """/financials/ is retired — it now redirects to the Business
+    Performance SPA (which carries the channel split / weekly trend /
+    per-customer breakdowns). The financials_home view + template stay in
+    the tree, unused; the underlying financials.py math is still covered by
+    the dashboard / business-performance API reconciliation tests.
+    """
 
     def setUp(self):
         U = get_user_model()
@@ -10001,57 +10004,18 @@ class FinancialsViewTests(TestCase):
         self.user = U.objects.create_user("alice", password="pw")
         self.dept.members.add(self.user)
         self.client.force_login(self.user)
-        session = self.client.session
-        session["current_department_pk"] = self.dept.pk
-        session.save()
-        self.wc = datetime.date(2026, 3, 30)
-        teals = Customer.objects.create(
-            name="TEALS", customer_type=Customer.WHOLESALE,
-            department=self.dept)
-        garden = Customer.objects.create(
-            name="GARDEN CAFE", customer_type=Customer.INTERNAL,
-            department=self.dept)
-        Customer.objects.create(
-            name="BAKERY INTERNAL USE",
-            customer_type=Customer.INTERNAL,
-            is_internal=True, department=self.dept)
-        for cust, qty, price in (
-            (teals, Decimal("10"), Decimal("2.00")),     # 20.00 wholesale
-            (garden, Decimal("4"), Decimal("3.50")),     # 14.00 internal
-        ):
-            o = Order.objects.create(
-                customer=cust, department=self.dept, order_date=self.wc)
-            OrderLine.objects.create(
-                order=o, product_name="P", unit_price=price,
-                qty_ordered=qty)
 
-    def test_default_range_renders_with_split_and_tables(self):
+    def test_financials_redirects_to_business_performance(self):
         r = self.client.get("/financials/")
-        self.assertEqual(r.status_code, 200)
-        body = r.content.decode()
-        # Headline channel split
-        self.assertIn("Internal", body)
-        self.assertIn("Wholesale", body)
-        self.assertIn("£20.00", body)   # wholesale total
-        self.assertIn("£14.00", body)   # internal total
-        self.assertIn("£34.00", body)   # grand total
-        # Both breakdown tables present
-        self.assertIn("TEALS", body)
-        self.assertIn("GARDEN CAFE", body)
-        # BAKERY INTERNAL USE excluded everywhere
-        self.assertNotIn("BAKERY INTERNAL USE", body)
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], "/business-performance-dashboard/")
 
-    def test_narrowed_range_renders(self):
-        # Same start + end → just one week — must still render.
-        r = self.client.get(
-            f"/financials/?from={self.wc.isoformat()}"
-            f"&to={self.wc.isoformat()}")
-        self.assertEqual(r.status_code, 200)
-        self.assertIn("£34.00", r.content.decode())
-
-    def test_nav_includes_financials_link(self):
-        r = self.client.get("/home/")
-        self.assertIn('href="/financials/"', r.content.decode())
+    def test_financials_redirect_preserves_query_string(self):
+        r = self.client.get("/financials/?from=2026-03-30&to=2026-03-30")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(
+            r["Location"],
+            "/business-performance-dashboard/?from=2026-03-30&to=2026-03-30")
 
 
 class DashboardSummaryApiTests(TestCase):

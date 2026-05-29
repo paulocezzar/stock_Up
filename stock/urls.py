@@ -74,7 +74,13 @@ urlpatterns = [
          name="sale_product_link_set"),
     # Financials — channel split (Internal vs Wholesale) over a week
     # range. Read-only; aggregates from existing OrderLine snapshots.
-    path("financials/", views.financials_home, name="financials"),
+    # /financials/ retired: redirects to the Business Performance SPA, which
+    # carries the channel split / trends / customer breakdowns. The
+    # financials_home view + template stay in the tree, unused. Query string
+    # preserved so from/to range params survive the hop.
+    path("financials/", RedirectView.as_view(
+        pattern_name="business_performance_dashboard",
+        permanent=False, query_string=True), name="financials"),
     # Orders — chunk 1: model + manual CRUD. No import yet.
     path("orders/", views.orders_home, name="orders"),
     path("orders/new/", views.order_new, name="order_new"),
