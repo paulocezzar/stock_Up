@@ -1011,6 +1011,67 @@ class PriceHistoryTests(TestCase):
         self.assertEqual(ids, [self.sup.pk])
 
 
+class HomeRebuildTests(TestCase):
+    """The merged /home/ rebuilt on the design system: KPI tiles (from the
+    retired root dashboard) + staff-on-shift shell + stock alerts + urgent
+    tasks, with the weather card and the per-ingredient inventory table
+    dropped. Exercised via the temporary /home-preview/ route until cutover
+    (retarget the URL to /home/ then).
+    """
+
+    PREVIEW_URL = "/home-preview/"
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self._weather_patch = patch("stock.views.fetch_weather", return_value=None)
+        self._weather_patch.start()
+        self.addCleanup(self._weather_patch.stop)
+
+    def test_preview_renders_on_design_system_shell(self):
+        r = self.client.get(self.PREVIEW_URL)
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Design-system shell (BP sidebar + offset main), not the old shell.
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+
+    def test_preview_shows_the_four_dashboard_kpis(self):
+        r = self.client.get(self.PREVIEW_URL)
+        body = r.content.decode()
+        for label in ("Ingredients", "Below minimum", "Stock value", "Last count"):
+            self.assertIn(label, body, f"KPI '{label}' missing")
+
+    def test_preview_has_staff_widget_empty_state(self):
+        # No Shift/Rota model exists yet, so the widget shows its empty-state
+        # and "0 on shift" — and must NOT fabricate any names.
+        r = self.client.get(self.PREVIEW_URL)
+        body = r.content.decode()
+        self.assertIn("Staff on shift today", body)
+        self.assertIn("0 on shift", body)
+        self.assertIn("No shifts recorded for today", body)
+
+    def test_preview_keeps_alerts_and_tasks_but_drops_weather(self):
+        # Below-minimum ingredient → a stock alert linking to reorder.
+        low = Product.objects.create(
+            code="NPD-I100", name="Test Flour", department=self.dept,
+            category="dry_goods", unit="g", minimum=50)
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date.today())
+        StockLine.objects.create(stocktake=st, product=low, current=Decimal("10"))
+        r = self.client.get(self.PREVIEW_URL)
+        body = r.content.decode()
+        self.assertIn("Stock alerts", body)
+        self.assertIn("Test Flour", body)
+        self.assertIn("Urgent tasks", body)
+        # Weather card was dropped from the merged page.
+        self.assertNotIn("weather", body.lower())
+
+
 class SectionNavigationTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")

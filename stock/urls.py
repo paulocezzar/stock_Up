@@ -11,6 +11,8 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
     path("", views.dashboard, name="dashboard"),
     path("home/", views.home, name="home"),
+    # TEMP: live preview of the design-system /home/ rebuild. Remove on cutover.
+    path("home-preview/", views.home_preview, name="home_preview"),
     path("stock/", views.stock_home, name="stock_home"),
     path("recipes/", views.recipes_home, name="recipes"),
     path("recipes/upload/", views.recipe_upload, name="recipe_upload"),

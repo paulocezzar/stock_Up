@@ -1,0 +1,134 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Home — the merged landing page rebuilt on the shared Business Performance
+design system. Combines the KPI tiles from the (retired) root dashboard()
+view with the stock alerts + urgent tasks from the old /home/. The weather
+card and the full per-ingredient inventory table were intentionally dropped
+(the latter duplicates /products/ and /reorder/).
+
+"Staff on shift today" is an empty-state shell: there is no Shift/Rota model
+yet, so the view passes an empty staff_on_shift list (see views.home). Do
+not fabricate names here.
+{% endcomment %}
+{% load humanize design_nav %}
+{% block title %}Home · StockUp{% endblock %}
+
+{% block body %}
+{% comment %} Greeting + date {% endcomment %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">{{ greeting }}{% if user.username %}, {{ user.username }}{% endif %}</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{% if has_dept and current_dept %}{{ current_dept.name }} · {% endif %}{{ today|date:"l, d M Y" }}</p>
+  </div>
+</div>
+
+{% comment %} Row 1 — KPI tiles (BP 4-up KpiRow grid via the shared partial) {% endcomment %}
+<div class="mb-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+  {% include "design_system/components/kpi_tile.html" with label="Ingredients" value=n_ingredients subline="in catalogue" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/></svg>' %}
+  {% include "design_system/components/kpi_tile.html" with label="Below minimum" value=below_min subline="need reorder" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>' %}
+  {% include "design_system/components/kpi_tile.html" with label="Stock value" value=stock_value|gbp subline="latest stocktake" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7c0-5.333-8-5.333-8 0"/><path d="M10 7v14"/><path d="M6 21h12"/><path d="M6 13h10"/></svg>' %}
+  {% include "design_system/components/kpi_tile.html" with label="Last count" value=latest_stocktake.date|date:"d M Y"|default:"—" subline="stocktake date" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/></svg>' %}
+</div>
+
+{% comment %} Row 2 — Staff on shift today (empty-state shell; no Shift/Rota model yet) {% endcomment %}
+<div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Staff on shift today</h3>
+    <span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/20">{{ staff_count }} on shift</span>
+  </div>
+  {% if staff_on_shift %}
+    <table data-testid="staff-table" class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          <th class="py-2.5 pr-2">Name</th>
+          <th class="py-2.5 px-2">Role</th>
+          <th class="py-2.5 pl-2 text-right">Shift</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in staff_on_shift %}
+          <tr class="border-b border-slate-100 last:border-0 dark:border-slate-800">
+            <td class="py-2.5 pr-2 font-medium text-slate-800 dark:text-slate-200">{{ s.name }}</td>
+            <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">{{ s.role|default:"—" }}</td>
+            <td class="py-2.5 pl-2 text-right tabular text-slate-600 dark:text-slate-400">{{ s.shift|default:"—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-800">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="mb-2 text-slate-300 dark:text-slate-600"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No shifts recorded for today</p>
+    </div>
+  {% endif %}
+</div>
+
+{% comment %} Row 3 — Stock alerts (kept from the old /home/, BP table styling) {% endcomment %}
+<div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-1 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Stock alerts</h3>
+  </div>
+  <p class="mb-3 text-sm text-slate-500 dark:text-slate-400">Ingredients that need attention right now</p>
+  {% if stock_alerts %}
+    <table data-testid="alerts-table" class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          <th class="py-2.5 pr-2">Ingredient</th>
+          <th class="py-2.5 px-2">Alert</th>
+          <th class="py-2.5 px-2">Detail</th>
+          <th class="py-2.5 pl-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in stock_alerts %}
+          <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+            <td class="py-2.5 pr-2">
+              <a href="{% url 'product_detail' a.ingredient.pk %}" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">{{ a.ingredient.name }}</a>
+              {% if a.ingredient.code %}<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">{{ a.ingredient.code }}</span>{% endif %}
+            </td>
+            <td class="py-2.5 px-2">
+              {% if a.kind == "low_cover" %}
+                <span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/20">{{ a.alert }}</span>
+              {% else %}
+                <span class="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/30">{{ a.alert }}</span>
+              {% endif %}
+            </td>
+            <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">{{ a.detail }}</td>
+            <td class="py-2.5 pl-2 text-right"><a href="{{ a.href }}" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">{% if a.kind == "below_min" %}Reorder →{% else %}View →{% endif %}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      Stock looks healthy — no alerts in {% if has_dept and current_dept %}{{ current_dept.name }}{% else %}your department{% endif %}.
+    </div>
+  {% endif %}
+</div>
+
+{% comment %} Row 4 — Urgent tasks (kept from the old /home/) {% endcomment %}
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Urgent tasks</h3>
+    <span class="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/30">{{ urgent_count }}</span>
+  </div>
+  {% if urgent_tasks %}
+    <ul class="space-y-1.5">
+      {% for t in urgent_tasks %}
+        <li>
+          <a href="{{ t.url }}" class="flex items-center justify-between gap-3 rounded-lg border-l-2 border-rose-300 bg-slate-50 px-3 py-2.5 text-sm transition hover:border-amber-400 hover:bg-slate-100 dark:border-rose-500/40 dark:bg-slate-800/50 dark:hover:border-amber-400/50 dark:hover:bg-slate-800">
+            <span class="min-w-0 text-slate-700 dark:text-slate-200">{{ t.label }}{% if t.count %} <span class="text-xs text-slate-500 dark:text-slate-400">— {{ t.count }} item{{ t.count|pluralize }}</span>{% endif %}</span>
+            <span class="shrink-0 text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">do →</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      All caught up!
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

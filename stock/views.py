@@ -212,7 +212,7 @@ def fetch_weather(lat=51.1485, lon=-2.7137, timeout=3.0):
 
 
 @login_required
-def home(request):
+def home(request, template_name="stock/home.html"):
     """Dashboard-style landing page — the post-login destination.
 
     Top row: welcome + weather + urgent tasks cards. Below: per-ingredient
@@ -279,7 +279,23 @@ def home(request):
         weather = fetch_weather()
     except Exception:
         weather = None
-    return render(request, "stock/home.html", {
+
+    # KPI tiles — the same four metrics as the (retired) root dashboard()
+    # view: ingredient count / below-minimum count / stock value / last
+    # count date. Merged here so /home/ is the single landing page.
+    below_min = sum(1 for a in stock_alerts if a["kind"] == "below_min")
+    latest_stocktake = dept.stocktakes.first() if dept is not None else None
+    n_ingredients = dept.products.count() if dept is not None else 0
+    stock_value = (latest_stocktake.total_value
+                   if latest_stocktake else Decimal("0"))
+
+    # "Staff on shift today": there is NO Shift/Rota model in the project
+    # yet (/rota/ is a coming-soon placeholder), so there is nothing to
+    # query. Intentionally empty until a roster data layer exists — the
+    # widget renders its empty-state. Do NOT fabricate names here.
+    staff_on_shift = []
+
+    return render(request, template_name, {
         "greeting": greeting,
         "today": today,
         "urgent_tasks": urgent_tasks,
@@ -287,7 +303,22 @@ def home(request):
         "stock_alerts": stock_alerts,
         "has_dept": dept is not None,
         "weather": weather,
+        "n_ingredients": n_ingredients,
+        "below_min": below_min,
+        "stock_value": stock_value,
+        "latest_stocktake": latest_stocktake,
+        "staff_on_shift": staff_on_shift,
+        "staff_count": len(staff_on_shift),
     })
+
+
+@login_required
+def home_preview(request):
+    """TEMPORARY live preview of the merged /home/ rebuilt on the shared
+    design system (KPI tiles + staff-on-shift shell + stock alerts + urgent
+    tasks). Reuses home()'s full context, swapping only the template.
+    Remove this view + its URL on cutover to home_bp.html."""
+    return home(request, template_name="stock/home_bp.html")
 
 
 @login_required
