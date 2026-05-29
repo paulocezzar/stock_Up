@@ -2566,7 +2566,7 @@ def financials_home(request):
 
 
 @login_required
-def orders_home(request):
+def orders_home(request, template_name="stock/orders.html"):
     """Orders list grouped by week, then by day (Mon–Sun).
 
     Orders are stored per-date — the "week commencing" Monday is always
@@ -2689,7 +2689,7 @@ def orders_home(request):
         except ValueError:
             filtered_day = None
 
-    return render(request, "stock/orders.html", {
+    return render(request, template_name, {
         "orders": orders,
         "customers": customers,
         "filter_customer": customer_pk,
@@ -2709,6 +2709,16 @@ def orders_home(request):
         "customer_links": customer_links,
         "filtered_day": filtered_day,
     })
+
+
+@login_required
+def orders_preview(request):
+    """TEMPORARY live preview of the Orders page rebuilt on the shared
+    design system. Reuses orders_home's full context + week/customer/date
+    logic, swapping only the template. /orders/ stays on the old template
+    until cutover; remove this view + its URL once Orders is switched over.
+    """
+    return orders_home(request, template_name="stock/orders_bp.html")
 
 
 def _build_order_grid(orders, days):
