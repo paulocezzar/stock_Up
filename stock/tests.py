@@ -1240,13 +1240,15 @@ class SectionNavigationTests(TestCase):
         self.assertNotIn('href="/stock/"', nav)
 
     def test_stock_sub_pages_highlight_themselves_not_a_top_link(self):
+        # Products has moved to the design-system shell, where the active
+        # section is marked on the left rail (amber ring), not the old
+        # `class="on"` nav — see test_products_highlights_itself_on_bp_rail.
         for path, link in (
             ("/", '/'),
             ("/stocktakes/", '/stocktakes/'),
             ("/deliveries/", '/deliveries/'),
             ("/adjustments/", '/adjustments/'),
             ("/reorder/", '/reorder/'),
-            ("/products/", '/products/'),
             ("/suppliers/", '/suppliers/'),
         ):
             r = self.client.get(path)
@@ -1256,6 +1258,16 @@ class SectionNavigationTests(TestCase):
                 nav, r'href="' + link + r'"\s+class="on"',
                 f"{path} should highlight its own sub-nav link",
             )
+
+    def test_products_highlights_itself_on_bp_rail(self):
+        # The Ingredients page renders the design-system shell: the active
+        # section is marked on the left rail with the amber ring
+        # (bg-amber-50 / ring-amber-200), replacing the old `class="on"`.
+        body = self.client.get("/products/").content.decode()
+        self.assertRegex(
+            body, r'href="/products/"[^>]*\bring-amber-200\b',
+            "Products should mark its own rail link active on the BP shell",
+        )
 
     def test_placeholder_navbars_have_home_plus_section(self):
         # Recipes now has Home + Recipes + Import sub-nav (tested elsewhere);
@@ -7401,10 +7413,11 @@ class OrdersTests(TestCase):
 
     def test_other_pages_do_not_opt_into_wide_layout(self):
         # The wide layout is scoped to the orders weekly view ONLY —
-        # other pages (Home, New order form, Products, etc.) keep the
-        # default centred 1100px container. Assert their <main> carries
-        # an empty class attribute (no `wide`).
-        for path in ("/home/", "/orders/new/", "/products/", "/recipes/"):
+        # other still-old-shell pages (Home, New order form, Recipes) keep
+        # the default centred 1100px container. Assert their <main> carries
+        # an empty class attribute (no `wide`). Products has since moved to
+        # the design-system shell, so it's covered by the Ingredients tests.
+        for path in ("/home/", "/orders/new/", "/recipes/"):
             body = self.client.get(path).content.decode()
             self.assertIn('<main class="">', body,
                           f"{path} should not opt into the wide layout")

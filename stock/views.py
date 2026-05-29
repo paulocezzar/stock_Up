@@ -1107,7 +1107,7 @@ def supplier_delete(request, pk):
 
 # ---- ingredients (per department) ----
 @login_required
-def products(request, template_name="stock/products.html"):
+def products(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1141,19 +1141,11 @@ def products(request, template_name="stock/products.html"):
         return redirect("products")
     # Ingredients list excludes packaging — packaging has its own page so
     # the bakery view isn't drowned in NPD-P box/case rows.
-    return render(request, template_name, {
+    return render(request, "stock/products_bp.html", {
         "products": (dept.products.exclude(category="packaging")
                      .prefetch_related("prices__supplier")),
         "suppliers": Supplier.objects.all(),
     })
-
-
-@login_required
-def products_preview(request):
-    """TEMPORARY live preview of the Ingredients page rebuilt on the shared
-    design system. Reuses the products view (context + add-ingredient POST),
-    swapping only the template. Remove this view + its URL on cutover."""
-    return products(request, template_name="stock/products_bp.html")
 
 
 @login_required
