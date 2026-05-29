@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard,
   ScrollText,
-  LineChart,
   BarChart3,
   Package,
   ChefHat,
@@ -14,15 +12,12 @@ import {
   LogOut,
 } from "lucide-react";
 
-// Fixed left rail. Every entry routes to a page that actually exists
-// in the Django app — no nav that 404s. Active item is hard-coded to
-// Dashboard (client router lands later; for now /dashboard is the only
-// SPA route).
+// Fixed left rail. Every entry routes to a page that actually exists in
+// the Django app — no nav that 404s. Dashboard and Financials were retired
+// (both now redirect to Business Performance), so they're dropped here too.
 const NAV = [
-  { label: "Dashboard",  icon: LayoutDashboard, href: "/dashboard/" },
   { label: "Business Performance", icon: BarChart3, href: "/business-performance-dashboard/" },
   { label: "Orders",     icon: ScrollText,      href: "/orders/" },
-  { label: "Financials", icon: LineChart,       href: "/financials/" },
   { label: "Products",   icon: Package,         href: "/products/" },
   { label: "Recipes",    icon: ChefHat,         href: "/recipes/" },
   { label: "Stock",      icon: Boxes,           href: "/stock/" },
