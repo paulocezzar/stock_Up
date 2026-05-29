@@ -71,19 +71,19 @@ export default function Sidebar() {
   return (
     <aside style={asideStyle}>
       <div style={HEADER_STYLE} className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
-        <div className="flex items-center gap-3">
+        <a href="/home/" className="group flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">
             SU
           </div>
           <div>
-            <div className="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">
+            <div className="font-display text-lg font-semibold tracking-normal text-slate-950 transition-colors group-hover:text-amber-700 dark:text-slate-100 dark:group-hover:text-amber-300">
               StockUp
             </div>
             <div className="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
               Bakery
             </div>
           </div>
-        </div>
+        </a>
       </div>
       <nav style={NAV_STYLE} className="space-y-1 px-3 py-4">
         {NAV.map(({ label, icon: Icon, href }) => {
