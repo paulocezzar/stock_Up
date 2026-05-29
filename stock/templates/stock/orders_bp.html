@@ -1,0 +1,250 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Orders — page 1 rebuilt on the shared Business Performance design system.
+Extends design_system/base.html, so the BP sidebar + shell + fonts come
+from the shared layer; this file only renders the page body in BP's real
+Tailwind classes (no duplicated shell/card/colour CSS). Data contract and
+behaviour are identical to stock/orders.html — same context, same GET
+links, filters, week navigation, drilldowns, and number formats.
+
+NOT wired to the /orders/ route yet (parallel build pending approval).
+{% endcomment %}
+{% block title %}Orders · StockUp{% endblock %}
+
+{% block body %}
+{# ---- Title row ---- #}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Orders</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Week commencing {{ week_start|date:"d M Y" }}</p>
+  </div>
+  <a href="{% url 'order_new' %}"
+     class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">
+    + New order
+  </a>
+</div>
+
+{# ---- Week navigator ---- #}
+<div class="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Week</span>
+  <a href="?week={{ prev_week|date:'Y-m-d' }}"
+     class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">← Previous</a>
+  <span class="font-display text-sm font-semibold text-slate-950 dark:text-slate-100">{{ week_start|date:"d M" }} – {{ week_end|date:"d M Y" }}</span>
+  <a href="?week={{ next_week|date:'Y-m-d' }}"
+     class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">Next →</a>
+  {% if not on_today_week %}
+    <a href="?week={{ today_week|date:'Y-m-d' }}"
+       class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">This week</a>
+  {% endif %}
+  <form method="get" class="ml-auto flex items-center gap-2">
+    <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Jump to</label>
+    <input type="date" name="week" value="{{ week_start|date:'Y-m-d' }}"
+           class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    <button type="submit"
+            class="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">Go</button>
+  </form>
+</div>
+
+{# ---- Filter bar ---- #}
+<form method="get" class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <input type="hidden" name="week" value="{{ week_start|date:'Y-m-d' }}">
+  <div class="flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Customer</label>
+      <select name="customer"
+              class="h-10 min-w-[220px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <option value="">— any —</option>
+        {% for c in customers %}
+          <option value="{{ c.pk }}" {% if filter_customer == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Specific day</label>
+      <input type="date" name="date" value="{{ filter_date }}"
+             min="{{ week_start|date:'Y-m-d' }}" max="{{ week_end|date:'Y-m-d' }}"
+             class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <button type="submit"
+            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Filter</button>
+    {% if filter_customer or filter_date %}
+      <a href="?week={{ week_start|date:'Y-m-d' }}" class="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear within-week filters</a>
+    {% endif %}
+  </div>
+</form>
+
+{# ---- Per-day totals strip (external revenue) + week total tile ---- #}
+<div class="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
+  {% for day in days %}
+    <a href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60{% if not day.count %} opacity-60 hover:opacity-100{% endif %}">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ day.label|slice:":3" }}</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">{{ day.date|date:"d M" }}</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal {% if day.total %}text-slate-950 dark:text-slate-100{% else %}text-slate-400 dark:text-slate-500{% endif %}">{% if day.total %}£{{ day.total }}{% else %}—{% endif %}</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if day.count %}{{ day.count }} order{{ day.count|pluralize }}{% else %}—{% endif %}</div>
+    </a>
+  {% endfor %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+    <div class="text-xs font-medium text-amber-800 dark:text-amber-200">Week</div>
+    <div class="text-xs text-amber-700/70 dark:text-amber-200/60">Total</div>
+    <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£{{ week_total_value }}</div>
+    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ week_total_orders }} order{{ week_total_orders|pluralize }}</div>
+  </div>
+</div>
+{% if week_total_internal %}
+  <div class="-mt-2 mb-5 flex items-baseline justify-end gap-2.5 text-xs text-slate-500 dark:text-slate-400">
+    <span>Internal use (excluded from week total)</span>
+    <span class="tabular font-semibold text-slate-700 dark:text-slate-300">£{{ week_total_internal }}</span>
+  </div>
+{% endif %}
+
+{# ---- Customer picker (week overview state) ---- #}
+{% if customer_links and not grid %}
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Customers</h3>
+    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Click a customer to see their grid for this week</div>
+  </div>
+  <table class="w-full text-sm">
+    <tbody>
+      {% if customer_links.0.active %}
+        <tr><td colspan="2" class="border-b border-slate-200 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">Ordered this week</td></tr>
+      {% endif %}
+      {% for cl in customer_links %}
+        {% ifchanged cl.active %}
+          {% if not cl.active %}
+            <tr><td colspan="2" class="border-b border-slate-200 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">Other customers <span class="font-normal normal-case tracking-normal text-slate-400 dark:text-slate-500">— no orders this week</span></td></tr>
+          {% endif %}
+        {% endifchanged %}
+        <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}"
+               class="font-medium {% if cl.active %}text-slate-800 hover:text-slate-950 dark:text-slate-200{% else %}text-slate-400 hover:text-slate-600 dark:text-slate-500{% endif %}">{{ cl.customer.name }}</a>
+            {% if cl.is_internal %}
+              <span title="Non-revenue: this customer's orders are EXCLUDED from the Week total but still listed."
+                    class="ml-2 inline-block rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">internal</span>
+            {% endif %}
+          </td>
+          <td class="py-2.5 pl-2 text-right tabular whitespace-nowrap {% if cl.active %}font-semibold text-slate-900 dark:text-slate-100{% else %}text-slate-400 dark:text-slate-500{% endif %}">
+            {% if cl.active %}{{ cl.n_orders }} order{{ cl.n_orders|pluralize }} · £{{ cl.total_value }}{% else %}no orders this week{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ---- Single-customer spreadsheet grid (products × Mon–Sun) ---- #}
+{% if grid %}
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}</h3>
+    <a href="?week={{ week_start|date:'Y-m-d' }}" class="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">← Back to all customers</a>
+  </div>
+  <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <table class="w-full table-fixed border-collapse text-sm tabular">
+      <thead>
+        <tr class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <th class="sticky left-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">SKU</th>
+          <th class="sticky left-[90px] top-0 z-30 w-[360px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">Product</th>
+          <th class="sticky left-[450px] top-0 z-30 w-[70px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Price</th>
+          {% for day in days %}
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 {% if day.is_today %}bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300{% else %}bg-slate-50 dark:bg-slate-950{% endif %}">{{ day.label|slice:":3" }}<br><span class="font-normal text-slate-400 dark:text-slate-500">{{ day.date|date:"d M" }}</span></th>
+          {% endfor %}
+          <th class="sticky right-[90px] top-0 z-30 w-[70px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Total</th>
+          <th class="sticky right-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Total £</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in grid.rows %}
+          <tr class="group">
+            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
+            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+              {% if row.product.sale_product %}
+                <a href="{% url 'sale_product_detail' row.product.sale_product.pk %}" title="{{ row.product.name }}" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">{{ row.product.name }}</a>
+              {% else %}
+                <span title="{{ row.product.name }} — discontinued / not in current catalogue" class="text-slate-400 dark:text-slate-500">{{ row.product.name }}</span>
+              {% endif %}
+            </td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.price is not None %}£{{ row.product.price }}{% else %}—{% endif %}</td>
+            {% for cell in row.cells %}
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 {% if cell.qty is not None %}text-slate-700 dark:text-slate-300{% else %}text-slate-300 dark:text-slate-600{% endif %}">{% if cell.qty is not None %}{{ cell.qty|floatformat:"-3" }}{% endif %}</td>
+            {% endfor %}
+            <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">{{ row.total_qty|floatformat:"-3" }}</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">{% if row.total_value is not None %}£{{ row.total_value }}{% else %}—{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="12" class="px-2.5 py-4 text-sm text-slate-500 dark:text-slate-400">No orders for {{ selected_customer.name }} this week. <a href="{% url 'order_new' %}" class="font-medium text-slate-700 underline dark:text-slate-200">+ New order</a>.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if grid.rows %}
+      <tfoot>
+        <tr class="font-semibold text-slate-900 dark:text-slate-100">
+          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (qty)</td>
+          {% for t in grid.day_totals %}
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">{% if t %}{{ t|floatformat:"-3" }}{% else %}—{% endif %}</td>
+          {% endfor %}
+          <td class="sticky right-[90px] z-20 w-[70px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">{{ grid.grand_total|floatformat:"-3" }}</td>
+          <td class="sticky right-0 z-20 w-[90px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">£{{ grid.grand_value }}</td>
+        </tr>
+        <tr class="font-semibold text-slate-900 dark:text-slate-100">
+          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (£)</td>
+          {% for v in grid.day_values %}
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">{% if v %}£{{ v }}{% else %}—{% endif %}</td>
+          {% endfor %}
+          <td class="sticky right-[90px] z-20 w-[70px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950"></td>
+          <td class="sticky right-0 z-20 w-[90px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£{{ grid.grand_value }}</td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ---- Single-day drilldown list (when ?date= narrows to one day) ---- #}
+{% if filtered_day and filter_date %}
+<div class="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 {% if filtered_day.is_today %}ring-1 ring-amber-200 dark:ring-amber-500/30{% endif %}">
+  <div class="mb-3 flex flex-wrap items-baseline gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
+    <span class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">{{ filtered_day.label }}</span>
+    <span class="text-xs text-slate-500 dark:text-slate-400">{{ filtered_day.date|date:"d M Y" }}</span>
+    <span class="ml-auto text-xs tabular text-slate-500 dark:text-slate-400">{{ filtered_day.count }} order{{ filtered_day.count|pluralize }} · £{{ filtered_day.total }}</span>
+  </div>
+  {% if filtered_day.orders %}
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <th class="py-2.5 pr-2">Customer</th>
+        <th class="py-2.5 px-2 text-right">Lines</th>
+        <th class="py-2.5 px-2 text-right">Value</th>
+        <th class="py-2.5 px-2"></th>
+        <th class="py-2.5 pl-2 text-right"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in filtered_day.orders %}
+        <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="{% url 'order_detail' o.pk %}" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">{{ o.customer.name }}</a>
+            {% if o.note %}<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">· {{ o.note }}</span>{% endif %}
+          </td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">{{ o.lines.count }}</td>
+          <td class="py-2.5 px-2 text-right tabular font-semibold text-slate-900 dark:text-slate-100">£{{ o.total_value }}</td>
+          <td class="py-2.5 px-2 text-right"><a href="{% url 'order_edit' o.pk %}" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="{% url 'order_delete' o.pk %}" class="inline"
+                  onsubmit="return confirm('Delete the order for {{ o.customer.name|escapejs }} on {{ o.order_date|date:'d M Y'|escapejs }}? This can\'t be undone.')">{% csrf_token %}
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="text-sm text-slate-400 dark:text-slate-500">No orders for this day.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

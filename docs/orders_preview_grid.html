@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders · StockUp</title>
+
+{# Pre-paint theme: same mechanism as the Business Performance SPA —
+   Tailwind darkMode:"class" toggling a `.dark` class on <html>, keyed on
+   the SAME localStorage entry ("stockup-theme") so the theme is shared
+   across the React dashboard and these rebuilt pages without a flash. #}
+<script>
+  (function () {
+    try {
+      if (localStorage.getItem("stockup-theme") === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    } catch (e) {}
+  })();
+</script>
+
+{# Compiled Tailwind built from the BP config (frontend/tailwind.config.js)
+   scanning these templates. Same tokens, fonts and dark variants as BP. #}
+<link rel="stylesheet" href="../stock/static/stockup/app.css">
+
+</head>
+<body class="antialiased">
+<div class="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+  {# Left rail — a faithful HTML/Tailwind reproduction of the Business
+   Performance React rail (frontend/src/components/Sidebar.jsx): same
+   fixed 16rem rail, logo, lucide icons, active-item style (amber-50 +
+   ring + 3px amber bar), dark-mode toggle SWITCH, and the
+   "Bakery account / Sign out" footer. Differences from the JSX, both
+   deliberate: dark surfaces come from the `.dark` class (not JS-driven
+   inline styles), and Sign out posts a form (Django 5 LogoutView is
+   POST-only) instead of a GET <a href="/logout/">. #}
+<aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+
+  <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
+    <a href="/home/" class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">SU</div>
+      <div>
+        <div class="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">StockUp</div>
+        <div class="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Bakery</div>
+      </div>
+    </a>
+  </div>
+
+  <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+    
+<a href="/dashboard/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+    
+  </svg>
+  <span class="flex-1">Dashboard</span>
+</a>
+
+
+    
+<a href="/business-performance-dashboard/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>
+    
+  </svg>
+  <span class="flex-1">Business Performance</span>
+</a>
+
+
+    
+<a href="/orders/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition bg-amber-50 text-slate-950 ring-1 ring-amber-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700">
+  <span aria-hidden="true" class="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-amber-500"></span>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>
+    
+  </svg>
+  <span class="flex-1">Orders</span>
+</a>
+
+
+    
+<a href="/financials/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>
+    
+  </svg>
+  <span class="flex-1">Financials</span>
+</a>
+
+
+    
+<a href="/products/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/>
+    
+  </svg>
+  <span class="flex-1">Products</span>
+</a>
+
+
+    
+<a href="/recipes/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/>
+    
+  </svg>
+  <span class="flex-1">Recipes</span>
+</a>
+
+
+    
+<a href="/stock/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/>
+    
+  </svg>
+  <span class="flex-1">Stock</span>
+</a>
+
+
+    
+<a href="/deliveries/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>
+    
+  </svg>
+  <span class="flex-1">Deliveries</span>
+</a>
+
+
+    
+<a href="/customers/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </svg>
+  <span class="flex-1">Customers</span>
+</a>
+
+
+  </nav>
+
+  <div class="shrink-0 space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+    <div class="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+      <span class="flex items-center gap-3">
+        <span id="su-theme-icon" aria-hidden="true">
+          
+          <svg data-icon="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg data-icon="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </span>
+        Dark mode
+      </span>
+      <button id="su-theme-toggle" type="button" onclick="stockupToggleTheme(); stockupSyncThemeUI();"
+        class="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition dark:bg-amber-500"
+        title="Toggle light/dark" aria-label="Toggle light/dark">
+        <span id="su-theme-knob" aria-hidden="true"
+          class="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"></span>
+      </button>
+    </div>
+
+    <form method="post" action="/logout/">
+      <input type="hidden" name="csrfmiddlewaretoken" value="cBeYzjOZN3weXTVbTDSQWNozMYHJ61nu5ShV4GwmPYi0AJlSmQlJeCUrY3eKSwLU">
+      <button type="submit"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-900">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">B</span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-display text-sm leading-tight text-slate-950 dark:text-slate-100">Bakery account</span>
+          <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">Sign out</span>
+        </span>
+        <svg class="shrink-0 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      </button>
+    </form>
+  </div>
+</aside>
+
+<script>
+  // Reflect the live `.dark` state in the toggle knob/track + moon/sun
+  // icon. The track itself uses dark: variants (bg-slate-200 →
+  // dark:bg-amber-500), so only the knob position and icon need syncing.
+  function stockupSyncThemeUI() {
+    var dark = document.documentElement.classList.contains("dark");
+    var knob = document.getElementById("su-theme-knob");
+    if (knob) {
+      knob.classList.toggle("translate-x-[18px]", dark);
+      knob.classList.toggle("translate-x-1", !dark);
+    }
+    var icon = document.getElementById("su-theme-icon");
+    if (icon) {
+      var moon = icon.querySelector('[data-icon="moon"]');
+      var sun = icon.querySelector('[data-icon="sun"]');
+      if (moon) moon.style.display = dark ? "none" : "";
+      if (sun) sun.style.display = dark ? "" : "none";
+    }
+  }
+  stockupSyncThemeUI();
+</script>
+
+  <main class="ml-64 min-w-0">
+    <div class="mx-auto w-full max-w-[1760px] px-8 py-7">
+      
+      
+
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Orders</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Week commencing 25 May 2026</p>
+  </div>
+  <a href="/orders/new/"
+     class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">
+    + New order
+  </a>
+</div>
+
+
+<div class="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Week</span>
+  <a href="?week=2026-05-18"
+     class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">← Previous</a>
+  <span class="font-display text-sm font-semibold text-slate-950 dark:text-slate-100">25 May – 31 May 2026</span>
+  <a href="?week=2026-06-01"
+     class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">Next →</a>
+  
+    <a href="?week=2026-05-25"
+       class="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">This week</a>
+  
+  <form method="get" class="ml-auto flex items-center gap-2">
+    <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Jump to</label>
+    <input type="date" name="week" value="2026-05-25"
+           class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    <button type="submit"
+            class="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">Go</button>
+  </form>
+</div>
+
+
+<form method="get" class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <input type="hidden" name="week" value="2026-05-25">
+  <div class="flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Customer</label>
+      <select name="customer"
+              class="h-10 min-w-[220px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <option value="">— any —</option>
+        
+          <option value="1" selected>Garden Cafe</option>
+        
+          <option value="2" >Riverside Deli</option>
+        
+          <option value="3" >Hill Bakery Co</option>
+        
+          <option value="4" >Bakery Internal Use</option>
+        
+          <option value="5" >Corner Store</option>
+        
+          <option value="6" >Westgate Hotel</option>
+        
+      </select>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Specific day</label>
+      <input type="date" name="date" value=""
+             min="2026-05-25" max="2026-05-31"
+             class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <button type="submit"
+            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Filter</button>
+    
+      <a href="?week=2026-05-25" class="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear within-week filters</a>
+    
+  </div>
+</form>
+
+
+<div class="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
+  
+    <a href="?week=2026-05-25&date=2026-05-25"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Mon</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">25 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£1240.50</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">4 orders</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-26"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60 opacity-60 hover:opacity-100">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Tue</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">26 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-400 dark:text-slate-500">—</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">—</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-27"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Wed</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">27 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£980.00</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">3 orders</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-28"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Thu</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">28 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£1510.75</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">5 orders</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-29"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Fri</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">29 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£2030.20</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">6 orders</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-30"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Sat</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">30 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£760.00</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">2 orders</div>
+    </a>
+  
+    <a href="?week=2026-05-25&date=2026-05-31"
+       class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60 opacity-60 hover:opacity-100">
+      <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Sun</div>
+      <div class="text-xs text-slate-400 dark:text-slate-500">31 May</div>
+      <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-400 dark:text-slate-500">—</div>
+      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">—</div>
+    </a>
+  
+  <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+    <div class="text-xs font-medium text-amber-800 dark:text-amber-200">Week</div>
+    <div class="text-xs text-amber-700/70 dark:text-amber-200/60">Total</div>
+    <div class="mt-2 font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">£6521.45</div>
+    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">20 orders</div>
+  </div>
+</div>
+
+  <div class="-mt-2 mb-5 flex items-baseline justify-end gap-2.5 text-xs text-slate-500 dark:text-slate-400">
+    <span>Internal use (excluded from week total)</span>
+    <span class="tabular font-semibold text-slate-700 dark:text-slate-300">£120.00</span>
+  </div>
+
+
+
+
+
+
+
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Garden Cafe — week commencing 25 May 2026</h3>
+    <a href="?week=2026-05-25" class="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">← Back to all customers</a>
+  </div>
+  <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <table class="w-full table-fixed border-collapse text-sm tabular">
+      <thead>
+        <tr class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <th class="sticky left-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">SKU</th>
+          <th class="sticky left-[90px] top-0 z-30 w-[360px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">Product</th>
+          <th class="sticky left-[450px] top-0 z-30 w-[70px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Price</th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Mon<br><span class="font-normal text-slate-400 dark:text-slate-500">25 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Tue<br><span class="font-normal text-slate-400 dark:text-slate-500">26 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Wed<br><span class="font-normal text-slate-400 dark:text-slate-500">27 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">Thu<br><span class="font-normal text-slate-400 dark:text-slate-500">28 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Fri<br><span class="font-normal text-slate-400 dark:text-slate-500">29 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Sat<br><span class="font-normal text-slate-400 dark:text-slate-500">30 May</span></th>
+          
+            <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 bg-slate-50 dark:bg-slate-950">Sun<br><span class="font-normal text-slate-400 dark:text-slate-500">31 May</span></th>
+          
+          <th class="sticky right-[90px] top-0 z-30 w-[70px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Total</th>
+          <th class="sticky right-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Total £</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+          <tr class="group">
+            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">10231</td>
+            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+              
+                <a href="/sale-products/1/" title="Sourdough Large" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Sourdough Large</a>
+              
+            </td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£3.20</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">12</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">8</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">15</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">20</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">6</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+            <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">61</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">£195.20</td>
+          </tr>
+        
+          <tr class="group">
+            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">10244</td>
+            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+              
+                <a href="/sale-products/1/" title="Baguette" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Baguette</a>
+              
+            </td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£1.10</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">24</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">18</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">30</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">36</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">12</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+            <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">120</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">£132.00</td>
+          </tr>
+        
+          <tr class="group">
+            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">10312</td>
+            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+              
+                <a href="/sale-products/1/" title="Pain au Chocolat" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Pain au Chocolat</a>
+              
+            </td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£1.45</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">40</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">30</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">50</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">60</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">20</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+            <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">200</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">£290.00</td>
+          </tr>
+        
+          <tr class="group">
+            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50"></td>
+            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+              
+                <span title="Spelt Loaf (discontinued) — discontinued / not in current catalogue" class="text-slate-400 dark:text-slate-500">Spelt Loaf (discontinued)</span>
+              
+            </td>
+            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£2.90</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">4</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">3</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-700 dark:text-slate-300">5</td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+              <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 text-slate-300 dark:text-slate-600"></td>
+            
+            <td class="sticky right-[90px] z-20 w-[70px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">12</td>
+            <td class="sticky right-0 z-20 w-[90px] border-b border-slate-100 bg-slate-50 px-2.5 py-2 text-right font-semibold text-slate-900 group-hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">£34.80</td>
+          </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr class="font-semibold text-slate-900 dark:text-slate-100">
+          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (qty)</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">80</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">—</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">56</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">98</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">121</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">38</td>
+          
+            <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">—</td>
+          
+          <td class="sticky right-[90px] z-20 w-[70px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">393</td>
+          <td class="sticky right-0 z-20 w-[90px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">£652.00</td>
+        </tr>
+        <tr class="font-semibold text-slate-900 dark:text-slate-100">
+          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (£)</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£134.40</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">—</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£88.90</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£162.20</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£205.10</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£61.40</td>
+          
+            <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">—</td>
+          
+          <td class="sticky right-[90px] z-20 w-[70px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950"></td>
+          <td class="sticky right-0 z-20 w-[90px] bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">£652.00</td>
+        </tr>
+      </tfoot>
+      
+    </table>
+  </div>
+</div>
+
+
+
+
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // Toggle .dark on <html> and persist under the BP-shared key. The
+  // sidebar switch reads/writes through this single helper.
+  function stockupToggleTheme() {
+    var root = document.documentElement;
+    var dark = root.classList.toggle("dark");
+    try { localStorage.setItem("stockup-theme", dark ? "dark" : "light"); } catch (e) {}
+    document.dispatchEvent(new CustomEvent("stockup:theme", { detail: { dark: dark } }));
+    return dark;
+  }
+</script>
+
+</body>
+</html>
