@@ -6943,7 +6943,7 @@ class OrdersTests(TestCase):
         # week. Other customers' orders don't bleed in.
         body = self.client.get(
             f"/orders/?customer={self.alice_cust.pk}").content.decode()
-        self.assertIn('class="order-grid"', body)
+        self.assertIn('data-testid="order-grid"', body)
         self.assertNotIn(f'/orders/{b.pk}/', body)
         # Date filter alone → single-day list of orders with their
         # detail / edit / delete actions.
@@ -7195,7 +7195,7 @@ class OrdersTests(TestCase):
         # order inside the strip section.
         self._seed_two_weeks()
         body = self.client.get("/orders/?week=2026-05-04").content.decode()
-        strip_start = body.find('class="day-strip"')
+        strip_start = body.find('data-testid="day-strip"')
         self.assertGreater(strip_start, -1,
                            "compact day-strip should be on the page")
         last = strip_start
@@ -7238,7 +7238,7 @@ class OrdersTests(TestCase):
             f"/orders/?week=2026-05-04&customer={self.alice_cust.pk}"
         ).content.decode()
         # Alice's grid is on the page.
-        self.assertIn('class="order-grid"', body)
+        self.assertIn('data-testid="order-grid"', body)
         self.assertIn(self.loose.name, body)
         # Bob's a_wed order, and Week B's order detail links, must not
         # appear anywhere on the page (no detail-link surface here).
@@ -7290,7 +7290,7 @@ class OrdersTests(TestCase):
         self.assertIn(f"week commencing {today_monday:%d %b %Y}", body)
         # 7 weekday tiles + 1 week-total tile = 8 occurrences of
         # `class="day-tile`.
-        self.assertEqual(body.count('class="day-tile'), 8)
+        self.assertEqual(body.count('data-testid="day-tile"'), 8)
 
     def test_manual_create_still_works_per_date_through_week_view(self):
         # Creating an order through the existing endpoint isn't
@@ -7367,10 +7367,8 @@ class OrdersTests(TestCase):
             customer=self.alice_cust, department=self.dept,
             order_date=datetime.date(2026, 5, 18))
         body = self.client.get("/orders/?week=2026-05-18").content.decode()
-        self.assertNotIn("Mon", body[body.find("<table class=\"order-grid"):
-                                       body.find("<table class=\"order-grid") + 200]
-                         if 'order-grid' in body else body[:0])
-        self.assertNotIn('class="order-grid"', body)
+        # No product grid renders without a selected customer.
+        self.assertNotIn('data-testid="order-grid"', body)
         # Customer picker list rendered instead.
         self.assertIn("click a customer to see their grid", body)
         self.assertIn(f"customer={self.alice_cust.pk}", body)
@@ -7385,26 +7383,21 @@ class OrdersTests(TestCase):
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
             "&date=2026-05-18"
         ).content.decode()
-        self.assertNotIn('class="order-grid"', body)
+        self.assertNotIn('data-testid="order-grid"', body)
 
     # ---- wide layout opt-in ----
 
     def test_orders_weekly_view_uses_wide_main_layout(self):
-        # The weekly orders view opts into the wide-main layout so the
-        # per-customer grid can use most of the viewport. Assert the
-        # rendered <main> carries the `wide` class and the supporting
-        # CSS raises the max-width well above the default 1100px while
-        # keeping a modest side gutter (so content doesn't run flush
-        # to the screen edges).
+        # On the shared design-system shell the weekly orders view uses a
+        # wide, centred main column so the per-customer grid can use most
+        # of the viewport. Assert the BP shell's main + capped, guttered
+        # container render (the old `main.wide` mechanism was replaced by
+        # the sidebar + max-width container in design_system/base.html).
         body = self.client.get("/orders/").content.decode()
-        self.assertIn('<main class="wide">', body)
-        # Wider than the default 1100px container but capped so on
-        # ultra-wide monitors content still sits inside a sensible
-        # reading width.
-        self.assertIn('main.wide{max-width:1700px', body)
-        # And a real side gutter is set (not edge-to-edge).
-        self.assertIn('padding-left:28px', body)
-        self.assertIn('padding-right:28px', body)
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        # Capped reading width (not edge-to-edge) with a real side gutter.
+        self.assertIn('max-w-[1760px]', body)
+        self.assertIn('px-8', body)
 
     def test_other_pages_do_not_opt_into_wide_layout(self):
         # The wide layout is scoped to the orders weekly view ONLY —
@@ -7433,21 +7426,21 @@ class OrdersTests(TestCase):
         body = self.client.get(
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
         ).content.decode()
-        # Header cells carry the col-* sticky classes.
-        self.assertIn('class="l col-sku"', body)
-        self.assertIn('class="l col-name"', body)
-        self.assertIn('class="col-price"', body)
-        # And the body cells carry them too — without these, the
-        # column wouldn't actually stick.
-        self.assertIn('class="sku col-sku"', body)
-        self.assertIn('class="l name col-name"', body)
-        self.assertIn('class="col-price"', body)
-        # Sticky positioning is enabled in the CSS block.
-        self.assertIn('position:sticky', body)
+        # SKU / Product / Price columns are tagged (data-col) and made
+        # sticky via Tailwind's `sticky` + left-offset utilities. The
+        # data-col hooks land on BOTH the <th>s and the <td>s — each
+        # appears at least twice (header + at least one body row).
+        for col in ("sku", "name", "price"):
+            self.assertGreaterEqual(
+                body.count(f'data-col="{col}"'), 2,
+                f"{col} column should be tagged on header and body cells")
+        # Sticky positioning is enabled (Tailwind `sticky` + pinned offsets).
+        self.assertIn('sticky left-0', body)
+        self.assertIn('sticky left-[90px]', body)
         # The wrap div provides the horizontal scroll context.
-        self.assertIn('class="order-grid-wrap"', body)
+        self.assertIn('data-testid="order-grid-wrap"', body)
         # The day-totals footer also pins its label cell sticky.
-        self.assertIn('col-sticky-foot', body)
+        self.assertIn('data-col="foot"', body)
 
     def test_grid_long_product_names_keep_full_text_via_title(self):
         # The Product column has a fixed width (so the grid fits the
@@ -7473,9 +7466,9 @@ class OrdersTests(TestCase):
         # The link carries title="<full name>" so hover reveals it
         # even when the cell visually truncates.
         self.assertIn(f'title="{escaped}"', body)
-        # And the row uses nowrap (single-line truncation, not wrapping
-        # to a second row) so the grid keeps its tight vertical rhythm.
-        self.assertIn('white-space:nowrap', body)
+        # And the product cell uses Tailwind `truncate` (overflow-hidden +
+        # ellipsis + nowrap) so a long name stays on one line.
+        self.assertIn('truncate', body)
 
     def test_grid_uses_fixed_layout_to_fit_container(self):
         # The grid is table-layout:fixed and width:100% so its column
@@ -7491,10 +7484,10 @@ class OrdersTests(TestCase):
         body = self.client.get(
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
         ).content.decode()
-        # table-layout:fixed is on the .order-grid rule.
-        self.assertIn('table-layout:fixed', body)
-        # Width is 100% so the table tracks the container exactly.
-        self.assertIn('width:100%', body)
+        # table-fixed + w-full so the table's column widths come from the
+        # CSS and the table tracks the container exactly.
+        self.assertIn('table-fixed', body)
+        self.assertIn('w-full', body)
 
     # ---- active-first customer list ----
 
@@ -7507,7 +7500,7 @@ class OrdersTests(TestCase):
         OrderLine.objects.create(
             order=order, sale_product=self.loose, qty_ordered=Decimal("4"))
         body = self.client.get("/orders/?week=2026-05-18").content.decode()
-        list_start = body.find('class="cust-list"')
+        list_start = body.find('data-testid="cust-list"')
         self.assertGreater(list_start, -1)
         # "Ordered this week" divider sits above Alice's row; the
         # "Other customers" divider sits above Bob's row.
@@ -7551,17 +7544,17 @@ class OrdersTests(TestCase):
         # Scope the lookup to the customer-list section so we don't
         # collide with the customer name appearing in the filter
         # <select> at the top of the page.
-        list_start = body.find('class="cust-list"')
+        list_start = body.find('data-testid="cust-list"')
         self.assertGreater(list_start, -1)
         list_body = body[list_start:]
         bob_pos = list_body.find(self.bob_cust.name)
         self.assertGreater(bob_pos, -1)
-        # Walk back to the enclosing <li> opening tag.
-        li_start = list_body.rfind("<li", 0, bob_pos)
-        self.assertGreater(li_start, -1)
-        li_tag = list_body[li_start:bob_pos]
-        self.assertIn("cust muted", li_tag,
-                      "inactive customer row should carry the `muted` class")
+        # Walk back to the enclosing <tr> opening tag.
+        row_start = list_body.rfind("<tr", 0, bob_pos)
+        self.assertGreater(row_start, -1)
+        row_tag = list_body[row_start:bob_pos]
+        self.assertIn('data-active="false"', row_tag,
+                      "inactive customer row should be marked inactive (dimmed)")
         # And he's still clickable: the customer-filtered URL is on
         # his row's <a href>.
         self.assertIn(f"customer={self.bob_cust.pk}", list_body)
@@ -7577,9 +7570,9 @@ class OrdersTests(TestCase):
             customer=self.alice_cust, department=self.dept,
             order_date=datetime.date(2026, 5, 18))
         body = self.client.get("/orders/?week=2026-05-18").content.decode()
-        i_filter = body.find('<form method="get" class="card"')
-        i_strip = body.find('class="day-strip"')
-        i_cust = body.find('class="cust-list"')
+        i_filter = body.find('data-testid="filter-form"')
+        i_strip = body.find('data-testid="day-strip"')
+        i_cust = body.find('data-testid="cust-list"')
         self.assertGreater(i_filter, -1, "filter form missing")
         self.assertGreater(i_strip, -1, "day-strip block missing")
         self.assertGreater(i_cust, -1, "customer list missing")
@@ -7604,9 +7597,9 @@ class OrdersTests(TestCase):
         ):
             body = self.client.get(path).content.decode()
             self.assertEqual(
-                body.count('class="day-strip"'), 1,
+                body.count('data-testid="day-strip"'), 1,
                 f"{path} should render exactly one day-strip — found "
-                f"{body.count('class=\"day-strip\"')}")
+                f"{body.count('data-testid=\"day-strip\"')}")
 
     def test_day_strip_sits_above_the_customer_grid(self):
         # When a customer is selected, the order is:
@@ -7620,9 +7613,9 @@ class OrdersTests(TestCase):
         body = self.client.get(
             f"/orders/?week=2026-05-18&customer={self.alice_cust.pk}"
         ).content.decode()
-        i_filter = body.find('<form method="get" class="card"')
-        i_strip = body.find('class="day-strip"')
-        i_grid = body.find('class="order-grid-wrap"')
+        i_filter = body.find('data-testid="filter-form"')
+        i_strip = body.find('data-testid="day-strip"')
+        i_grid = body.find('data-testid="order-grid-wrap"')
         self.assertGreater(i_filter, -1)
         self.assertGreater(i_strip, -1)
         self.assertGreater(i_grid, -1)
@@ -7645,7 +7638,7 @@ class OrdersTests(TestCase):
         OrderLine.objects.create(
             order=order_wed, sale_product=self.slab, qty_ordered=Decimal("1"))
         body = self.client.get("/orders/?week=2026-05-18").content.decode()
-        strip_start = body.find('class="day-strip"')
+        strip_start = body.find('data-testid="day-strip"')
         self.assertGreater(strip_start, -1)
         # All 7 weekday tiles render with their date.
         for dt in ("18 May", "19 May", "20 May", "21 May",
@@ -7674,7 +7667,7 @@ class OrdersTests(TestCase):
         self.assertEqual(body.count('class="day-block'), 0)
         # The compact strip is the replacement — 7 day-tiles + 1
         # week-total tile = 8.
-        self.assertEqual(body.count('class="day-tile'), 8)
+        self.assertEqual(body.count('data-testid="day-tile"'), 8)
 
     def test_day_strip_tile_links_filter_to_that_day(self):
         # Each day-tile is a clickable link with ?date=YYYY-MM-DD so

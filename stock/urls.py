@@ -74,9 +74,6 @@ urlpatterns = [
     path("financials/", views.financials_home, name="financials"),
     # Orders — chunk 1: model + manual CRUD. No import yet.
     path("orders/", views.orders_home, name="orders"),
-    # TEMP: live preview of the design-system Orders rebuild (same view
-    # logic + login, new template). Remove on cutover to orders_bp.html.
-    path("orders-preview/", views.orders_preview, name="orders_preview"),
     path("orders/new/", views.order_new, name="order_new"),
     path("orders/<int:pk>/", views.order_detail, name="order_detail"),
     path("orders/<int:pk>/edit/", views.order_edit, name="order_edit"),

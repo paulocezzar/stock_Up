@@ -4,10 +4,10 @@ Orders — page 1 rebuilt on the shared Business Performance design system.
 Extends design_system/base.html, so the BP sidebar + shell + fonts come
 from the shared layer; this file only renders the page body in BP's real
 Tailwind classes (no duplicated shell/card/colour CSS). Data contract and
-behaviour are identical to stock/orders.html — same context, same GET
-links, filters, week navigation, drilldowns, and number formats.
-
-NOT wired to the /orders/ route yet (parallel build pending approval).
+behaviour are identical to the previous stock/orders.html — same context,
+same GET links, filters, week navigation, drilldowns, and number formats.
+This template now backs the live /orders/ route. data-testid / data-col
+attributes are inert test hooks (no visual effect).
 {% endcomment %}
 {% load humanize design_nav %}
 {% block title %}Orders · StockUp{% endblock %}
@@ -17,7 +17,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
 <div class="mb-5 flex flex-wrap items-end justify-between gap-4">
   <div>
     <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Orders</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Week commencing {{ week_start|date:"d M Y" }}</p>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">week commencing {{ week_start|date:"d M Y" }}</p>
   </div>
   <a href="{% url 'order_new' %}"
      class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">
@@ -47,7 +47,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
 </div>
 
 {% comment %} Filter bar {% endcomment %}
-<form method="get" class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+<form method="get" data-testid="filter-form" class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
   <input type="hidden" name="week" value="{{ week_start|date:'Y-m-d' }}">
   <div class="flex flex-wrap items-end gap-4">
     <div class="flex flex-col gap-1.5">
@@ -75,16 +75,18 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
 </form>
 
 {% comment %} Per-day totals strip + week total — BP KPI tiles via the shared partial in BP's 4-up KpiRow grid so each tile is BP-width and never clips {% endcomment %}
-<div class="mb-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+<div data-testid="day-strip" class="mb-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
   {% for day in days %}
     {% with abbr=day.label|slice:":3" dstr=day.date|date:"d M" %}
-    <a href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}"
+    <a data-testid="day-tile" href="?week={{ week_start|date:'Y-m-d' }}&date={{ day.date|date:'Y-m-d' }}"
        class="block{% if not day.count %} opacity-60 transition hover:opacity-100{% endif %}">
       {% include "design_system/components/kpi_tile.html" with label=abbr|add:" · "|add:dstr value=day.total|gbp subline=day.count|order_count %}
     </a>
     {% endwith %}
   {% endfor %}
-  {% include "design_system/components/kpi_tile.html" with label="Week · total" value=week_total_value|gbp subline=week_total_orders|order_count icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>' %}
+  <div data-testid="day-tile">
+    {% include "design_system/components/kpi_tile.html" with label="Week · total" value=week_total_value|gbp subline=week_total_orders|order_count icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>' %}
+  </div>
 </div>
 {% if week_total_internal %}
   <div class="-mt-2 mb-5 flex items-baseline justify-end gap-2.5 text-xs text-slate-500 dark:text-slate-400">
@@ -98,9 +100,9 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
 <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
   <div class="mb-3">
     <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Customers</h3>
-    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Click a customer to see their grid for this week</div>
+    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">click a customer to see their grid for this week</div>
   </div>
-  <table class="w-full text-sm">
+  <table data-testid="cust-list" class="w-full text-sm">
     <tbody>
       {% if customer_links.0.active %}
         <tr><td colspan="2" class="border-b border-slate-200 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">Ordered this week</td></tr>
@@ -111,7 +113,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
             <tr><td colspan="2" class="border-b border-slate-200 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">Other customers <span class="font-normal normal-case tracking-normal text-slate-400 dark:text-slate-500">— no orders this week</span></td></tr>
           {% endif %}
         {% endifchanged %}
-        <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+        <tr data-testid="cust-row" data-active="{% if cl.active %}true{% else %}false{% endif %}" class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
           <td class="py-2.5 pr-2">
             <a href="?week={{ week_start|date:'Y-m-d' }}&customer={{ cl.customer.pk }}"
                class="font-medium {% if cl.active %}text-slate-800 hover:text-slate-950 dark:text-slate-200{% else %}text-slate-400 hover:text-slate-600 dark:text-slate-500{% endif %}">{{ cl.customer.name }}</a>
@@ -137,13 +139,13 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
     <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">{{ selected_customer.name }} — week commencing {{ week_start|date:"d M Y" }}</h3>
     <a href="?week={{ week_start|date:'Y-m-d' }}" class="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">← Back to all customers</a>
   </div>
-  <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-    <table class="w-full table-fixed border-collapse text-sm tabular">
+  <div data-testid="order-grid-wrap" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <table data-testid="order-grid" class="w-full table-fixed border-collapse text-sm tabular">
       <thead>
         <tr class="text-xs font-semibold text-slate-500 dark:text-slate-400">
-          <th class="sticky left-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">SKU</th>
-          <th class="sticky left-[90px] top-0 z-30 w-[360px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">Product</th>
-          <th class="sticky left-[450px] top-0 z-30 w-[70px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Price</th>
+          <th data-col="sku" class="sticky left-0 top-0 z-30 w-[90px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">SKU</th>
+          <th data-col="name" class="sticky left-[90px] top-0 z-30 w-[360px] border-b border-slate-200 bg-slate-50 px-2.5 py-2.5 text-left dark:border-slate-800 dark:bg-slate-950">Product</th>
+          <th data-col="price" class="sticky left-[450px] top-0 z-30 w-[70px] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2.5 text-right dark:border-slate-800 dark:bg-slate-950">Price</th>
           {% for day in days %}
             <th class="sticky top-0 z-10 border-b border-slate-200 px-2.5 py-2.5 text-right dark:border-slate-800 {% if day.is_today %}bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300{% else %}bg-slate-50 dark:bg-slate-950{% endif %}">{{ day.label|slice:":3" }}<br><span class="font-normal text-slate-400 dark:text-slate-500">{{ day.date|date:"d M" }}</span></th>
           {% endfor %}
@@ -154,15 +156,15 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
       <tbody>
         {% for row in grid.rows %}
           <tr class="group">
-            <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
-            <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
+            <td data-col="sku" class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.sage_number and row.product.sage_number != '0' %}{{ row.product.sage_number }}{% endif %}</td>
+            <td data-col="name" class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
               {% if row.product.sale_product %}
                 <a href="{% url 'sale_product_detail' row.product.sale_product.pk %}" title="{{ row.product.name }}" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">{{ row.product.name }}</a>
               {% else %}
                 <span title="{{ row.product.name }} — discontinued / not in current catalogue" class="text-slate-400 dark:text-slate-500">{{ row.product.name }}</span>
               {% endif %}
             </td>
-            <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.price is not None %}£{{ row.product.price|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+            <td data-col="price" class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">{% if row.product.price is not None %}£{{ row.product.price|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
             {% for cell in row.cells %}
               <td class="border-b border-slate-100 px-2.5 py-2 text-right group-hover:bg-slate-50/80 dark:border-slate-800 dark:group-hover:bg-slate-800/50 {% if cell.qty is not None %}text-slate-700 dark:text-slate-300{% else %}text-slate-300 dark:text-slate-600{% endif %}">{% if cell.qty is not None %}{{ cell.qty|floatformat:"-3" }}{% endif %}</td>
             {% endfor %}
@@ -176,7 +178,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
       {% if grid.rows %}
       <tfoot>
         <tr class="font-semibold text-slate-900 dark:text-slate-100">
-          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (qty)</td>
+          <td data-col="foot" colspan="3" class="sticky left-0 z-20 w-[520px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (qty)</td>
           {% for t in grid.day_totals %}
             <td class="border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">{% if t %}{{ t|floatformat:"-3" }}{% else %}—{% endif %}</td>
           {% endfor %}
@@ -184,7 +186,7 @@ NOT wired to the /orders/ route yet (parallel build pending approval).
           <td class="sticky right-0 z-20 w-[90px] border-t-2 border-slate-200 bg-slate-50 px-2.5 py-2 text-right dark:border-slate-800 dark:bg-slate-950">£{{ grid.grand_value|floatformat:2|intcomma }}</td>
         </tr>
         <tr class="font-semibold text-slate-900 dark:text-slate-100">
-          <td colspan="3" class="sticky left-0 z-20 w-[520px] border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (£)</td>
+          <td data-col="foot" colspan="3" class="sticky left-0 z-20 w-[520px] border-slate-200 bg-slate-50 px-2.5 py-2 text-left dark:border-slate-800 dark:bg-slate-950">Day totals (£)</td>
           {% for v in grid.day_values %}
             <td class="bg-slate-50 px-2.5 py-2 text-right dark:bg-slate-950">{% if v %}£{{ v|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
           {% endfor %}
