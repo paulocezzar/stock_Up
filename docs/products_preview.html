@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingredients · StockUp</title>
+
+
+<script>
+  (function () {
+    try {
+      if (localStorage.getItem("stockup-theme") === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    } catch (e) {}
+  })();
+</script>
+
+
+<link rel="stylesheet" href="../stock/static/stockup/app.css">
+
+</head>
+<body class="antialiased">
+<div class="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+  
+<aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+
+  <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
+    <a href="/home/" class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-display text-sm font-semibold text-white dark:bg-white dark:text-slate-950">SU</div>
+      <div>
+        <div class="font-display text-lg font-semibold tracking-normal text-slate-950 dark:text-slate-100">StockUp</div>
+        <div class="mt-0.5 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Bakery</div>
+      </div>
+    </a>
+  </div>
+
+  <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+    
+<a href="/dashboard/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+    
+  </svg>
+  <span class="flex-1">Dashboard</span>
+</a>
+
+
+    
+<a href="/business-performance-dashboard/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>
+    
+  </svg>
+  <span class="flex-1">Business Performance</span>
+</a>
+
+
+    
+<a href="/orders/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>
+    
+  </svg>
+  <span class="flex-1">Orders</span>
+</a>
+
+
+    
+<a href="/financials/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>
+    
+  </svg>
+  <span class="flex-1">Financials</span>
+</a>
+
+
+    
+<a href="/products/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition bg-amber-50 text-slate-950 ring-1 ring-amber-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700">
+  <span aria-hidden="true" class="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-amber-500"></span>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/>
+    
+  </svg>
+  <span class="flex-1">Products</span>
+</a>
+
+
+    
+<a href="/recipes/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/>
+    
+  </svg>
+  <span class="flex-1">Recipes</span>
+</a>
+
+
+    
+<a href="/stock/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/>
+    
+  </svg>
+  <span class="flex-1">Stock</span>
+</a>
+
+
+    
+<a href="/deliveries/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>
+    
+  </svg>
+  <span class="flex-1">Deliveries</span>
+</a>
+
+
+    
+<a href="/customers/"
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </svg>
+  <span class="flex-1">Customers</span>
+</a>
+
+
+  </nav>
+
+  <div class="shrink-0 space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+    <div class="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+      <span class="flex items-center gap-3">
+        <span id="su-theme-icon" aria-hidden="true">
+          
+          <svg data-icon="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg data-icon="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </span>
+        Dark mode
+      </span>
+      <button id="su-theme-toggle" type="button" onclick="stockupToggleTheme(); stockupSyncThemeUI();"
+        class="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition dark:bg-amber-500"
+        title="Toggle light/dark" aria-label="Toggle light/dark">
+        <span id="su-theme-knob" aria-hidden="true"
+          class="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white shadow transition-transform"></span>
+      </button>
+    </div>
+
+    <form method="post" action="/logout/">
+      <input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+      <button type="submit"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-900">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">B</span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-display text-sm leading-tight text-slate-950 dark:text-slate-100">Bakery account</span>
+          <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">Sign out</span>
+        </span>
+        <svg class="shrink-0 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      </button>
+    </form>
+  </div>
+</aside>
+
+<script>
+  // Reflect the live `.dark` state in the toggle knob/track + moon/sun
+  // icon. The track itself uses dark: variants (bg-slate-200 →
+  // dark:bg-amber-500), so only the knob position and icon need syncing.
+  function stockupSyncThemeUI() {
+    var dark = document.documentElement.classList.contains("dark");
+    var knob = document.getElementById("su-theme-knob");
+    if (knob) {
+      knob.classList.toggle("translate-x-[18px]", dark);
+      knob.classList.toggle("translate-x-1", !dark);
+    }
+    var icon = document.getElementById("su-theme-icon");
+    if (icon) {
+      var moon = icon.querySelector('[data-icon="moon"]');
+      var sun = icon.querySelector('[data-icon="sun"]');
+      if (moon) moon.style.display = dark ? "none" : "";
+      if (sun) sun.style.display = dark ? "" : "none";
+    }
+  }
+  stockupSyncThemeUI();
+</script>
+
+  <main class="ml-64 min-w-0">
+    <div class="mx-auto w-full max-w-[1760px] px-8 py-7">
+      
+      
+
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Ingredients</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Per-department ingredient catalogue · cheapest supplier and £/1000 worked out for you</p>
+  </div>
+</div>
+
+
+<form method="post" data-testid="add-ingredient" class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+  <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">Add ingredient</h3>
+  <div class="flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Supplier</label>
+      <input type="text" name="supplier" list="suplist" placeholder="optional"
+             class="h-10 w-[160px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      <datalist id="suplist"><option value="Brake Bros"><option value="Wessex Mill"><option value="Dairy Direct"></datalist>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Code <span class="text-slate-400">(optional)</span></label>
+      <input type="text" name="code" placeholder="BAKE00123"
+             class="h-10 w-[130px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Name <span class="text-rose-500">*</span></label>
+      <input type="text" name="name" required placeholder="Caster Sugar"
+             class="h-10 w-[200px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Pack size</label>
+      <input type="number" step="any" name="quantity" placeholder="25"
+             class="h-10 w-[90px] rounded-lg border border-slate-200 bg-white px-3 text-right text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Pack unit</label>
+      <select name="unit"
+              class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <option value="g">g</option><option value="kg">kg</option>
+        <option value="ml">ml</option><option value="L">L</option><option value="ea">each</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Cost / pack (£)</label>
+      <input type="number" step="any" name="cost" placeholder="34.91"
+             class="h-10 w-[110px] rounded-lg border border-slate-200 bg-white px-3 text-right text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Minimum</label>
+      <input type="number" step="any" name="minimum" value="0"
+             class="h-10 w-[90px] rounded-lg border border-slate-200 bg-white px-3 text-right text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <button type="submit"
+            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Add</button>
+  </div>
+  <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Supplier, quantity and cost are optional here — add or compare more suppliers later from the ingredient's page. £/1000 is worked out for you.</p>
+</form>
+
+
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">All ingredients</h3>
+    <div class="flex items-center gap-2.5">
+      <input type="search" data-filter="ingredients-tbl" placeholder="Filter by name or code…" autocomplete="off"
+             class="h-9 w-[260px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      <span class="count-out text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+  </div>
+  <table id="ingredients-tbl" data-testid="ingredients-table" class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <th class="py-2.5 pr-2">Ingredient</th>
+        <th class="py-2.5 px-2">Cheapest</th>
+        <th class="py-2.5 px-2 text-right">£/1000</th>
+        <th class="py-2.5 px-2 text-right">Min</th>
+        <th class="py-2.5 px-2"></th>
+        <th class="py-2.5 pl-2 text-right"></th>
+      </tr>
+    </thead>
+    <tbody>
+      
+        <tr data-search="caster sugar bake00123"
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="/products/1/" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Caster Sugar</a>
+            <span class="ml-1 text-xs text-slate-400 dark:text-slate-500">BAKE00123</span>
+          </td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">Brake Bros</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">1,280.50</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">2</td>
+          <td class="py-2.5 px-2 text-right"><a href="/products/1/" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit prices →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="/products/1/delete/" class="inline" onsubmit="return confirm('Delete Caster Sugar?')"><input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      
+        <tr data-search="strong white flour bake00088"
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="/products/2/" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Strong White Flour</a>
+            <span class="ml-1 text-xs text-slate-400 dark:text-slate-500">BAKE00088</span>
+          </td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">Wessex Mill</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">640.00</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">5</td>
+          <td class="py-2.5 px-2 text-right"><a href="/products/2/" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit prices →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="/products/2/delete/" class="inline" onsubmit="return confirm('Delete Strong White Flour?')"><input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      
+        <tr data-search="unsalted butter bake00204"
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="/products/3/" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Unsalted Butter</a>
+            <span class="ml-1 text-xs text-slate-400 dark:text-slate-500">BAKE00204</span>
+          </td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">Dairy Direct</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">5,420.00</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">3</td>
+          <td class="py-2.5 px-2 text-right"><a href="/products/3/" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit prices →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="/products/3/delete/" class="inline" onsubmit="return confirm('Delete Unsalted Butter?')"><input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      
+        <tr data-search="free-range eggs (tray 30) "
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="/products/4/" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Free-Range Eggs (tray 30)</a>
+            
+          </td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400"><span class="text-slate-400 dark:text-slate-500">no price</span></td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">—</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">4</td>
+          <td class="py-2.5 px-2 text-right"><a href="/products/4/" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit prices →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="/products/4/delete/" class="inline" onsubmit="return confirm('Delete Free\u002DRange Eggs (tray 30)?')"><input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      
+        <tr data-search="fine sea salt bake00311"
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <a href="/products/5/" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Fine Sea Salt</a>
+            <span class="ml-1 text-xs text-slate-400 dark:text-slate-500">BAKE00311</span>
+          </td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">Brake Bros</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">210.20</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">1</td>
+          <td class="py-2.5 px-2 text-right"><a href="/products/5/" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit prices →</a></td>
+          <td class="py-2.5 pl-2 text-right">
+            <form method="post" action="/products/5/delete/" class="inline" onsubmit="return confirm('Delete Fine Sea Salt?')"><input type="hidden" name="csrfmiddlewaretoken" value="0Xr991z02ijaSAhWtiqM9lV4EJGeeZ9MHRg55Vt43KbbfpI9yc3Zq0NwuKVzDDav">
+              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            </form>
+          </td>
+        </tr>
+      
+    </tbody>
+  </table>
+</div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // Toggle .dark on <html> and persist under the BP-shared key. The
+  // sidebar switch reads/writes through this single helper.
+  function stockupToggleTheme() {
+    var root = document.documentElement;
+    var dark = root.classList.toggle("dark");
+    try { localStorage.setItem("stockup-theme", dark ? "dark" : "light"); } catch (e) {}
+    document.dispatchEvent(new CustomEvent("stockup:theme", { detail: { dark: dark } }));
+    return dark;
+  }
+
+  // Generic client-side table filter (shared with the old shell): an
+  // <input data-filter="table-id"> hides <tbody> rows whose
+  // data-search attribute doesn't contain the query, and updates the
+  // sibling .count-out with "N shown". Inert when no data-filter exists.
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t.dataset || !t.dataset.filter) return;
+    var tbl = document.getElementById(t.dataset.filter);
+    if (!tbl) return;
+    var q = t.value.trim().toLowerCase();
+    var shown = 0;
+    tbl.querySelectorAll("tbody tr").forEach(function (r) {
+      if (r.dataset.search === undefined) return;
+      var match = !q || r.dataset.search.indexOf(q) >= 0;
+      r.style.display = match ? "" : "none";
+      if (match) shown++;
+    });
+    var out = t.parentNode.querySelector(".count-out");
+    if (out) out.textContent = shown + " shown";
+  });
+</script>
+
+</body>
+</html>

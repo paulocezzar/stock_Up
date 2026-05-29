@@ -59,6 +59,27 @@ scanning these templates. Same tokens, fonts and dark variants as BP.
     document.dispatchEvent(new CustomEvent("stockup:theme", { detail: { dark: dark } }));
     return dark;
   }
+
+  // Generic client-side table filter (shared with the old shell): an
+  // <input data-filter="table-id"> hides <tbody> rows whose
+  // data-search attribute doesn't contain the query, and updates the
+  // sibling .count-out with "N shown". Inert when no data-filter exists.
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t.dataset || !t.dataset.filter) return;
+    var tbl = document.getElementById(t.dataset.filter);
+    if (!tbl) return;
+    var q = t.value.trim().toLowerCase();
+    var shown = 0;
+    tbl.querySelectorAll("tbody tr").forEach(function (r) {
+      if (r.dataset.search === undefined) return;
+      var match = !q || r.dataset.search.indexOf(q) >= 0;
+      r.style.display = match ? "" : "none";
+      if (match) shown++;
+    });
+    var out = t.parentNode.querySelector(".count-out");
+    if (out) out.textContent = shown + " shown";
+  });
 </script>
 {% block scripts %}{% endblock %}
 </body>

@@ -32,6 +32,8 @@ urlpatterns = [
     path("suppliers/", views.suppliers, name="suppliers"),
     path("suppliers/<int:pk>/delete/", views.supplier_delete, name="supplier_delete"),
     path("products/", views.products, name="products"),
+    # TEMP: live preview of the design-system Ingredients rebuild. Remove on cutover.
+    path("products-preview/", views.products_preview, name="products_preview"),
     path("packaging/", views.packaging, name="packaging"),
     path("products/<int:pk>/", views.product_detail, name="product_detail"),
     path("products/<int:pk>/delete/", views.product_delete, name="product_delete"),
