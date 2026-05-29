@@ -5,10 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}StockUp{% endblock %}</title>
 
-{# Pre-paint theme: same mechanism as the Business Performance SPA —
-   Tailwind darkMode:"class" toggling a `.dark` class on <html>, keyed on
-   the SAME localStorage entry ("stockup-theme") so the theme is shared
-   across the React dashboard and these rebuilt pages without a flash. #}
+{% comment %}
+Pre-paint theme: same mechanism as the Business Performance SPA —
+Tailwind darkMode:"class" toggling a `.dark` class on <html>, keyed on
+the SAME localStorage entry ("stockup-theme") so the theme is shared
+across the React dashboard and these rebuilt pages without a flash.
+{% endcomment %}
 <script>
   (function () {
     try {
@@ -19,8 +21,10 @@
   })();
 </script>
 
-{# Compiled Tailwind built from the BP config (frontend/tailwind.config.js)
-   scanning these templates. Same tokens, fonts and dark variants as BP. #}
+{% comment %}
+Compiled Tailwind built from the BP config (frontend/tailwind.config.js)
+scanning these templates. Same tokens, fonts and dark variants as BP.
+{% endcomment %}
 <link rel="stylesheet" href="{% static 'stockup/app.css' %}">
 {% block head %}{% endblock %}
 </head>

@@ -1,5 +1,7 @@
-{# Secondary button / "Show N more" expander — mirrors BP's Export-style
-   button. Slots: label, optional onclick. #}
+{% comment %}
+Secondary button / "Show N more" expander — mirrors BP's Export-style
+button. Slots: label, optional onclick.
+{% endcomment %}
 <button type="button" {% if onclick %}onclick="{{ onclick }}"{% endif %}
   class="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">
   {{ label|default:"Show more" }}

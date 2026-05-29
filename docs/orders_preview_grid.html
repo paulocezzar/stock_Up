@@ -5,10 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orders · StockUp</title>
 
-{# Pre-paint theme: same mechanism as the Business Performance SPA —
-   Tailwind darkMode:"class" toggling a `.dark` class on <html>, keyed on
-   the SAME localStorage entry ("stockup-theme") so the theme is shared
-   across the React dashboard and these rebuilt pages without a flash. #}
+
 <script>
   (function () {
     try {
@@ -19,21 +16,13 @@
   })();
 </script>
 
-{# Compiled Tailwind built from the BP config (frontend/tailwind.config.js)
-   scanning these templates. Same tokens, fonts and dark variants as BP. #}
+
 <link rel="stylesheet" href="../stock/static/stockup/app.css">
 
 </head>
 <body class="antialiased">
 <div class="min-h-screen bg-[#f5f7fb] text-slate-950 dark:bg-slate-950 dark:text-slate-100">
-  {# Left rail — a faithful HTML/Tailwind reproduction of the Business
-   Performance React rail (frontend/src/components/Sidebar.jsx): same
-   fixed 16rem rail, logo, lucide icons, active-item style (amber-50 +
-   ring + 3px amber bar), dark-mode toggle SWITCH, and the
-   "Bakery account / Sign out" footer. Differences from the JSX, both
-   deliberate: dark surfaces come from the `.dark` class (not JS-driven
-   inline styles), and Sign out posts a form (Django 5 LogoutView is
-   POST-only) instead of a GET <a href="/logout/">. #}
+  
 <aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
 
   <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
@@ -73,8 +62,8 @@
 
     
 <a href="/orders/"
-  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition bg-amber-50 text-slate-950 ring-1 ring-amber-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700">
-  <span aria-hidden="true" class="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-amber-500"></span>
+  class="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100">
+  
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
     <path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>
     
@@ -175,7 +164,7 @@
     </div>
 
     <form method="post" action="/logout/">
-      <input type="hidden" name="csrfmiddlewaretoken" value="cBeYzjOZN3weXTVbTDSQWNozMYHJ61nu5ShV4GwmPYi0AJlSmQlJeCUrY3eKSwLU">
+      <input type="hidden" name="csrfmiddlewaretoken" value="JgYJhRF8u8VoaEmONZwrqtvbHCWEfgMRnCcElWH667AO55Zo8JykoPuBKcZr95Lt">
       <button type="submit"
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-900">
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 font-display text-sm font-bold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">B</span>
@@ -428,7 +417,7 @@
             <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">10244</td>
             <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
               
-                <a href="/sale-products/1/" title="Baguette" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Baguette</a>
+                <a href="/sale-products/2/" title="Baguette" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Baguette</a>
               
             </td>
             <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£1.10</td>
@@ -455,7 +444,7 @@
             <td class="sticky left-0 z-20 w-[90px] border-b border-slate-100 bg-white px-2.5 py-2 text-left text-slate-500 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">10312</td>
             <td class="sticky left-[90px] z-20 w-[360px] truncate border-b border-slate-100 bg-white px-2.5 py-2 text-left group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:group-hover:bg-slate-800/50">
               
-                <a href="/sale-products/1/" title="Pain au Chocolat" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Pain au Chocolat</a>
+                <a href="/sale-products/3/" title="Pain au Chocolat" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">Pain au Chocolat</a>
               
             </td>
             <td class="sticky left-[450px] z-20 w-[70px] border-b border-r border-slate-200 bg-white px-2.5 py-2 text-right text-slate-600 group-hover:bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:group-hover:bg-slate-800/50">£1.45</td>

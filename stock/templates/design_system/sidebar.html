@@ -1,11 +1,13 @@
-{# Left rail — a faithful HTML/Tailwind reproduction of the Business
-   Performance React rail (frontend/src/components/Sidebar.jsx): same
-   fixed 16rem rail, logo, lucide icons, active-item style (amber-50 +
-   ring + 3px amber bar), dark-mode toggle SWITCH, and the
-   "Bakery account / Sign out" footer. Differences from the JSX, both
-   deliberate: dark surfaces come from the `.dark` class (not JS-driven
-   inline styles), and Sign out posts a form (Django 5 LogoutView is
-   POST-only) instead of a GET <a href="/logout/">. #}
+{% comment %}
+Left rail — a faithful HTML/Tailwind reproduction of the Business
+Performance React rail (frontend/src/components/Sidebar.jsx): same
+fixed 16rem rail, logo, lucide icons, active-item style (amber-50 +
+ring + 3px amber bar), dark-mode toggle SWITCH, and the
+"Bakery account / Sign out" footer. Differences from the JSX, both
+deliberate: dark surfaces come from the `.dark` class (not JS-driven
+inline styles), and Sign out posts a form (Django 5 LogoutView is
+POST-only) instead of a GET <a href="/logout/">.
+{% endcomment %}
 <aside class="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
 
   <div class="shrink-0 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
