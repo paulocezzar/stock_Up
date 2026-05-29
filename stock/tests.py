@@ -10698,10 +10698,12 @@ class DashboardExportCsvTests(TestCase):
 
 
 class SpaDashboardRouteTests(TestCase):
-    """The /dashboard/ route serves the built Vite bundle's index.html
-    and falls back to the same HTML for any sub-route (so client-side
-    routes in Phase B deep-link cleanly). Auth-gated like every other
-    page in the app.
+    """The /business-performance-dashboard/ route serves the built Vite
+    bundle's index.html and falls back to the same HTML for any sub-route
+    (client-side deep-linking). Auth-gated like every other page.
+
+    /dashboard/ is RETIRED — it now redirects to the Business Performance
+    route (App.jsx stays in the frontend tree, unused).
     """
 
     def setUp(self):
@@ -10710,19 +10712,29 @@ class SpaDashboardRouteTests(TestCase):
         self.user = U.objects.create_user("alice", password="pw")
         self.dept.members.add(self.user)
 
-    def test_anonymous_redirects_to_login(self):
+    def test_dashboard_redirects_to_business_performance(self):
         r = self.client.get("/dashboard/")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], "/business-performance-dashboard/")
+
+    def test_dashboard_redirect_preserves_query_string(self):
+        r = self.client.get("/dashboard/?week=2026-05-18")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(
+            r["Location"], "/business-performance-dashboard/?week=2026-05-18")
+
+    def test_bp_anonymous_redirects_to_login(self):
+        r = self.client.get("/business-performance-dashboard/")
         # @login_required redirects to /login/ when anonymous.
         self.assertEqual(r.status_code, 302)
         self.assertIn("/login/", r["Location"])
 
-    def test_authenticated_serves_index_html_or_helpful_404(self):
-        # If the SPA has been built (frontend/dist/index.html exists),
-        # we get the bundled HTML; if not, we get the actionable 404
-        # message telling the dev to run the build. EITHER is correct
-        # depending on whether `npm run build` has been run yet.
+    def test_bp_authenticated_serves_index_html_or_helpful_404(self):
+        # If the SPA has been built (frontend/dist/index.html exists), we get
+        # the bundled HTML; otherwise the actionable 404 telling the dev to
+        # run the build. EITHER is correct depending on the build state.
         self.client.force_login(self.user)
-        r = self.client.get("/dashboard/")
+        r = self.client.get("/business-performance-dashboard/")
         self.assertIn(r.status_code, (200, 404))
         body = r.content.decode()
         if r.status_code == 200:
@@ -10730,11 +10742,11 @@ class SpaDashboardRouteTests(TestCase):
         else:
             self.assertIn("npm run build", body)
 
-    def test_subroute_falls_back_to_same_response(self):
-        # Phase B will introduce client-side routes — /dashboard/foo/
-        # must serve the same HTML, not 404 in Django.
+    def test_bp_subroute_falls_back_to_same_response(self):
+        # Client-side routes — /business-performance-dashboard/foo/ must
+        # serve the same HTML, not 404 in Django.
         self.client.force_login(self.user)
-        r = self.client.get("/dashboard/anything-here/")
+        r = self.client.get("/business-performance-dashboard/anything-here/")
         self.assertIn(r.status_code, (200, 404))
 
 

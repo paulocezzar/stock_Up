@@ -81,9 +81,10 @@ urlpatterns = [
     path("orders/<int:pk>/", views.order_detail, name="order_detail"),
     path("orders/<int:pk>/edit/", views.order_edit, name="order_edit"),
     path("orders/<int:pk>/delete/", views.order_delete, name="order_delete"),
-    # React dashboard SPA + its DRF backend. Two patterns so any
-    # client-side sub-route under /dashboard/ falls back to the same
-    # index.html (Phase B will use this for routing).
+    # Business Performance SPA + its DRF backend. The re_path catches any
+    # client-side sub-route under /business-performance-dashboard/ so it
+    # deep-links to the same index.html. (The /api/dashboard/* endpoints are
+    # still consumed by the SPA's App.jsx code paths.)
     path("api/dashboard/summary/", dashboard_summary, name="api_dashboard_summary"),
     path("api/dashboard/export.csv", dashboard_export_csv,
          name="api_dashboard_export_csv"),
@@ -91,9 +92,13 @@ urlpatterns = [
          name="api_business_performance_summary"),
     path("api/business-performance/export.csv", business_performance_export_csv,
          name="api_business_performance_export_csv"),
-    path("dashboard/", views.spa_dashboard, name="spa_dashboard"),
+    # /dashboard/ retired: it now redirects to the Business Performance SPA
+    # route (App.jsx is left unused in the frontend tree). Query string
+    # preserved so deep params survive the hop.
+    path("dashboard/", RedirectView.as_view(
+        pattern_name="business_performance_dashboard",
+        permanent=False, query_string=True), name="spa_dashboard"),
     path("business-performance-dashboard/", views.spa_dashboard,
          name="business_performance_dashboard"),
-    re_path(r"^dashboard/.+$", views.spa_dashboard),
     re_path(r"^business-performance-dashboard/.+$", views.spa_dashboard),
 ]
