@@ -840,6 +840,16 @@ class StocktakesRebuildTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn('class="tag', r.content.decode())
 
+    def test_starting_a_count_from_the_preview_lands_on_count_preview(self):
+        # The preview list redirects a started count to the count PREVIEW (so
+        # the rebuilt flow can be driven end-to-end); the live list still
+        # redirects to /count/.
+        r = self.client.post("/stocktakes-preview/", {"completed_by": "Paulo"})
+        self.assertEqual(r.status_code, 302)
+        self.assertRegex(r["Location"], r"^/stocktakes/\d+/count-preview/$")
+        r2 = self.client.post("/stocktakes/", {"completed_by": "Paulo"})
+        self.assertRegex(r2["Location"], r"^/stocktakes/\d+/count/$")
+
 
 class PackUnitConversionTests(TestCase):
     def setUp(self):

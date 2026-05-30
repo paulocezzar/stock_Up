@@ -1331,7 +1331,7 @@ def price_delete(request, price_id):
 
 # ---- stocktakes (per department) ----
 @login_required
-def stocktakes(request, template_name="stock/stocktakes.html"):
+def stocktakes(request, template_name="stock/stocktakes.html", count_route="count"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1346,7 +1346,7 @@ def stocktakes(request, template_name="stock/stocktakes.html"):
                 stocktake=st, product=p,
                 current=prev, carried_over=prev is not None))
         StockLine.objects.bulk_create(new_lines)
-        return redirect("count", pk=st.pk)
+        return redirect(count_route, pk=st.pk)
     return render(request, template_name, {
         "stocktakes": dept.stocktakes.all(),
         "has_products": dept.products.exists(),
@@ -1356,9 +1356,11 @@ def stocktakes(request, template_name="stock/stocktakes.html"):
 @login_required
 def stocktakes_preview(request):
     """TEMPORARY live preview of the Stocktakes list rebuilt on the shared
-    design system. Same context + POST behaviour as stocktakes(). Remove this
-    view + its URL on cutover to stocktakes_bp.html."""
-    return stocktakes(request, template_name="stock/stocktakes_bp.html")
+    design system. Same context + POST behaviour as stocktakes(), except a
+    started count redirects to the count PREVIEW so the whole rebuilt flow
+    can be driven end-to-end. Remove this view + its URL on cutover."""
+    return stocktakes(request, template_name="stock/stocktakes_bp.html",
+                      count_route="count_preview")
 
 
 @login_required
