@@ -58,7 +58,7 @@ class DeliveryBatchTests(TestCase):
     def test_delivery_form_creates_delivery_and_batch(self):
         c = Client(); assert c.login(username="alice", password="pw")
         c.get(f"/switch/{self.dept.pk}/")
-        r = c.post("/deliveries/new/", {
+        r = c.post("/goods-in/new/", {
             "supplier": str(self.sup.pk),
             "date": datetime.date.today().isoformat(),
             "note": "docket 42",
@@ -104,7 +104,7 @@ class DeliveryBatchTests(TestCase):
     def test_form_save_still_succeeds_when_supplier_has_no_price_for_product(self):
         c = Client(); assert c.login(username="alice", password="pw")
         c.get(f"/switch/{self.dept.pk}/")
-        r = c.post("/deliveries/new/", {
+        r = c.post("/goods-in/new/", {
             "supplier": str(self.sup.pk),
             "date": datetime.date.today().isoformat(),
             "product": [str(self.product.pk)],
@@ -199,7 +199,7 @@ class DeliveryScanFlowTests(TestCase):
         ]
         fake_file = SimpleUploadedFile("test.jpg", b"\xff\xd8fake-jpg-bytes",
                                        content_type="image/jpeg")
-        r = self.client.post("/deliveries/scan/", {
+        r = self.client.post("/goods-in/scan/", {
             "supplier": str(self.sup.pk),
             "file": fake_file,
         })
@@ -223,13 +223,13 @@ class DeliveryScanFlowTests(TestCase):
         self.assertIn("Mystery Item XYZ", body)
         self.assertIn('value="1.0"', body)
         # form posts to delivery_new (the existing save endpoint)
-        self.assertIn('action="/deliveries/new/"', body)
+        self.assertIn('action="/goods-in/new/"', body)
 
     @patch("stock.views.extract_lines")
     def test_zero_lines_falls_back_to_manual_form_with_message(self, mock_extract):
         mock_extract.return_value = []
         f = SimpleUploadedFile("x.png", b"png-bytes", content_type="image/png")
-        r = self.client.post("/deliveries/scan/", {"supplier": str(self.sup.pk), "file": f})
+        r = self.client.post("/goods-in/scan/", {"supplier": str(self.sup.pk), "file": f})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn("No line items came back", body)
@@ -241,7 +241,7 @@ class DeliveryScanFlowTests(TestCase):
         from .ai_extract import ExtractError
         mock_extract.side_effect = ExtractError("could not reach scanning service")
         f = SimpleUploadedFile("x.png", b"png-bytes", content_type="image/png")
-        r = self.client.post("/deliveries/scan/", {"supplier": str(self.sup.pk), "file": f})
+        r = self.client.post("/goods-in/scan/", {"supplier": str(self.sup.pk), "file": f})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn("could not reach scanning service", body)
@@ -249,12 +249,12 @@ class DeliveryScanFlowTests(TestCase):
 
     def test_no_supplier_redirects_back_to_scan(self):
         f = SimpleUploadedFile("x.png", b"png-bytes", content_type="image/png")
-        r = self.client.post("/deliveries/scan/", {"supplier": "", "file": f})
+        r = self.client.post("/goods-in/scan/", {"supplier": "", "file": f})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/deliveries/scan/")
+        self.assertEqual(r.headers["Location"], "/goods-in/scan/")
 
     def test_get_renders_upload_form(self):
-        r = self.client.get("/deliveries/scan/")
+        r = self.client.get("/goods-in/scan/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn("Scan delivery note", body)
@@ -669,7 +669,7 @@ class DeliveryDetailTests(TestCase):
             delivery=delivery, product=self.sugar, batch_code="B7",
             qty_received=Decimal("4"), qty_remaining=Decimal("4"))
 
-        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        r = self.client.get(f"/goods-in/{delivery.pk}/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
 
@@ -679,8 +679,8 @@ class DeliveryDetailTests(TestCase):
         self.assertIn("docket 99", body)
 
         # Header stats: 2 lines, 12 packs in
-        self.assertRegex(body, r"Lines</div><div class=\"v\">2<")
-        self.assertRegex(body, r"Packs in</div><div class=\"v\">12<")
+        self.assertRegex(body, r"Lines</div>\s*<div[^>]*>2<")
+        self.assertRegex(body, r"Packs in</div>\s*<div[^>]*>12<")
 
         # Both batches present with qty and batch code
         self.assertIn("Flour", body)
@@ -695,7 +695,7 @@ class DeliveryDetailTests(TestCase):
         self.assertIn(f'href="/products/{self.sugar.pk}/"', body)
 
         # Back link
-        self.assertIn('href="/deliveries/"', body)
+        self.assertIn('href="/goods-in/"', body)
 
         # has_supplier_price flag: flour has a price, sugar does not
         # The "no price" tag should appear once (sugar row).
@@ -705,38 +705,37 @@ class DeliveryDetailTests(TestCase):
         other = Department.objects.create(name="Butchery")
         delivery = Delivery.objects.create(
             department=other, supplier=self.sup, date=datetime.date(2026, 5, 22))
-        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        r = self.client.get(f"/goods-in/{delivery.pk}/")
         self.assertEqual(r.status_code, 403)
 
     def test_delivery_detail_requires_login(self):
         delivery = Delivery.objects.create(
             department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
         c = Client()
-        r = c.get(f"/deliveries/{delivery.pk}/")
+        r = c.get(f"/goods-in/{delivery.pk}/")
         self.assertEqual(r.status_code, 302)
         self.assertIn("/login/", r.headers["Location"])
 
     def test_deliveries_list_rows_link_to_detail(self):
         delivery = Delivery.objects.create(
             department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
-        r = self.client.get("/deliveries/")
+        r = self.client.get("/goods-in/")
         self.assertEqual(r.status_code, 200)
-        self.assertIn(f'href="/deliveries/{delivery.pk}/"', r.content.decode())
+        self.assertIn(f'href="/goods-in/{delivery.pk}/"', r.content.decode())
 
     def test_delivery_with_no_batches_still_renders(self):
         delivery = Delivery.objects.create(
             department=self.dept, supplier=self.sup, date=datetime.date(2026, 5, 22))
-        r = self.client.get(f"/deliveries/{delivery.pk}/")
+        r = self.client.get(f"/goods-in/{delivery.pk}/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("No batches on this delivery.", r.content.decode())
 
 
 class GoodsInRebuildTests(TestCase):
-    """Goods In (Deliveries) rebuilt on the design system — list / new / scan
-    / detail — exercised via the temporary /goods-in*-preview routes until
-    cutover. The previews link to each other (and the scan result renders the
-    BP new form) so the whole workflow can be driven on the preview. URL
-    paths stay /deliveries... live; the /goods-in/ rename is the cutover.
+    """Goods In (formerly Deliveries) on the design system — list / new /
+    scan / detail at the canonical /goods-in/ routes. The pages link to each
+    other and the scan result renders the BP new form pre-filled. The old
+    /deliveries/... paths 302-redirect here.
     """
 
     def setUp(self):
@@ -756,21 +755,21 @@ class GoodsInRebuildTests(TestCase):
         self.client.get(f"/switch/{self.dept.pk}/")
 
     def test_list_preview_renders_with_new_and_scan_links(self):
-        r = self.client.get("/goods-in-preview/")
+        r = self.client.get("/goods-in/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("Goods In", body)
         # New / scan buttons stay inside the preview.
-        self.assertIn('href="/goods-in/new-preview/"', body)
-        self.assertIn('href="/goods-in/scan-preview/"', body)
+        self.assertIn('href="/goods-in/new/"', body)
+        self.assertIn('href="/goods-in/scan/"', body)
 
     def test_detail_preview_renders_with_batches_and_back_link(self):
         d = Delivery.objects.create(department=self.dept, supplier=self.sup,
                                     date=datetime.date(2026, 5, 22), note="docket 99")
         Batch.objects.create(delivery=d, product=self.sugar, batch_code="B7",
                              qty_received=Decimal("4"), qty_remaining=Decimal("4"))
-        r = self.client.get(f"/goods-in/{d.pk}/preview/")
+        r = self.client.get(f"/goods-in/{d.pk}/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -778,34 +777,34 @@ class GoodsInRebuildTests(TestCase):
         self.assertIn("docket 99", body)
         self.assertIn("B7", body)
         self.assertIn("no price", body)                 # sugar has no price for this supplier
-        self.assertIn('href="/goods-in-preview/"', body)  # back link to preview list
+        self.assertIn('href="/goods-in/"', body)  # back link to preview list
 
     def test_new_preview_renders_form_posting_to_preview(self):
-        r = self.client.get("/goods-in/new-preview/")
+        r = self.client.get("/goods-in/new/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
-        self.assertIn('action="/goods-in/new-preview/"', body)
+        self.assertIn('action="/goods-in/new/"', body)
         self.assertIn('id="product-options"', body)     # the JS template block
 
     def test_new_preview_post_creates_delivery_and_redirects_to_preview_list(self):
-        r = self.client.post("/goods-in/new-preview/", {
+        r = self.client.post("/goods-in/new/", {
             "supplier": str(self.sup.pk), "date": "2026-05-22",
             "product": str(self.flour.pk), "batch_code": "A1",
             "use_by": "", "qty": "5"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r["Location"], "/goods-in-preview/")
+        self.assertEqual(r["Location"], "/goods-in/")
         d = Delivery.objects.get()
         self.assertEqual(d.batches.count(), 1)
 
     def test_scan_preview_get_renders_upload_form(self):
-        r = self.client.get("/goods-in/scan-preview/")
+        r = self.client.get("/goods-in/scan/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("Scan delivery note", body)
         self.assertIn('name="file"', body)
-        self.assertIn('href="/goods-in/new-preview/"', body)  # "enter manually" stays in preview
+        self.assertIn('href="/goods-in/new/"', body)  # "enter manually" stays in preview
 
     @patch("stock.views.extract_lines")
     def test_scan_preview_post_prefills_bp_new_form(self, mock_extract):
@@ -814,16 +813,34 @@ class GoodsInRebuildTests(TestCase):
             {"description": "Mystery Item XYZ", "qty": 1.0},
         ]
         f = SimpleUploadedFile("note.jpg", b"\xff\xd8jpgbytes", content_type="image/jpeg")
-        r = self.client.post("/goods-in/scan-preview/",
+        r = self.client.post("/goods-in/scan/",
                              {"supplier": str(self.sup.pk), "file": f})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         # Lands on the BP new form, supplier preselected, posting to the preview.
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn(f'<option value="{self.sup.pk}" selected>Acme Mill</option>', body)
-        self.assertIn('action="/goods-in/new-preview/"', body)
+        self.assertIn('action="/goods-in/new/"', body)
         self.assertIn("Mystery Item XYZ", body)   # raw hint shown
         self.assertIn('value="4.0"', body)
+
+    def test_old_deliveries_paths_redirect_to_goods_in(self):
+        # Backward-compat: the retired /deliveries/... paths 302-redirect to
+        # the /goods-in/ equivalents, preserving PKs and query strings.
+        d = Delivery.objects.create(department=self.dept, supplier=self.sup,
+                                    date=datetime.date(2026, 5, 22))
+        for old, new in (
+            ("/deliveries/", "/goods-in/"),
+            ("/deliveries/new/", "/goods-in/new/"),
+            ("/deliveries/scan/", "/goods-in/scan/"),
+            (f"/deliveries/{d.pk}/", f"/goods-in/{d.pk}/"),
+        ):
+            r = self.client.get(old)
+            self.assertEqual(r.status_code, 302, old)
+            self.assertEqual(r["Location"], new, old)
+        # Query string preserved.
+        r = self.client.get("/deliveries/?foo=bar")
+        self.assertEqual(r["Location"], "/goods-in/?foo=bar")
 
 
 class StocktakeCSVTests(TestCase):
@@ -1234,7 +1251,7 @@ class PriceHistoryTests(TestCase):
         # the supplier stocks the ingredient twice.
         self._price(self.sup, Decimal("25.00"), date=datetime.date(2026, 1, 1))
         self._price(self.sup, Decimal("30.00"), date=datetime.date(2026, 5, 22))
-        r = self.client.get("/deliveries/new/")
+        r = self.client.get("/goods-in/new/")
         # Page renders; supplier_ids list on the product is deduped
         p = (Product.objects.filter(pk=self.flour.pk)
              .prefetch_related("prices").first())
@@ -1472,7 +1489,7 @@ class SectionNavigationTests(TestCase):
         self.assertIn("Use expiring stock", urgent)
         self.assertIn("Stocktake due", urgent)
         # Links to where the user does the work
-        self.assertIn('href="/deliveries/"', urgent)
+        self.assertIn('href="/goods-in/"', urgent)
         self.assertIn('href="/stocktakes/"', urgent)
 
     def test_urgent_task_helper_returns_extendable_list(self):
@@ -1557,19 +1574,17 @@ class SectionNavigationTests(TestCase):
         self.assertNotIn('href="/stock/"', nav)
 
     def test_stock_sub_pages_highlight_themselves_not_a_top_link(self):
-        # Products has moved to the design-system shell, where the active
-        # section is marked on the left rail (amber ring), not the old
-        # `class="on"` nav — see test_products_highlights_itself_on_bp_rail.
-        for path, link in (
-            ("/deliveries/", '/deliveries/'),
-        ):
-            r = self.client.get(path)
-            body = r.content.decode()
-            nav = body[body.index("<nav>"):body.index("</nav>")]
-            self.assertRegex(
-                nav, r'href="' + link + r'"\s+class="on"',
-                f"{path} should highlight its own sub-nav link",
-            )
+        # The whole Stock area is on the design-system shell now EXCEPT
+        # Packaging (off-limits, still old-shell). It's the last page using
+        # the old contextual-nav self-highlight (`class="on"`); the rebuilt
+        # pages mark the active section on the BP rail instead.
+        r = self.client.get("/packaging/")
+        body = r.content.decode()
+        nav = body[body.index("<nav>"):body.index("</nav>")]
+        self.assertRegex(
+            nav, r'href="/packaging/"\s+class="on"',
+            "Packaging should highlight its own sub-nav link",
+        )
 
     def test_products_highlights_itself_on_bp_rail(self):
         # The Ingredients page renders the design-system shell: the active
@@ -1611,7 +1626,7 @@ class SectionNavigationTests(TestCase):
 
     def test_existing_urls_still_work(self):
         # Sanity: the existing stock pages keep their URLs and views.
-        for path in ("/stocktakes/", "/deliveries/", "/adjustments/",
+        for path in ("/stocktakes/", "/goods-in/", "/adjustments/",
                      "/reorder/", "/products/", "/suppliers/"):
             r = self.client.get(path)
             self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")

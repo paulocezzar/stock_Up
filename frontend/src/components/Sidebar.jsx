@@ -5,7 +5,7 @@ import {
   Package,
   ChefHat,
   Boxes,
-  Truck,
+  PackageOpen,
   Users,
   Moon,
   Sun,
@@ -21,7 +21,7 @@ const NAV = [
   { label: "Ingredients", icon: Package,        href: "/products/" },
   { label: "Recipes",    icon: ChefHat,         href: "/recipes/" },
   { label: "Stock",      icon: Boxes,           href: "/stock/" },
-  { label: "Deliveries", icon: Truck,           href: "/deliveries/" },
+  { label: "Goods In",   icon: PackageOpen,     href: "/goods-in/" },
   { label: "Customers",  icon: Users,           href: "/customers/" },
 ];
 

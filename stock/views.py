@@ -162,7 +162,7 @@ def _stock_tasks_for_home(dept, today):
     ).count()
     if expiring:
         tasks.append({"label": "Use expiring stock", "count": expiring,
-                      "url": "/deliveries/"})
+                      "url": "/goods-in/"})
 
     last_st = dept.stocktakes.first()
     needs_count = False
@@ -267,7 +267,7 @@ def home(request):
                 "ingredient": b.product,
                 "alert": "Expires soon",
                 "detail": f"use-by {b.use_by:%d %b}",
-                "href": f"/deliveries/{b.delivery.pk}/",
+                "href": f"/goods-in/{b.delivery.pk}/",
                 "kind": "expiring",
             })
 
@@ -409,7 +409,7 @@ def _stock_recent_activity(dept, limit=5):
               .order_by("-date", "-id")[:limit]):
         items.append({"date": d.date, "kind": "Delivery",
                       "detail": d.supplier.name,
-                      "href": f"/deliveries/{d.pk}/"})
+                      "href": f"/goods-in/{d.pk}/"})
     items.sort(key=lambda x: x["date"], reverse=True)
     return items[:limit]
 
@@ -1490,32 +1490,23 @@ def reorder_csv(request):
 
 
 # ---- deliveries / goods-in (per department) ----
-# URL-name maps so the design-system templates can link list <-> new <-> scan
-# <-> detail through either the live routes or (during review) the temporary
-# preview routes. Read-only; never mutated.
+# Route-name map the Goods In templates use to link list <-> new <-> scan
+# <-> detail. The names are unchanged by the /deliveries/ -> /goods-in/ path
+# rename, so the templates need no edits at cutover. Read-only.
 _GOODS_IN_URLS = {"list": "deliveries", "new": "delivery_new",
                   "scan": "delivery_scan", "detail": "delivery_detail"}
-_GOODS_IN_PREVIEW_URLS = {"list": "deliveries_preview", "new": "delivery_new_preview",
-                          "scan": "delivery_scan_preview", "detail": "delivery_detail_preview"}
 
 
 @login_required
-def deliveries(request, template_name="stock/deliveries.html", urls=_GOODS_IN_URLS):
+def deliveries(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
     deliv = (dept.deliveries.select_related("supplier")
              .annotate(n_lines=Count("batches"), packs_in=Sum("batches__qty_received"))
              .order_by("-date", "-id"))
-    return render(request, template_name, {"deliveries": deliv, "urls": urls})
-
-
-@login_required
-def deliveries_preview(request):
-    """TEMPORARY design-system preview of the Goods In (Deliveries) list.
-    Remove on cutover."""
-    return deliveries(request, template_name="stock/goods_in_bp.html",
-                      urls=_GOODS_IN_PREVIEW_URLS)
+    return render(request, "stock/goods_in_bp.html",
+                  {"deliveries": deliv, "urls": _GOODS_IN_URLS})
 
 
 @login_required
@@ -1557,33 +1548,24 @@ def adjustments(request):
 
 
 @login_required
-def delivery_detail(request, pk, template_name="stock/delivery_detail.html",
-                    urls=_GOODS_IN_URLS):
+def delivery_detail(request, pk):
     delivery = get_object_or_404(Delivery.objects.select_related("supplier", "department"), pk=pk)
     if not delivery.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
     batches = list(delivery.batches.select_related("product")
                    .order_by("product__name"))
     total_packs = sum((b.qty_received for b in batches), Decimal("0"))
-    return render(request, template_name, {
+    return render(request, "stock/goods_in_detail_bp.html", {
         "delivery": delivery,
         "batches": batches,
         "n_lines": len(batches),
         "total_packs": total_packs,
-        "urls": urls,
+        "urls": _GOODS_IN_URLS,
     })
 
 
 @login_required
-def delivery_detail_preview(request, pk):
-    """TEMPORARY design-system preview of the Goods In detail page. Remove on
-    cutover."""
-    return delivery_detail(request, pk, template_name="stock/goods_in_detail_bp.html",
-                           urls=_GOODS_IN_PREVIEW_URLS)
-
-
-@login_required
-def delivery_new(request, template_name="stock/delivery_new.html", urls=_GOODS_IN_URLS):
+def delivery_new(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1592,7 +1574,7 @@ def delivery_new(request, template_name="stock/delivery_new.html", urls=_GOODS_I
         supplier = Supplier.objects.filter(pk=supplier_id).first() if supplier_id else None
         if not supplier:
             messages.error(request, "Pick a supplier.")
-            return redirect(urls["new"])
+            return redirect("delivery_new")
         date_str = (request.POST.get("date") or "").strip()
         try:
             d = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
@@ -1617,7 +1599,7 @@ def delivery_new(request, template_name="stock/delivery_new.html", urls=_GOODS_I
             rows.append((product, code.strip(), ub_date, qty))
         if not rows:
             messages.error(request, "Add at least one line with a quantity.")
-            return redirect(urls["new"])
+            return redirect("delivery_new")
         delivery = Delivery.objects.create(
             department=dept, supplier=supplier, date=d,
             note=(request.POST.get("note") or "").strip())
@@ -1635,50 +1617,41 @@ def delivery_new(request, template_name="stock/delivery_new.html", urls=_GOODS_I
             msg += (f" Note: {no_price} batch{'es' if no_price != 1 else ''} "
                     f"need{'' if no_price != 1 else 's'} a supplier price set.")
         messages.success(request, msg)
-        return redirect(urls["list"])
+        return redirect("deliveries")
     products = list(dept.products.prefetch_related("prices").order_by("name"))
     for p in products:
         p.supplier_ids = sorted({sp.supplier_id for sp in p.prices.all()})
-    return render(request, template_name, {
+    return render(request, "stock/goods_in_new_bp.html", {
         "products": products,
         "suppliers": Supplier.objects.order_by("name"),
         "today": datetime.date.today().isoformat(),
         "lines": [{} for _ in range(6)],
-        "urls": urls,
+        "urls": _GOODS_IN_URLS,
     })
 
 
 @login_required
-def delivery_new_preview(request):
-    """TEMPORARY design-system preview of the new Goods In form. Remove on
-    cutover."""
-    return delivery_new(request, template_name="stock/goods_in_new_bp.html",
-                        urls=_GOODS_IN_PREVIEW_URLS)
-
-
-@login_required
-def delivery_scan(request, template_name="stock/delivery_scan.html",
-                  new_template="stock/delivery_new.html", urls=_GOODS_IN_URLS):
+def delivery_scan(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
     if request.method != "POST":
-        return render(request, template_name, {
+        return render(request, "stock/goods_in_scan_bp.html", {
             "suppliers": Supplier.objects.order_by("name"),
-            "urls": urls,
+            "urls": _GOODS_IN_URLS,
         })
     supplier_id = request.POST.get("supplier")
     supplier = Supplier.objects.filter(pk=supplier_id).first() if supplier_id else None
     if not supplier:
         messages.error(request, "Pick a supplier first.")
-        return redirect(urls["scan"])
+        return redirect("delivery_scan")
     upload = request.FILES.get("file")
     if not upload:
         messages.error(request, "Pick a delivery-note image or PDF to scan.")
-        return redirect(urls["scan"])
+        return redirect("delivery_scan")
     if upload.size > 20 * 1024 * 1024:
         messages.error(request, "That file is over 20 MB. Try a smaller photo or PDF.")
-        return redirect(urls["scan"])
+        return redirect("delivery_scan")
     extracted = []
     try:
         extracted = extract_lines(upload.read(), upload.content_type or "")
@@ -1702,26 +1675,15 @@ def delivery_scan(request, template_name="stock/delivery_scan.html",
     products = list(dept.products.prefetch_related("prices").order_by("name"))
     for p in products:
         p.supplier_ids = sorted({sp.supplier_id for sp in p.prices.all()})
-    return render(request, new_template, {
+    return render(request, "stock/goods_in_new_bp.html", {
         "products": products,
         "suppliers": Supplier.objects.order_by("name"),
         "today": datetime.date.today().isoformat(),
         "lines": prefilled,
         "prefilled_supplier_id": supplier.pk,
         "default_show_all": True,
-        "urls": urls,
+        "urls": _GOODS_IN_URLS,
     })
-
-
-@login_required
-def delivery_scan_preview(request):
-    """TEMPORARY design-system preview of the Goods In scan workflow. The
-    upload posts back to this preview and, on success, renders the BP new
-    form pre-filled (goods_in_new_bp.html) — so the whole scan flow can be
-    driven on the preview. Remove on cutover."""
-    return delivery_scan(request, template_name="stock/goods_in_scan_bp.html",
-                         new_template="stock/goods_in_new_bp.html",
-                         urls=_GOODS_IN_PREVIEW_URLS)
 
 
 # ---- customers (per department) ----

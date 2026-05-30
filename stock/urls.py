@@ -42,17 +42,23 @@ urlpatterns = [
     path("stocktakes/<int:pk>/count/", views.count, name="count"),
     path("stocktakes/<int:pk>/csv/", views.stocktake_csv, name="stocktake_csv"),
     path("count/line/<int:line_id>/", views.save_count, name="save_count"),
-    path("deliveries/", views.deliveries, name="deliveries"),
-    path("deliveries/new/", views.delivery_new, name="delivery_new"),
-    path("deliveries/scan/", views.delivery_scan, name="delivery_scan"),
-    path("deliveries/<int:pk>/", views.delivery_detail, name="delivery_detail"),
-    # TEMP: Wave B design-system previews (Goods In: list / new / scan /
-    # detail). Remove all four on cutover. URL paths stay /deliveries... for
-    # now; the /goods-in/ rename happens at cutover.
-    path("goods-in-preview/", views.deliveries_preview, name="deliveries_preview"),
-    path("goods-in/new-preview/", views.delivery_new_preview, name="delivery_new_preview"),
-    path("goods-in/scan-preview/", views.delivery_scan_preview, name="delivery_scan_preview"),
-    path("goods-in/<int:pk>/preview/", views.delivery_detail_preview, name="delivery_detail_preview"),
+    # Goods In (formerly Deliveries) — canonical /goods-in/ routes. The view
+    # and URL names keep their delivery* identity (only the path changed).
+    path("goods-in/", views.deliveries, name="deliveries"),
+    path("goods-in/new/", views.delivery_new, name="delivery_new"),
+    path("goods-in/scan/", views.delivery_scan, name="delivery_scan"),
+    path("goods-in/<int:pk>/", views.delivery_detail, name="delivery_detail"),
+    # Old /deliveries/... paths 302-redirect to the /goods-in/ equivalents
+    # (PKs + query strings preserved). Unnamed so reverse() resolves to the
+    # canonical /goods-in/ routes above.
+    path("deliveries/", RedirectView.as_view(
+        pattern_name="deliveries", permanent=False, query_string=True)),
+    path("deliveries/new/", RedirectView.as_view(
+        pattern_name="delivery_new", permanent=False, query_string=True)),
+    path("deliveries/scan/", RedirectView.as_view(
+        pattern_name="delivery_scan", permanent=False, query_string=True)),
+    path("deliveries/<int:pk>/", RedirectView.as_view(
+        pattern_name="delivery_detail", permanent=False, query_string=True)),
     path("adjustments/", views.adjustments, name="adjustments"),
     path("customers/", views.customers_internal, name="customers"),
     path("customers/wholesale/", views.customers_wholesale, name="customers_wholesale"),
