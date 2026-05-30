@@ -774,6 +774,73 @@ class StocktakeCSVTests(TestCase):
         self.assertIn(f'/stocktakes/{st.pk}/csv/', r.content.decode())
 
 
+class StocktakesRebuildTests(TestCase):
+    """Stocktakes list + count-entry rebuilt on the design system, exercised
+    via the temporary /stocktakes-preview/ and /stocktakes/<pk>/count-preview/
+    routes until cutover. Preserves the AJAX save (save_count) — the BP count
+    page posts with ?bp=1 to get the BP-styled status fragment.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="kg", minimum=Decimal("0"))
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25"), pack_price=Decimal("10.00"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.st = Stocktake.objects.create(department=self.dept,
+                                           date=datetime.date(2026, 1, 15))
+        self.line = StockLine.objects.create(
+            stocktake=self.st, product=self.flour, current=Decimal("3"))
+
+    def test_list_preview_renders_on_design_system(self):
+        r = self.client.get("/stocktakes-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Start a new weekly count", body)
+        self.assertIn('data-testid="stocktakes-table"', body)
+
+    def test_count_preview_renders_with_total_csv_and_htmx(self):
+        r = self.client.get(f"/stocktakes/{self.st.pk}/count-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        # Running total preserved (3 packs x £10 = £30.00).
+        self.assertIn("Total stock value", body)
+        self.assertIn("£30.00", body)
+        # CSV link preserved.
+        self.assertIn(f'/stocktakes/{self.st.pk}/csv/', body)
+        # htmx wiring intact: input posts to save_count with the bp flag.
+        self.assertIn(f'/count/line/{self.line.id}/?bp=1', body)
+        self.assertIn("htmx.org", body)
+
+    def test_save_count_with_bp_flag_returns_bp_fragment(self):
+        r = self.client.post(f"/count/line/{self.line.id}/?bp=1",
+                             {"current": "3"})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # BP-styled "ok" badge (needed=0); not the old .tag markup.
+        self.assertIn("bg-emerald-50", body)
+        self.assertNotIn('class="tag', body)
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.current, Decimal("3"))
+
+    def test_save_count_without_flag_keeps_old_fragment(self):
+        # The still-live old count page must keep its original fragment.
+        r = self.client.post(f"/count/line/{self.line.id}/", {"current": "3"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('class="tag', r.content.decode())
+
+
 class PackUnitConversionTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")

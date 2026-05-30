@@ -1,0 +1,65 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Stocktakes list — rebuilt on the shared Business Performance design system.
+Same context + POST (start a count) as the old stocktakes.html: the
+"Counted by" field and the per-row "open" link to the count screen are
+unchanged. Value uses the shared gbp filter.
+{% endcomment %}
+{% load humanize design_nav %}
+{% block title %}Stocktakes · StockUp{% endblock %}
+
+{% block body %}
+{% comment %} Title {% endcomment %}
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Stocktakes</h1>
+  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Weekly inventory counts · start a count, then enter quantities line by line</p>
+</div>
+
+{% comment %} Start a new count {% endcomment %}
+<form method="post" data-testid="start-count" class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  {% csrf_token %}
+  <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">Start a new weekly count</h3>
+  {% if has_products %}
+    <div class="flex flex-wrap items-end gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Counted by <span class="text-slate-400">(optional)</span></label>
+        <input type="text" name="completed_by" placeholder="your name"
+               class="h-10 w-[200px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      </div>
+      <button type="submit"
+              class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Start count for today</button>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500 dark:text-slate-400">Add some ingredients first, then you can start a count.</p>
+  {% endif %}
+</form>
+
+{% comment %} Stocktakes table {% endcomment %}
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">All stocktakes</h3>
+  <table data-testid="stocktakes-table" class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <th class="py-2.5 pr-2">Date</th>
+        <th class="py-2.5 px-2">Counted by</th>
+        <th class="py-2.5 px-2 text-right">Items counted</th>
+        <th class="py-2.5 px-2 text-right">Value</th>
+        <th class="py-2.5 pl-2 text-right"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for st in stocktakes %}
+        <tr class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2 font-medium text-slate-800 dark:text-slate-200">{{ st.date|date:"d M Y" }}</td>
+          <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">{{ st.completed_by|default:"—" }}</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">{{ st.counted }}</td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">{{ st.total_value|gbp }}</td>
+          <td class="py-2.5 pl-2 text-right"><a href="{% url 'count' st.pk %}" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">open →</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="py-4 text-sm text-slate-400 dark:text-slate-500">No stocktakes yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

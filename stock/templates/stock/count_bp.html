@@ -1,0 +1,79 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Count-entry screen — rebuilt on the shared Business Performance design
+system. Same behaviour as count.html: each row's number input saves itself
+via htmx (POST to save_count) and swaps in the status fragment; the
+name/code filter reuses the shared base table-filter JS; CSV export and the
+running total are preserved. htmx is loaded locally (the BP shell doesn't
+bundle it) and the CSRF token is supplied via hx-headers on the table. The
+input posts with ?bp=1 so save_count returns the BP-styled status fragment.
+{% endcomment %}
+{% load humanize design_nav %}
+{% block title %}Count {{ st.date|date:"d M Y" }} · StockUp{% endblock %}
+
+{% block body %}
+{% comment %} Title + CSV {% endcomment %}
+<div class="mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Count — {{ st.date|date:"d M Y" }}</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Type a number and tab out — each line saves itself.</p>
+  </div>
+  <a href="{% url 'stocktake_csv' st.pk %}" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">Download CSV</a>
+</div>
+
+{% comment %} Count table {% endcomment %}
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Lines</h3>
+    <div class="flex items-center gap-2.5">
+      <input type="search" data-filter="count-tbl" placeholder="Filter by name or code…" autocomplete="off"
+             class="h-10 w-[260px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      <span class="count-out text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+  </div>
+  <table id="count-tbl" data-testid="count-table" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <th class="py-2.5 pr-2">Ingredient</th>
+        <th class="py-2.5 px-2 text-right">Min</th>
+        <th class="py-2.5 px-2 text-right">Count</th>
+        <th class="py-2.5 pl-2">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+        <tr data-search="{{ line.product.name|lower }} {{ line.product.code|default:''|lower }}"
+            class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+          <td class="py-2.5 pr-2">
+            <span class="font-medium text-slate-800 dark:text-slate-200">{{ line.product.name }}</span>
+            {% if line.product.code %}<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">{{ line.product.code }}</span>{% endif %}
+          </td>
+          <td class="py-2.5 px-2 text-right tabular text-slate-500 dark:text-slate-400">{{ line.product.minimum|floatformat:0 }}</td>
+          <td class="py-2.5 px-2 text-right">
+            <input type="number" step="any" inputmode="decimal" name="current"
+                   value="{{ line.current|default_if_none:'' }}"
+                   hx-post="{% url 'save_count' line.id %}?bp=1" hx-trigger="change" hx-target="#s-{{ line.id }}" hx-swap="innerHTML"
+                   onchange="this.classList.remove('border-amber-300','dark:border-amber-400/40');this.classList.add('border-slate-200','dark:border-slate-800')"
+                   class="h-9 w-28 rounded-lg border bg-white px-2.5 text-right text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:text-slate-300 {% if line.carried_over %}border-amber-300 dark:border-amber-400/40{% else %}border-slate-200 dark:border-slate-800{% endif %}">
+          </td>
+          <td id="s-{{ line.id }}" class="py-2.5 pl-2">{% include "stock/_line_status_bp.html" %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 text-sm dark:border-slate-800">
+    <span class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Total stock value</span>
+    <span class="font-display text-base font-semibold text-slate-900 dark:text-slate-100">{{ total_value|gbp }}</span>
+    <span class="text-xs text-slate-400 dark:text-slate-500">(counted lines only)</span>
+  </div>
+</div>
+
+<div class="mt-4 flex items-center gap-4 text-sm">
+  <a href="{% url 'stocktakes' %}" class="font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">← all stocktakes</a>
+  <a href="{% url 'stock_home' %}" class="font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">Stock →</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{% endblock %}

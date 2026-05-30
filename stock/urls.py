@@ -39,6 +39,10 @@ urlpatterns = [
     path("reorder/", views.reorder, name="reorder"),
     path("reorder/csv/", views.reorder_csv, name="reorder_csv"),
     path("stocktakes/", views.stocktakes, name="stocktakes"),
+    # TEMP: live previews of the design-system Stocktakes rebuild (list +
+    # count-entry). Remove both on cutover.
+    path("stocktakes-preview/", views.stocktakes_preview, name="stocktakes_preview"),
+    path("stocktakes/<int:pk>/count-preview/", views.count_preview, name="count_preview"),
     path("stocktakes/<int:pk>/count/", views.count, name="count"),
     path("stocktakes/<int:pk>/csv/", views.stocktake_csv, name="stocktake_csv"),
     path("count/line/<int:line_id>/", views.save_count, name="save_count"),
