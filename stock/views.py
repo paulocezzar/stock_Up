@@ -1694,27 +1694,18 @@ def _customer_qs(dept, customer_type):
 
 
 # Route-name map the customer templates use for cross-links (list/detail/
-# edit/new + the Internal/Wholesale tabs). Defaults are the live routes; the
-# preview views pass the *-preview names so the previews stay self-contained.
-# set_type / delete have no preview routes (POST actions) — they stay live.
+# edit/new + the Internal/Wholesale tabs). View + URL names are unchanged by
+# the design-system cutover — only the templates changed. Read-only.
 _CUSTOMER_URLS = {
     "list_internal": "customers", "list_wholesale": "customers_wholesale",
     "new": "customer_new", "detail": "customer_detail",
     "edit": "customer_edit", "set_type": "customer_set_type",
     "delete": "customer_delete",
 }
-_CUSTOMER_PREVIEW_URLS = {
-    "list_internal": "customers_preview",
-    "list_wholesale": "customers_wholesale_preview",
-    "new": "customer_new_preview", "detail": "customer_detail_preview",
-    "edit": "customer_edit_preview", "set_type": "customer_set_type",
-    "delete": "customer_delete",
-}
 
 
 @login_required
-def customers_internal(request, template_name="stock/customers_internal.html",
-                       urls=_CUSTOMER_URLS):
+def customers_internal(request):
     """Internal-customer list (Estate outlets like GARDEN CAFE, FARMSHOP, …).
 
     Also the default landing for the Customers top-nav link.
@@ -1722,60 +1713,34 @@ def customers_internal(request, template_name="stock/customers_internal.html",
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
-    return render(request, template_name, {
+    return render(request, "stock/customers_internal_bp.html", {
         "customers": _customer_qs(dept, Customer.INTERNAL),
-        "urls": urls,
+        "urls": _CUSTOMER_URLS,
     })
 
 
 @login_required
-def customers_preview(request):
-    """TEMPORARY design-system preview of the internal customers list."""
-    return customers_internal(request,
-                              template_name="stock/customers_internal_bp.html",
-                              urls=_CUSTOMER_PREVIEW_URLS)
-
-
-@login_required
-def customers_wholesale(request, template_name="stock/customers_wholesale.html",
-                        urls=_CUSTOMER_URLS):
+def customers_wholesale(request):
     """Wholesale-customer list (TEALS, PINKMANS, SOCIETY …)."""
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
-    return render(request, template_name, {
+    return render(request, "stock/customers_wholesale_bp.html", {
         "customers": _customer_qs(dept, Customer.WHOLESALE),
-        "urls": urls,
+        "urls": _CUSTOMER_URLS,
     })
 
 
 @login_required
-def customers_wholesale_preview(request):
-    """TEMPORARY design-system preview of the wholesale customers list."""
-    return customers_wholesale(request,
-                               template_name="stock/customers_wholesale_bp.html",
-                               urls=_CUSTOMER_PREVIEW_URLS)
-
-
-@login_required
-def customer_detail(request, pk, template_name="stock/customer_detail.html",
-                    urls=_CUSTOMER_URLS):
+def customer_detail(request, pk):
     customer = get_object_or_404(Customer, pk=pk)
     if customer.department and not customer.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
-    return render(request, template_name, {
+    return render(request, "stock/customer_detail_bp.html", {
         "customer": customer,
         "type_choices": Customer.TYPE_CHOICES,
-        "urls": urls,
+        "urls": _CUSTOMER_URLS,
     })
-
-
-@login_required
-def customer_detail_preview(request, pk):
-    """TEMPORARY design-system preview of the customer detail page."""
-    return customer_detail(request, pk,
-                           template_name="stock/customer_detail_bp.html",
-                           urls=_CUSTOMER_PREVIEW_URLS)
 
 
 @require_POST
@@ -1811,8 +1776,7 @@ def _customer_list_redirect_url(customer_type):
 
 
 @login_required
-def customer_new(request, template_name="stock/customer_form.html",
-                 urls=_CUSTOMER_URLS):
+def customer_new(request):
     """Create a customer by hand.
 
     Pre-selects the type from the ?type= query parameter so the "Add
@@ -1837,31 +1801,31 @@ def customer_new(request, template_name="stock/customer_form.html",
         valid_types = {k for k, _ in Customer.TYPE_CHOICES}
         if not name:
             messages.error(request, "Name is required.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(
                               {"name": name, "location": location,
                                "ordered_by": ordered_by,
                                "customer_type": customer_type or default_type},
-                              mode="new", default_type=default_type, urls=urls))
+                              mode="new", default_type=default_type, urls=_CUSTOMER_URLS))
         if customer_type not in valid_types:
             messages.error(request, "Pick a valid customer type.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(
                               {"name": name, "location": location,
                                "ordered_by": ordered_by,
                                "customer_type": default_type},
-                              mode="new", default_type=default_type, urls=urls))
+                              mode="new", default_type=default_type, urls=_CUSTOMER_URLS))
         # Case-insensitive duplicate check — "TEALS" / "teals" are the same.
         if Customer.objects.filter(name__iexact=name).exists():
             messages.error(request,
                            f"A customer named '{name}' already exists. "
                            "Pick a different name.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(
                               {"name": name, "location": location,
                                "ordered_by": ordered_by,
                                "customer_type": customer_type},
-                              mode="new", default_type=default_type, urls=urls))
+                              mode="new", default_type=default_type, urls=_CUSTOMER_URLS))
         customer = Customer.objects.create(
             name=name, location=location, ordered_by=ordered_by,
             customer_type=customer_type,
@@ -1869,13 +1833,13 @@ def customer_new(request, template_name="stock/customer_form.html",
             department=dept,
         )
         messages.success(request, f"Created customer '{customer.name}'.")
-        return redirect(urls["detail"], pk=customer.pk)
+        return redirect("customer_detail", pk=customer.pk)
 
-    return render(request, template_name,
+    return render(request, "stock/customer_form_bp.html",
                   _customer_form_context(
                       {"name": "", "location": "", "ordered_by": "",
                        "customer_type": default_type},
-                      mode="new", default_type=default_type, urls=urls))
+                      mode="new", default_type=default_type, urls=_CUSTOMER_URLS))
 
 
 def _customer_form_context(form, mode, default_type, customer=None,
@@ -1891,8 +1855,7 @@ def _customer_form_context(form, mode, default_type, customer=None,
 
 
 @login_required
-def customer_edit(request, pk, template_name="stock/customer_form.html",
-                  urls=_CUSTOMER_URLS):
+def customer_edit(request, pk):
     """Edit an existing customer.
 
     Always sets ``is_type_manual=True`` on save so the next import
@@ -1916,25 +1879,25 @@ def customer_edit(request, pk, template_name="stock/customer_form.html",
                 "is_internal": is_internal}
         if not name:
             messages.error(request, "Name is required.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(form, mode="edit",
                                                  default_type=customer.customer_type,
-                                                 customer=customer, urls=urls))
+                                                 customer=customer, urls=_CUSTOMER_URLS))
         if customer_type not in valid_types:
             messages.error(request, "Pick a valid customer type.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(form, mode="edit",
                                                  default_type=customer.customer_type,
-                                                 customer=customer, urls=urls))
+                                                 customer=customer, urls=_CUSTOMER_URLS))
         # Renaming: refuse a name that collides with a DIFFERENT customer.
         if Customer.objects.filter(name__iexact=name).exclude(pk=customer.pk).exists():
             messages.error(request,
                            f"A customer named '{name}' already exists. "
                            "Pick a different name.")
-            return render(request, template_name,
+            return render(request, "stock/customer_form_bp.html",
                           _customer_form_context(form, mode="edit",
                                                  default_type=customer.customer_type,
-                                                 customer=customer, urls=urls))
+                                                 customer=customer, urls=_CUSTOMER_URLS))
         customer.name = name
         customer.location = location
         customer.ordered_by = ordered_by
@@ -1943,30 +1906,16 @@ def customer_edit(request, pk, template_name="stock/customer_form.html",
         customer.is_type_manual = True  # operator owns this row's content now
         customer.save()
         messages.success(request, f"Saved changes to '{customer.name}'.")
-        return redirect(urls["detail"], pk=customer.pk)
+        return redirect("customer_detail", pk=customer.pk)
 
     form = {"name": customer.name, "location": customer.location,
             "ordered_by": customer.ordered_by,
             "customer_type": customer.customer_type,
             "is_internal": customer.is_internal}
-    return render(request, template_name,
+    return render(request, "stock/customer_form_bp.html",
                   _customer_form_context(form, mode="edit",
                                          default_type=customer.customer_type,
-                                         customer=customer, urls=urls))
-
-
-@login_required
-def customer_new_preview(request):
-    """TEMPORARY design-system preview of the new-customer form."""
-    return customer_new(request, template_name="stock/customer_form_bp.html",
-                        urls=_CUSTOMER_PREVIEW_URLS)
-
-
-@login_required
-def customer_edit_preview(request, pk):
-    """TEMPORARY design-system preview of the edit-customer form."""
-    return customer_edit(request, pk, template_name="stock/customer_form_bp.html",
-                         urls=_CUSTOMER_PREVIEW_URLS)
+                                         customer=customer, urls=_CUSTOMER_URLS))
 
 
 @require_POST

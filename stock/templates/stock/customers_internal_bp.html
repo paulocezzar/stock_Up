@@ -51,8 +51,8 @@ delete, the ·M manual-type badge, the shared data-filter search, and the
           <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">{{ c.ordered_by|default:"—" }}</td>
           <td class="py-2.5 px-2"><a href="{% url urls.edit c.pk %}" class="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">edit →</a></td>
           <td class="py-2.5 pl-2 text-right">
-            <form method="post" action="{% url urls.delete c.pk %}" class="inline" onsubmit="return confirm('Delete {{ c.name|escapejs }}?')">{% csrf_token %}
-              <button type="submit" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+            <form method="post" action="{% url urls.delete c.pk %}" class="inline">{% csrf_token %}
+              <button type="button" data-confirm-delete data-confirm-name="{{ c.name }}" class="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
             </form>
           </td>
         </tr>
@@ -62,4 +62,5 @@ delete, the ·M manual-type badge, the shared data-filter search, and the
     </tbody>
   </table>
 </div>
+{% include "design_system/components/confirm_dialog.html" %}
 {% endblock %}

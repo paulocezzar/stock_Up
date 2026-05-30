@@ -4351,15 +4351,16 @@ class CustomersViewTests(TestCase):
         self.assertNotIn("OTHER", r.content.decode())
 
     def test_section_nav_lists_internal_and_wholesale(self):
-        r = self.client.get("/customers/")
-        body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertIn(">Internal Customers<", nav)
-        self.assertIn(">Wholesale Customers<", nav)
-        self.assertIn('href="/customers/"', nav)
-        self.assertIn('href="/customers/wholesale/"', nav)
-        # Internal Customers is the active sub-nav link on /customers/
-        self.assertRegex(nav, r'class="on"[^>]*>Internal Customers')
+        # The old contextual <nav> is now BP-styled tabs (links, not a JS
+        # toggle) rendered by _customers_tabs_bp.html.
+        body = self.client.get("/customers/").content.decode()
+        tabs = body[body.index('data-testid="customer-tabs"'):]
+        self.assertIn("Internal Customers", tabs)
+        self.assertIn("Wholesale Customers", tabs)
+        self.assertIn('href="/customers/"', tabs)
+        self.assertIn('href="/customers/wholesale/"', tabs)
+        # Internal tab is the active one on /customers/ (BP active = bordered).
+        self.assertRegex(tabs, r'href="/customers/"[^>]*border-slate-900')
 
     def test_home_top_nav_includes_customers_link(self):
         # /home/ now renders the design-system shell; its left rail carries
@@ -4560,8 +4561,10 @@ class CustomersCRUDTests(TestCase):
         body = self.client.get(f"/customers/{c.pk}/").content.decode()
         self.assertIn(f'href="/customers/{c.pk}/edit/"', body)
         self.assertIn(f'action="/customers/{c.pk}/delete/"', body)
-        # JS confirmation step, per spec
-        self.assertIn("Delete ACTIONS?", body)
+        # Confirmation step via the BP dialog: the trigger carries the name
+        # and the dialog's "can't be undone" copy is present.
+        self.assertIn('data-confirm-name="ACTIONS"', body)
+        self.assertIn('data-testid="confirm-dialog"', body)
         self.assertIn("can't be undone", body)
 
     def test_detail_page_shows_hand_created_tag_for_manual_entries(self):
@@ -4609,14 +4612,17 @@ class CustomersListRowActionsTests(TestCase):
     def test_internal_row_has_delete_form_with_confirmation(self):
         body = self.client.get("/customers/").content.decode()
         row = self._row(body, "garden cafe")
-        # POSTs to the existing delete view
+        # POSTs to the existing delete view, still with a csrf token.
         self.assertIn(f'action="/customers/{self.internal.pk}/delete/"', row)
-        # JS confirm matches the ingredients/suppliers pattern
-        self.assertIn("onsubmit=\"return confirm('Delete GARDEN CAFE?')\"", row)
-        # Same .btn.ghost button styling
-        self.assertIn('class="btn ghost"', row)
-        # Carries a csrf token like every other delete form
         self.assertIn("csrfmiddlewaretoken", row)
+        # Guarded by the BP confirm dialog (not a native confirm()): the
+        # row's trigger carries the name and opens the dialog.
+        self.assertIn("data-confirm-delete", row)
+        self.assertIn('data-confirm-name="GARDEN CAFE"', row)
+        self.assertNotIn("confirm(", row)
+        # The dialog + its "can't be undone" text are present on the page.
+        self.assertIn('data-testid="confirm-dialog"', body)
+        self.assertIn("can't be undone", body)
 
     def test_wholesale_row_has_edit_link_to_edit_view(self):
         body = self.client.get("/customers/wholesale/").content.decode()
@@ -4628,8 +4634,10 @@ class CustomersListRowActionsTests(TestCase):
         body = self.client.get("/customers/wholesale/").content.decode()
         row = self._row(body, "teals")
         self.assertIn(f'action="/customers/{self.wholesale.pk}/delete/"', row)
-        self.assertIn("onsubmit=\"return confirm('Delete TEALS?')\"", row)
-        self.assertIn('class="btn ghost"', row)
+        self.assertIn("data-confirm-delete", row)
+        self.assertIn('data-confirm-name="TEALS"', row)
+        self.assertNotIn("confirm(", row)
+        self.assertIn('data-testid="confirm-dialog"', body)
 
     def test_row_edit_link_reaches_edit_form(self):
         # Follow the link from the row through to confirm it lands on the
@@ -4675,11 +4683,11 @@ class CustomersListRowActionsTests(TestCase):
 
 
 class CustomersRebuildTests(TestCase):
-    """Customers rebuilt on the design system, exercised via the temporary
-    /customers-preview* routes. Confirms the BP shell renders and the
+    """Customers on the design system — the real /customers/... routes now
+    render the BP templates. Confirms the BP shell renders and the
     behaviour-carrying markup is preserved (5-col table with id, ·M badge,
-    add ?type= buttons, set-type form, edit/new form prefill + is_internal).
-    Real /customers/... routes stay on the old shell until cutover.
+    add ?type= buttons, set-type form, edit/new form prefill + is_internal,
+    and the BP confirm dialog guarding deletes).
     """
 
     def setUp(self):
@@ -4698,13 +4706,13 @@ class CustomersRebuildTests(TestCase):
             name="TEALS", customer_type=Customer.WHOLESALE, department=self.dept)
 
     def test_internal_list_preview_renders_with_table_and_filters(self):
-        r = self.client.get("/customers-preview/")
+        r = self.client.get("/customers/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn('id="customers-tbl"', body)
         self.assertIn('data-filter="customers-tbl"', body)
-        self.assertIn('href="/customers-preview/new/?type=internal"', body)
+        self.assertIn('href="/customers/new/?type=internal"', body)
         self.assertIn("GARDEN CAFE", body)
         self.assertNotIn("TEALS", body)        # internal tab excludes wholesale
         self.assertIn("·M", body)              # manual-type badge
@@ -4713,18 +4721,18 @@ class CustomersRebuildTests(TestCase):
         thead = body[body.index('id="customers-tbl"'):body.index("</thead>", body.index('id="customers-tbl"'))]
         self.assertEqual(len(re.findall(r"<th(?:>|\s)", thead)), 5)
         # Tabs link to the preview lists (self-contained).
-        self.assertIn('href="/customers-wholesale-preview/"', body)
+        self.assertIn('href="/customers/wholesale/"', body)
 
     def test_wholesale_list_preview_renders(self):
-        r = self.client.get("/customers-wholesale-preview/")
+        r = self.client.get("/customers/wholesale/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("TEALS", body)
-        self.assertIn('href="/customers-preview/new/?type=wholesale"', body)
+        self.assertIn('href="/customers/new/?type=wholesale"', body)
 
     def test_detail_preview_renders_type_set_form_and_actions(self):
-        r = self.client.get(f"/customers-preview/{self.internal.pk}/")
+        r = self.client.get(f"/customers/{self.internal.pk}/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -4735,16 +4743,18 @@ class CustomersRebuildTests(TestCase):
         self.assertIn('name="customer_type"', body)
         # hand-created tag (is_manual_entry) + edit link into the preview.
         self.assertIn("hand-created", body)
-        self.assertIn(f'href="/customers-preview/{self.internal.pk}/edit/"', body)
-        # Delete guard must actually fire: the confirm JS string is double-
-        # quoted (&quot;) so the apostrophe in "can't" doesn't break it, and
-        # the visible text is unchanged.
+        self.assertIn(f'href="/customers/{self.internal.pk}/edit/"', body)
+        # Delete is guarded by the reusable BP confirm dialog (no native
+        # confirm()): the trigger carries the name, the dialog is present,
+        # and the "can't be undone" text is there.
+        self.assertIn('data-testid="confirm-dialog"', body)
+        self.assertIn("data-confirm-delete", body)
+        self.assertIn('data-confirm-name="GARDEN CAFE"', body)
         self.assertIn("can't be undone", body)
-        self.assertIn('confirm(&quot;Delete GARDEN CAFE? This can', body)
-        self.assertNotIn("confirm('Delete", body)   # no broken single-quoted form
+        self.assertNotIn("confirm(", body)   # native confirm() is gone
 
     def test_new_preview_defaults_type_and_posts_to_preview(self):
-        r = self.client.get("/customers-preview/new/?type=wholesale")
+        r = self.client.get("/customers/new/?type=wholesale")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -4753,16 +4763,16 @@ class CustomersRebuildTests(TestCase):
         self.assertNotIn('name="is_internal"', body)
 
     def test_new_preview_post_creates_and_redirects_to_preview_detail(self):
-        r = self.client.post("/customers-preview/new/", {
+        r = self.client.post("/customers/new/", {
             "name": "Preview Co", "location": "X", "ordered_by": "Y",
             "customer_type": "internal"})
         self.assertEqual(r.status_code, 302)
         c = Customer.objects.get(name="Preview Co")
-        self.assertEqual(r["Location"], f"/customers-preview/{c.pk}/")
+        self.assertEqual(r["Location"], f"/customers/{c.pk}/")
         self.assertTrue(c.is_manual_entry)
 
     def test_edit_preview_prefills_and_shows_is_internal_checkbox(self):
-        r = self.client.get(f"/customers-preview/{self.internal.pk}/edit/")
+        r = self.client.get(f"/customers/{self.internal.pk}/edit/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('value="GARDEN CAFE"', body)

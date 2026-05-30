@@ -21,8 +21,8 @@ actions. The delete confirm text is preserved verbatim.
   </div>
   <div class="flex items-center gap-2">
     <a href="{% url urls.edit customer.pk %}" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">edit</a>
-    <form method="post" action="{% url urls.delete customer.pk %}" class="inline" onsubmit="return confirm(&quot;Delete {{ customer.name|escapejs }}? This can't be undone.&quot;)">{% csrf_token %}
-      <button type="submit" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
+    <form method="post" action="{% url urls.delete customer.pk %}" class="inline">{% csrf_token %}
+      <button type="button" data-confirm-delete data-confirm-name="{{ customer.name }}" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
     </form>
   </div>
 </div>
@@ -60,4 +60,5 @@ actions. The delete confirm text is preserved verbatim.
 <div class="mt-4 text-sm">
   <a href="{% if customer.customer_type == 'wholesale' %}{% url urls.list_wholesale %}{% else %}{% url urls.list_internal %}{% endif %}" class="font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">← all {{ customer.get_customer_type_display|lower }} customers</a>
 </div>
+{% include "design_system/components/confirm_dialog.html" %}
 {% endblock %}

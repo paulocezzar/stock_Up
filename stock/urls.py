@@ -62,13 +62,6 @@ urlpatterns = [
     path("adjustments/", views.adjustments, name="adjustments"),
     path("customers/", views.customers_internal, name="customers"),
     path("customers/wholesale/", views.customers_wholesale, name="customers_wholesale"),
-    # TEMP: design-system previews of the Customers rebuild. Remove on cutover.
-    # No URL rename — real /customers/... routes stay; only the templates change.
-    path("customers-preview/", views.customers_preview, name="customers_preview"),
-    path("customers-wholesale-preview/", views.customers_wholesale_preview, name="customers_wholesale_preview"),
-    path("customers-preview/new/", views.customer_new_preview, name="customer_new_preview"),
-    path("customers-preview/<int:pk>/", views.customer_detail_preview, name="customer_detail_preview"),
-    path("customers-preview/<int:pk>/edit/", views.customer_edit_preview, name="customer_edit_preview"),
     path("customers/new/", views.customer_new, name="customer_new"),
     path("customers/<int:pk>/", views.customer_detail, name="customer_detail"),
     path("customers/<int:pk>/edit/", views.customer_edit, name="customer_edit"),
