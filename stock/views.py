@@ -284,10 +284,10 @@ def home(request):
     stock_value = (latest_stocktake.total_value
                    if latest_stocktake else Decimal("0"))
 
-    # "Staff on shift today": there is NO Shift/Rota model in the project
-    # yet (/rota/ is a coming-soon placeholder), so there is nothing to
-    # query. Intentionally empty until a roster data layer exists — the
-    # widget renders its empty-state. Do NOT fabricate names here.
+    # "Staff on shift today": there is NO Shift/Rota model in the project,
+    # so there is nothing to query. Intentionally empty until a roster data
+    # layer exists — the widget renders its empty-state. Do NOT fabricate
+    # names here.
     staff_on_shift = []
 
     return render(request, "stock/home_bp.html", {
@@ -310,19 +310,6 @@ def home(request):
 def stock_home(request):
     """Stock section landing — links to the existing stock sub-pages."""
     return render(request, "stock/section_stock.html", {})
-
-
-_COMING_SOON = {
-    "production": ("Production", "Daily production plans, batch schedules and outputs."),
-    "rota": ("Rota", "Staff schedules, shift assignments and time-off requests."),
-    "notes": ("Notes", "Shared notes for the team — handover, reminders, ideas."),
-}
-
-
-def _placeholder(request, key):
-    title, blurb = _COMING_SOON[key]
-    return render(request, "stock/coming_soon.html",
-                  {"title": title, "blurb": blurb, "section": key})
 
 
 # ---- recipes (per department) ----
@@ -1040,21 +1027,6 @@ def recipe_edit(request, pk):
         "sold_as_product": recipe.sold_as_product,
     }
     return render(request, "stock/recipe_edit.html", _ctx(form))
-
-
-@login_required
-def production_home(request):
-    return _placeholder(request, "production")
-
-
-@login_required
-def rota_home(request):
-    return _placeholder(request, "rota")
-
-
-@login_required
-def notes_home(request):
-    return _placeholder(request, "notes")
 
 
 @login_required

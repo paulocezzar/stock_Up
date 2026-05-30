@@ -1198,17 +1198,6 @@ class SectionNavigationTests(TestCase):
                     "/reorder/", "/products/", "/suppliers/"):
             self.assertIn(f'href="{url}"', nav)
 
-    def test_placeholder_sections_render_with_coming_soon(self):
-        # Recipes is no longer a placeholder — it has its own list/import flow,
-        # tested separately. The other three are still "coming soon".
-        for path, title in (("/production/", "Production"),
-                            ("/rota/", "Rota"), ("/notes/", "Notes")):
-            r = self.client.get(path)
-            self.assertEqual(r.status_code, 200, f"{path} returned {r.status_code}")
-            body = r.content.decode()
-            self.assertIn(title, body)
-            self.assertIn("coming soon", body.lower())
-
     def test_profile_shows_username_departments_and_logout(self):
         r = self.client.get("/profile/")
         self.assertEqual(r.status_code, 200)
@@ -1284,20 +1273,6 @@ class SectionNavigationTests(TestCase):
             body, r'href="/products/"[^>]*\bring-amber-200\b',
             "Products should mark its own rail link active on the BP shell",
         )
-
-    def test_placeholder_navbars_have_home_plus_section(self):
-        # Recipes now has Home + Recipes + Import sub-nav (tested elsewhere);
-        # the other three placeholders remain Home + section.
-        for path, label in (("/production/", "Production"),
-                            ("/rota/", "Rota"),
-                            ("/notes/", "Notes")):
-            r = self.client.get(path)
-            nav, labels = self._nav(r.content.decode())
-            self.assertEqual(nav.count("<a "), 2,
-                             f"{path} navbar should be Home + section (2 links)")
-            self.assertIn("Home", labels)
-            self.assertIn(label, labels)
-            self.assertRegex(nav, r'class="on"[^>]*>' + label)
 
     def test_profile_navbar_has_home_and_profile(self):
         r = self.client.get("/profile/")
