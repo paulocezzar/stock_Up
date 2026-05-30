@@ -2831,10 +2831,19 @@ class RecipesDs2bPreviewTests(TestCase):
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("NPD-R800", body)
         self.assertIn("Unknown ingredient", body)
+        # "Recipes parsed" tile must report the real count (7), not 0 — the
+        # old binding applied |length to an already-counted int and rendered 0.
+        self.assertIn('<div class="k">Recipes parsed</div><div class="v">7</div>', body)
+        self.assertNotIn('<div class="k">Recipes parsed</div><div class="v">0</div>', body)
         # Commit — single-sheet sample lands on the main recipe detail preview.
         r = self.client.post("/recipes-ds-preview/upload/preview/", {})
         self.assertEqual(r.status_code, 302)
-        self.assertTrue(Recipe.objects.filter(code="NPD-R364").exists())
+        # All 7 parsed codes are committed (commit iterates the list, not the count).
+        sample_codes = ["NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
+                        "NPD-R2029", "NPD-R1823", "NPD-R307"]
+        for code in sample_codes:
+            self.assertTrue(Recipe.objects.filter(code=code).exists(),
+                            f"{code} should have been committed")
         main = Recipe.objects.get(code="NPD-R800")
         self.assertEqual(r.headers["Location"], f"/recipes-ds-preview/{main.pk}/")
 
@@ -2992,6 +3001,8 @@ class RecipesSectionViewTests(TestCase):
         self.assertIn("NPD-R364", body)
         # Unknown ingredients block surfaced (4 of 6 NPD-I codes are missing)
         self.assertIn("Unknown ingredient", body)
+        # "Recipes parsed" tile reports the real count (7), not 0.
+        self.assertIn('<div class="k">Recipes parsed</div><div class="v">7</div>', body)
 
         # Confirm — commits the import
         r = self.client.post("/recipes/upload/preview/", {})

@@ -23,7 +23,7 @@ to step 1 via upload_url.
 <div class="rds">
 <div class="stats">
   <div class="stat"><div class="k">Sheets processed</div><div class="v">{{ summary.sheets_processed }}</div></div>
-  <div class="stat"><div class="k">Recipes parsed</div><div class="v">{{ summary.unique_recipe_codes|default:parsed|length }}</div></div>
+  <div class="stat"><div class="k">Recipes parsed</div><div class="v">{% if summary.unique_recipe_codes %}{{ summary.unique_recipe_codes }}{% else %}{{ parsed|length }}{% endif %}</div></div>
   {% if summary.sheets_failed %}<div class="stat warn"><div class="k">Sheets failed</div><div class="v">{{ summary.sheets_failed }}</div></div>{% endif %}
   {% if summary.unknown_ingredients %}<div class="stat warn"><div class="k">Unknown ingredients</div><div class="v">{{ summary.unknown_ingredients|length }}</div></div>{% endif %}
   {% if summary.stub_subrecipes %}<div class="stat warn"><div class="k">Sub-recipe stubs</div><div class="v">{{ summary.stub_subrecipes|length }}</div></div>{% endif %}
