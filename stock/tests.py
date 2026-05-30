@@ -4674,6 +4674,97 @@ class CustomersListRowActionsTests(TestCase):
         self.assertEqual(n_cells, 5)
 
 
+class CustomersRebuildTests(TestCase):
+    """Customers rebuilt on the design system, exercised via the temporary
+    /customers-preview* routes. Confirms the BP shell renders and the
+    behaviour-carrying markup is preserved (5-col table with id, ·M badge,
+    add ?type= buttons, set-type form, edit/new form prefill + is_internal).
+    Real /customers/... routes stay on the old shell until cutover.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.internal = Customer.objects.create(
+            name="GARDEN CAFE", location="Estate", ordered_by="Andy",
+            customer_type=Customer.INTERNAL, is_type_manual=True,
+            is_manual_entry=True, department=self.dept)
+        self.wholesale = Customer.objects.create(
+            name="TEALS", customer_type=Customer.WHOLESALE, department=self.dept)
+
+    def test_internal_list_preview_renders_with_table_and_filters(self):
+        r = self.client.get("/customers-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('id="customers-tbl"', body)
+        self.assertIn('data-filter="customers-tbl"', body)
+        self.assertIn('href="/customers-preview/new/?type=internal"', body)
+        self.assertIn("GARDEN CAFE", body)
+        self.assertNotIn("TEALS", body)        # internal tab excludes wholesale
+        self.assertIn("·M", body)              # manual-type badge
+        # 5 <th> in the customers table (Name/Location/Ordered by/edit/delete).
+        import re
+        thead = body[body.index('id="customers-tbl"'):body.index("</thead>", body.index('id="customers-tbl"'))]
+        self.assertEqual(len(re.findall(r"<th(?:>|\s)", thead)), 5)
+        # Tabs link to the preview lists (self-contained).
+        self.assertIn('href="/customers-wholesale-preview/"', body)
+
+    def test_wholesale_list_preview_renders(self):
+        r = self.client.get("/customers-wholesale-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("TEALS", body)
+        self.assertIn('href="/customers-preview/new/?type=wholesale"', body)
+
+    def test_detail_preview_renders_type_set_form_and_actions(self):
+        r = self.client.get(f"/customers-preview/{self.internal.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("GARDEN CAFE", body)
+        self.assertIn("Internal", body)
+        # Set-type form posts to the real type endpoint (no preview route).
+        self.assertIn(f'action="/customers/{self.internal.pk}/type/"', body)
+        self.assertIn('name="customer_type"', body)
+        # hand-created tag (is_manual_entry) + edit link into the preview.
+        self.assertIn("hand-created", body)
+        self.assertIn(f'href="/customers-preview/{self.internal.pk}/edit/"', body)
+
+    def test_new_preview_defaults_type_and_posts_to_preview(self):
+        r = self.client.get("/customers-preview/new/?type=wholesale")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertRegex(body, r'<option value="wholesale"\s+selected>')
+        # is_internal checkbox is NOT shown in new mode.
+        self.assertNotIn('name="is_internal"', body)
+
+    def test_new_preview_post_creates_and_redirects_to_preview_detail(self):
+        r = self.client.post("/customers-preview/new/", {
+            "name": "Preview Co", "location": "X", "ordered_by": "Y",
+            "customer_type": "internal"})
+        self.assertEqual(r.status_code, 302)
+        c = Customer.objects.get(name="Preview Co")
+        self.assertEqual(r["Location"], f"/customers-preview/{c.pk}/")
+        self.assertTrue(c.is_manual_entry)
+
+    def test_edit_preview_prefills_and_shows_is_internal_checkbox(self):
+        r = self.client.get(f"/customers-preview/{self.internal.pk}/edit/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('value="GARDEN CAFE"', body)
+        self.assertIn('value="Estate"', body)
+        self.assertIn('name="is_internal"', body)   # edit-only checkbox
+        self.assertRegex(body, r'<option value="internal"\s+selected>')
+
+
 class CustomersImportProtectionTests(TestCase):
     """Re-running the import must leave hand-created and manually-edited
     customers strictly alone."""

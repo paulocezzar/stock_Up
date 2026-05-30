@@ -1,0 +1,11 @@
+{% comment %}
+Internal / Wholesale customer tabs (server-side links, not a JS toggle).
+Expects `urls` (route-name map) and `active` ("internal"|"wholesale") in
+context. Each list/detail/form page renders this with its active tab.
+{% endcomment %}
+<div data-testid="customer-tabs" class="mb-5 flex items-center gap-1 border-b border-slate-200 dark:border-slate-800">
+  <a href="{% url urls.list_internal %}"
+     class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition {% if active == 'internal' %}border-slate-900 text-slate-950 dark:border-slate-100 dark:text-slate-100{% else %}border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">Internal Customers</a>
+  <a href="{% url urls.list_wholesale %}"
+     class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition {% if active == 'wholesale' %}border-slate-900 text-slate-950 dark:border-slate-100 dark:text-slate-100{% else %}border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">Wholesale Customers</a>
+</div>

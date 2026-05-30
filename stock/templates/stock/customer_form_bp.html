@@ -1,0 +1,67 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Customer create / edit form — rebuilt on the shared Business Performance
+design system. Shared by customer_new and customer_edit (mode = "new" |
+"edit"). Same fields + validation messages (surfaced via the base messages
+block); the "Internal use / non-revenue" (is_internal) checkbox shows in
+EDIT mode only — distinct axis from customer_type. Posts to the current URL.
+{% endcomment %}
+{% load humanize %}
+{% block title %}{% if mode == "edit" %}Edit customer{% else %}Add customer{% endif %} · StockUp{% endblock %}
+
+{% block body %}
+{% if mode == "edit" %}{% include "stock/_customers_tabs_bp.html" with active=customer.customer_type %}{% else %}{% include "stock/_customers_tabs_bp.html" with active=default_type %}{% endif %}
+
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">{% if mode == "edit" %}Edit customer{% else %}Add customer{% endif %}</h1>
+  {% if mode == "edit" %}<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{{ customer.name }}</p>{% endif %}
+</div>
+
+<form method="post" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  {% csrf_token %}
+  <div class="flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Name <span class="text-rose-500">*</span></label>
+      <input type="text" name="name" value="{{ form.name }}" required autofocus placeholder="e.g. GARDEN CAFE"
+             class="h-10 w-[280px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Type <span class="text-rose-500">*</span></label>
+      <select name="customer_type" aria-label="Customer type"
+              class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        {% for value, label in type_choices %}
+          <option value="{{ value }}" {% if form.customer_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="mt-4 flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Location</label>
+      <input type="text" name="location" value="{{ form.location }}" placeholder="e.g. Estate"
+             class="h-10 w-[260px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Ordered by</label>
+      <input type="text" name="ordered_by" value="{{ form.ordered_by }}" placeholder="contact name"
+             class="h-10 w-[260px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    </div>
+  </div>
+  {% if mode == "edit" %}
+    <label class="mt-4 flex max-w-xl items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
+      <input type="checkbox" name="is_internal" {% if form.is_internal %}checked{% endif %} class="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-700">
+      <span><strong class="font-medium text-slate-800 dark:text-slate-200">Internal use / non-revenue</strong>
+        <span class="text-xs text-slate-500 dark:text-slate-400"> — bakery's own consumption or wastage. Still listed with its own orders + value, but excluded from the Week revenue total.</span>
+      </span>
+    </label>
+  {% endif %}
+  <div class="mt-5 flex items-center gap-4">
+    <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">{% if mode == "edit" %}Save changes{% else %}Create customer{% endif %}</button>
+    <a href="{% if customer %}{% url urls.detail customer.pk %}{% elif default_type == 'wholesale' %}{% url urls.list_wholesale %}{% else %}{% url urls.list_internal %}{% endif %}" class="text-sm font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">cancel</a>
+  </div>
+</form>
+
+<p class="mt-4 text-xs text-slate-500 dark:text-slate-400">
+  {% if mode == "new" %}Hand-created customers are flagged so the order-sheet importer never touches them on subsequent deploys.{% else %}Saving an edit locks every field on this customer against the next import — re-imports won't overwrite your changes.{% endif %}
+</p>
+{% endblock %}
