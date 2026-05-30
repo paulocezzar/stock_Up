@@ -731,6 +731,101 @@ class DeliveryDetailTests(TestCase):
         self.assertIn("No batches on this delivery.", r.content.decode())
 
 
+class GoodsInRebuildTests(TestCase):
+    """Goods In (Deliveries) rebuilt on the design system — list / new / scan
+    / detail — exercised via the temporary /goods-in*-preview routes until
+    cutover. The previews link to each other (and the scan result renders the
+    BP new form) so the whole workflow can be driven on the preview. URL
+    paths stay /deliveries... live; the /goods-in/ rename is the cutover.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Acme Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept, unit="ea", minimum=0)
+        self.sugar = Product.objects.create(
+            name="Sugar", code="SUG1", department=self.dept, unit="ea", minimum=0)
+        SupplierPrice.objects.create(product=self.flour, supplier=self.sup,
+                                     pack_weight=Decimal("1"), pack_price=Decimal("3"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_list_preview_renders_with_new_and_scan_links(self):
+        r = self.client.get("/goods-in-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Goods In", body)
+        # New / scan buttons stay inside the preview.
+        self.assertIn('href="/goods-in/new-preview/"', body)
+        self.assertIn('href="/goods-in/scan-preview/"', body)
+
+    def test_detail_preview_renders_with_batches_and_back_link(self):
+        d = Delivery.objects.create(department=self.dept, supplier=self.sup,
+                                    date=datetime.date(2026, 5, 22), note="docket 99")
+        Batch.objects.create(delivery=d, product=self.sugar, batch_code="B7",
+                             qty_received=Decimal("4"), qty_remaining=Decimal("4"))
+        r = self.client.get(f"/goods-in/{d.pk}/preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Acme Mill", body)
+        self.assertIn("docket 99", body)
+        self.assertIn("B7", body)
+        self.assertIn("no price", body)                 # sugar has no price for this supplier
+        self.assertIn('href="/goods-in-preview/"', body)  # back link to preview list
+
+    def test_new_preview_renders_form_posting_to_preview(self):
+        r = self.client.get("/goods-in/new-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('action="/goods-in/new-preview/"', body)
+        self.assertIn('id="product-options"', body)     # the JS template block
+
+    def test_new_preview_post_creates_delivery_and_redirects_to_preview_list(self):
+        r = self.client.post("/goods-in/new-preview/", {
+            "supplier": str(self.sup.pk), "date": "2026-05-22",
+            "product": str(self.flour.pk), "batch_code": "A1",
+            "use_by": "", "qty": "5"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], "/goods-in-preview/")
+        d = Delivery.objects.get()
+        self.assertEqual(d.batches.count(), 1)
+
+    def test_scan_preview_get_renders_upload_form(self):
+        r = self.client.get("/goods-in/scan-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Scan delivery note", body)
+        self.assertIn('name="file"', body)
+        self.assertIn('href="/goods-in/new-preview/"', body)  # "enter manually" stays in preview
+
+    @patch("stock.views.extract_lines")
+    def test_scan_preview_post_prefills_bp_new_form(self, mock_extract):
+        mock_extract.return_value = [
+            {"description": "Strong White Flour 25kg", "qty": 4.0},
+            {"description": "Mystery Item XYZ", "qty": 1.0},
+        ]
+        f = SimpleUploadedFile("note.jpg", b"\xff\xd8jpgbytes", content_type="image/jpeg")
+        r = self.client.post("/goods-in/scan-preview/",
+                             {"supplier": str(self.sup.pk), "file": f})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Lands on the BP new form, supplier preselected, posting to the preview.
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn(f'<option value="{self.sup.pk}" selected>Acme Mill</option>', body)
+        self.assertIn('action="/goods-in/new-preview/"', body)
+        self.assertIn("Mystery Item XYZ", body)   # raw hint shown
+        self.assertIn('value="4.0"', body)
+
+
 class StocktakeCSVTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")

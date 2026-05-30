@@ -1,0 +1,128 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Goods In — new delivery form. Rebuilt on the shared Business Performance
+design system. Same context + behaviour as delivery_new.html (and the
+target of the scan flow, pre-filled): header (supplier / date / note), a
+"show all ingredients" toggle, and a dynamic lines table whose product
+selects are filtered by the chosen supplier. The two <template> blocks and
+the vanilla JS (refillProductSelects / addRow) are ported verbatim — the
+element IDs they rely on are unchanged. The form posts to {% url urls.new %}.
+{% endcomment %}
+{% load humanize %}
+{% block title %}New delivery · StockUp{% endblock %}
+
+{% block body %}
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">New delivery</h1>
+  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Log a goods-in delivery and its batches</p>
+</div>
+
+<form method="post" action="{% url urls.new %}">
+  {% csrf_token %}
+  <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">Header</h3>
+    <div class="flex flex-wrap items-end gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Supplier <span class="text-rose-500">*</span></label>
+        <select name="supplier" id="supplier-select" required
+                class="h-10 w-[220px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          <option value="">— pick supplier —</option>
+          {% for s in suppliers %}<option value="{{ s.pk }}"{% if prefilled_supplier_id and s.pk == prefilled_supplier_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Date</label>
+        <input type="date" name="date" value="{{ today }}"
+               class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      </div>
+      <div class="flex min-w-[200px] flex-1 flex-col gap-1.5">
+        <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Note <span class="text-slate-400">(optional)</span></label>
+        <input type="text" name="note" placeholder="docket #, driver, anything"
+               class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      </div>
+    </div>
+    <label class="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+      <input type="checkbox" id="show-all-ingredients"{% if default_show_all %} checked{% endif %} class="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-700">
+      show all ingredients (not just what this supplier stocks)
+    </label>
+  </div>
+
+  <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">Lines</h3>
+    <div class="overflow-x-auto">
+      <table id="delivery-lines" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <th class="py-2.5 pr-2" style="width:38%">Ingredient</th>
+            <th class="py-2.5 px-2">Batch code</th>
+            <th class="py-2.5 px-2">Use-by</th>
+            <th class="py-2.5 px-2 text-right">Packs received</th>
+            <th class="py-2.5 pl-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+            <tr class="border-b border-slate-100 last:border-0 dark:border-slate-800">
+              <td class="py-2 pr-2 align-top">
+                <select name="product"{% if line.product_id %} data-prefill="{{ line.product_id }}"{% endif %}
+                        class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"><option value="">—</option></select>
+                {% if line.hint %}<div class="mt-1 text-xs text-slate-400 dark:text-slate-500">from note: “{{ line.hint }}”</div>{% endif %}
+              </td>
+              <td class="py-2 px-2 align-top"><input type="text" name="batch_code" placeholder="optional" class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+              <td class="py-2 px-2 align-top"><input type="date" name="use_by" class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+              <td class="py-2 px-2 align-top text-right"><input type="number" step="any" inputmode="decimal" name="qty" placeholder="0" value="{{ line.qty|default_if_none:'' }}" class="h-9 w-24 rounded-lg border border-slate-200 bg-white px-2.5 text-right text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+              <td class="py-2 pl-2 align-top"><button type="button" onclick="this.closest('tr').remove()" class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-rose-500/40 dark:hover:text-rose-300">×</button></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-3">
+      <button type="button" onclick="addRow()" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">+ add row</button>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Log delivery</button>
+    <a href="{% url urls.list %}" class="text-sm font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">cancel</a>
+  </div>
+</form>
+
+<template id="product-options">{% for p in products %}<option value="{{ p.pk }}" data-suppliers="{{ p.supplier_ids|join:',' }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>{% endfor %}</template>
+
+<template id="row-template">
+<tr class="border-b border-slate-100 last:border-0 dark:border-slate-800">
+  <td class="py-2 pr-2 align-top"><select name="product" class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"><option value="">—</option></select></td>
+  <td class="py-2 px-2 align-top"><input type="text" name="batch_code" placeholder="optional" class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+  <td class="py-2 px-2 align-top"><input type="date" name="use_by" class="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+  <td class="py-2 px-2 align-top text-right"><input type="number" step="any" inputmode="decimal" name="qty" placeholder="0" class="h-9 w-24 rounded-lg border border-slate-200 bg-white px-2.5 text-right text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"></td>
+  <td class="py-2 pl-2 align-top"><button type="button" onclick="this.closest('tr').remove()" class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-rose-500/40 dark:hover:text-rose-300">×</button></td>
+</tr>
+</template>
+
+<script>
+function refillProductSelects(){
+  var sid = document.getElementById("supplier-select").value;
+  var all = document.getElementById("show-all-ingredients").checked;
+  var tpl = document.getElementById("product-options").content;
+  document.querySelectorAll('select[name="product"]').forEach(function(sel){
+    var keep = sel.value || sel.dataset.prefill || "";
+    sel.innerHTML = '<option value="">—</option>';
+    Array.prototype.forEach.call(tpl.querySelectorAll("option"), function(o){
+      var suppliers = (o.dataset.suppliers || "").split(",").filter(Boolean);
+      var match = !sid || all || suppliers.indexOf(sid) >= 0;
+      if(match){ sel.appendChild(o.cloneNode(true)); }
+    });
+    if(keep){ sel.value = keep; }
+  });
+}
+function addRow(){
+  var tpl = document.getElementById("row-template");
+  document.querySelector("#delivery-lines tbody").appendChild(tpl.content.cloneNode(true));
+  refillProductSelects();
+}
+document.getElementById("supplier-select").addEventListener("change", refillProductSelects);
+document.getElementById("show-all-ingredients").addEventListener("change", refillProductSelects);
+refillProductSelects();
+</script>
+{% endblock %}

@@ -46,6 +46,13 @@ urlpatterns = [
     path("deliveries/new/", views.delivery_new, name="delivery_new"),
     path("deliveries/scan/", views.delivery_scan, name="delivery_scan"),
     path("deliveries/<int:pk>/", views.delivery_detail, name="delivery_detail"),
+    # TEMP: Wave B design-system previews (Goods In: list / new / scan /
+    # detail). Remove all four on cutover. URL paths stay /deliveries... for
+    # now; the /goods-in/ rename happens at cutover.
+    path("goods-in-preview/", views.deliveries_preview, name="deliveries_preview"),
+    path("goods-in/new-preview/", views.delivery_new_preview, name="delivery_new_preview"),
+    path("goods-in/scan-preview/", views.delivery_scan_preview, name="delivery_scan_preview"),
+    path("goods-in/<int:pk>/preview/", views.delivery_detail_preview, name="delivery_detail_preview"),
     path("adjustments/", views.adjustments, name="adjustments"),
     path("customers/", views.customers_internal, name="customers"),
     path("customers/wholesale/", views.customers_wholesale, name="customers_wholesale"),
