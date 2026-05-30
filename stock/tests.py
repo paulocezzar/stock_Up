@@ -1014,11 +1014,11 @@ class PriceHistoryTests(TestCase):
 class StockRebuildTests(TestCase):
     """The Stock landing rebuilt on the design system: inventory KPIs +
     holdings table (on-hand from latest count, value at cheapest price) +
-    workflow links + batch-expiry badges. Exercised via the temporary
-    /stock-preview/ route until cutover (retarget the URL to /stock/ then).
+    workflow links + batch-expiry badges. /stock/ now serves this rebuilt
+    page (the old section_stock.html placeholder is retired).
     """
 
-    PREVIEW_URL = "/stock-preview/"
+    PREVIEW_URL = "/stock/"
 
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
@@ -1044,7 +1044,10 @@ class StockRebuildTests(TestCase):
     def test_preview_renders_on_design_system_shell(self):
         r = self.client.get(self.PREVIEW_URL)
         self.assertEqual(r.status_code, 200)
-        self.assertIn('<main class="ml-64 min-w-0">', r.content.decode())
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        # Holdings table is present by id.
+        self.assertIn('id="holdings-tbl"', body)
 
     def test_preview_shows_the_four_inventory_kpis(self):
         body = self.client.get(self.PREVIEW_URL).content.decode()
@@ -1261,16 +1264,18 @@ class SectionNavigationTests(TestCase):
         self.assertEqual(first["count"], 1)
         self.assertEqual(first["url"], "/reorder/")
 
-    def test_stock_section_landing_renders_with_stock_submenu(self):
-        # /stock/ is a Stock section page — its navbar carries the Stock
-        # sub-menu (Dashboard / Stocktakes / Deliveries / ...). Body is minimal.
+    def test_stock_section_landing_renders_on_design_system(self):
+        # /stock/ is now the rebuilt inventory page on the BP shell (the old
+        # placeholder + section sub-nav are retired). It links out to the
+        # stock workflows — those hrefs aren't in the BP rail, so finding
+        # them confirms the page's own workflow buttons rendered.
         r = self.client.get("/stock/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        for url in ("/", "/stocktakes/", "/deliveries/", "/adjustments/",
-                    "/reorder/", "/products/", "/suppliers/"):
-            self.assertIn(f'href="{url}"', nav)
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        for href in ('href="/stocktakes/"', 'href="/adjustments/"',
+                     'href="/reorder/"', 'href="/suppliers/"'):
+            self.assertIn(f'{href}', body)
 
     def test_profile_shows_username_departments_and_logout(self):
         r = self.client.get("/profile/")

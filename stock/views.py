@@ -308,8 +308,27 @@ def home(request):
 
 @login_required
 def stock_home(request):
-    """Stock section landing — links to the existing stock sub-pages."""
-    return render(request, "stock/section_stock.html", {})
+    """Stock landing — the inventory page on the shared design system:
+    KPI tiles + holdings table + workflow links + recent activity. on-hand
+    uses the latest counted value (see _stock_overview)."""
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    rows, kpis = _stock_overview(dept)
+    return render(request, "stock/stock_bp.html", {
+        "rows": rows,
+        "kpis": kpis,
+        "recent": _stock_recent_activity(dept),
+        "expiring_window": STOCK_EXPIRING_WINDOW_DAYS,
+        "workflow_links": [
+            ("Stocktakes", "/stocktakes/"), ("Adjustments", "/adjustments/"),
+            ("Reorder", "/reorder/"), ("Suppliers", "/suppliers/"),
+        ],
+        "status_filters": [
+            ("all", "All"), ("below-min", "Below min"),
+            ("expiring", "Expiring"), ("no-expiry", "No expiry data"),
+        ],
+    })
 
 
 # Expiry: batches whose use_by lands within this many days are "expiring".
@@ -393,32 +412,6 @@ def _stock_recent_activity(dept, limit=5):
                       "href": f"/deliveries/{d.pk}/"})
     items.sort(key=lambda x: x["date"], reverse=True)
     return items[:limit]
-
-
-@login_required
-def stock_preview(request):
-    """TEMPORARY live preview of the Stock landing rebuilt on the shared
-    design system (inventory KPIs + holdings table + workflow links +
-    recent activity). Remove this view + its URL on cutover to stock_bp.html.
-    """
-    dept = current_department(request)
-    if dept is None:
-        return render(request, "stock/no_department.html")
-    rows, kpis = _stock_overview(dept)
-    return render(request, "stock/stock_bp.html", {
-        "rows": rows,
-        "kpis": kpis,
-        "recent": _stock_recent_activity(dept),
-        "expiring_window": STOCK_EXPIRING_WINDOW_DAYS,
-        "workflow_links": [
-            ("Stocktakes", "/stocktakes/"), ("Adjustments", "/adjustments/"),
-            ("Reorder", "/reorder/"), ("Suppliers", "/suppliers/"),
-        ],
-        "status_filters": [
-            ("all", "All"), ("below-min", "Below min"),
-            ("expiring", "Expiring"), ("no-expiry", "No expiry data"),
-        ],
-    })
 
 
 # ---- recipes (per department) ----

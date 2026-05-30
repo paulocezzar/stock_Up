@@ -15,8 +15,6 @@ urlpatterns = [
     path("", RedirectView.as_view(pattern_name="home", permanent=False), name="dashboard"),
     path("home/", views.home, name="home"),
     path("stock/", views.stock_home, name="stock_home"),
-    # TEMP: live preview of the design-system Stock rebuild. Remove on cutover.
-    path("stock-preview/", views.stock_preview, name="stock_preview"),
     path("recipes/", views.recipes_home, name="recipes"),
     path("recipes/upload/", views.recipe_upload, name="recipe_upload"),
     path("recipes/upload/preview/", views.recipe_upload_preview, name="recipe_upload_preview"),
