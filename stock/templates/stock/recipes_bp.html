@@ -1,20 +1,19 @@
 {% extends "design_system/base.html" %}
 {% comment %}
-Recipes list rebuilt on the shared Business Performance design system (2a).
-The by-product tree, its ~200 lines of vanilla JS, the flat/archived bulk
-tables and every test hook (#tree-root, .tree-cb, tree-recipe-meta,
-#tree-bulk-form + formaction overrides, #recipes-tbl, .bulk-cb, #bulk-form,
-data-filter, data-search, class="on" tabs, the Sold column/toggle) are
-preserved verbatim from recipes.html. Only the page chrome is restyled: the
-old-shell CSS tokens (var(--amber) etc.) are rehomed onto a `.rds` wrapper
-with BP light/dark values, and a small compat block styles the old component
-classes (.card/.btn/.tag/.muted/.num/.filter) the BP shell doesn't define.
-Tab + recipe links route through list_url/detail_url so the preview is
-self-contained. 2b wiring: the soft/reversible actions (per-row + bulk
-archive/restore) go through the shared BP confirm_dialog.html (included once
-below); the hard bulk-delete keeps its high-friction typed-code page. All
-bulk/archive/restore/delete targets point at the /recipes-ds-preview/ routes
-so the whole flow stays inside the preview.
+Recipes list on the shared Business Performance design system (the live
+/recipes/ template since cutover). The by-product tree, its ~200 lines of
+vanilla JS, the flat/archived bulk tables and every test hook (#tree-root,
+.tree-cb, tree-recipe-meta, #tree-bulk-form + formaction overrides,
+#recipes-tbl, .bulk-cb, #bulk-form, data-filter, data-search, class="on" tabs,
+the Sold column/toggle) are preserved verbatim from the old recipes.html. Only
+the page chrome is restyled: the old-shell CSS tokens (var(--amber) etc.) are
+rehomed onto a `.rds` wrapper with BP light/dark values, and a small compat
+block styles the old component classes (.card/.btn/.tag/.muted/.num/.filter)
+the BP shell doesn't define. Tab + recipe links route through
+list_url/detail_url (defaulting to the real recipes/recipe_detail routes).
+Soft/reversible actions (per-row + bulk archive/restore) go through the shared
+BP confirm_dialog.html (included once below); the hard bulk-delete keeps its
+high-friction typed-code page.
 {% endcomment %}
 {% block title %}Recipes · StockUp{% endblock %}
 
@@ -99,7 +98,7 @@ so the whole flow stays inside the preview.
     <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Recipes</h1>
     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{% if view_mode == 'archived' %}{{ n_recipes }} archived{% else %}{{ n_recipes }} active in this department{% endif %} · by-product tree, full list, and archive</p>
   </div>
-  <a href="{% url 'recipe_upload_ds_preview' %}" class="inline-flex h-9 shrink-0 items-center rounded-lg bg-amber-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700">Import</a>
+  <a href="{% url 'recipe_upload' %}" class="inline-flex h-9 shrink-0 items-center rounded-lg bg-amber-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700">Import</a>
 </div>
 
 <div class="rds">
@@ -116,7 +115,7 @@ so the whole flow stays inside the preview.
   The form action defaults to bulk-archive; the Delete button overrides it
   via the HTML5 formaction attribute.
   {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_archive_ds_preview' %}" id="tree-bulk-form" style="display:none">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="tree-bulk-form" style="display:none">{% csrf_token %}</form>
   <div class="tree-actions">
     <button type="button" class="btn ghost" id="tree-select-all" style="padding:4px 12px">Select all products</button>
     <button type="button" class="btn ghost" id="tree-clear" style="padding:4px 12px">Clear</button>
@@ -129,7 +128,7 @@ so the whole flow stays inside the preview.
             data-confirm-msg="Archive the selected recipe(s)? They'll be hidden from the main lists but kept and restorable from the Archived tab."
             class="btn" style="padding:4px 14px">Archive selected</button>
     <button type="submit" form="tree-bulk-form" id="tree-delete-btn" disabled
-            formaction="{% url 'recipe_bulk_delete_ds_preview' %}"
+            formaction="{% url 'recipe_bulk_delete' %}"
             class="btn danger" style="padding:4px 14px">Delete selected</button>
   </div>
   <div class="tree-warnings" id="tree-warnings" hidden></div>
@@ -323,7 +322,7 @@ so the whole flow stays inside the preview.
     <span class="count-out"></span>
   </div>
   {% comment %} Bulk-restore form lives OUTSIDE the table; checkboxes attach via form= {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_restore_ds_preview' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_restore' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
       <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all archived recipes"></th>
@@ -419,7 +418,7 @@ so the whole flow stays inside the preview.
   per-row Sold-toggle / archive forms. Checkboxes and the submit button
   attach via the HTML5 form="bulk-form" attribute.
   {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_archive_ds_preview' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
       <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all recipes"></th>

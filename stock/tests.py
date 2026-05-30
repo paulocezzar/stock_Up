@@ -2665,15 +2665,14 @@ class RecipeSaveCycleProtectionTests(TestCase):
             save_recipes(parsed, dept)
 
 
-class RecipesDsPreviewTests(TestCase):
-    """Recipes list + detail rebuilt on the design system (2a), exercised via
-    the temporary /recipes-ds-preview* routes. Confirms the BP shell renders
-    and the test-coupled hooks are preserved (tree #tree-root /
-    tree-recipe-meta / .tree-cb / #tree-bulk-form formaction overrides;
-    #recipes-tbl / .bulk-cb / #bulk-form / data-filter; class="on" tabs; the
-    Sold column; the nested detail node). Real /recipes/... stays old-shell.
-    Tree JS is ported verbatim — not re-asserted here (DOM behaviour), but
-    its hooks are.
+class RecipesBpListDetailTests(TestCase):
+    """Recipes list + detail on the Business Performance design system (the
+    live /recipes/ routes since cutover). Confirms the BP shell renders and the
+    test-coupled hooks are preserved (tree #tree-root / tree-recipe-meta /
+    .tree-cb / #tree-bulk-form formaction overrides; #recipes-tbl / .bulk-cb /
+    #bulk-form / data-filter; class="on" tabs; the Sold column; the nested
+    detail node). Tree JS is ported verbatim — not re-asserted here (DOM
+    behaviour), but its hooks are.
     """
 
     def setUp(self):
@@ -2699,7 +2698,7 @@ class RecipesDsPreviewTests(TestCase):
             code="NPD-R900", name="Old Bun", department=self.dept, archived=True)
 
     def test_by_product_preview_renders_tree_with_hooks(self):
-        r = self.client.get("/recipes-ds-preview/")
+        r = self.client.get("/recipes/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -2708,14 +2707,14 @@ class RecipesDsPreviewTests(TestCase):
         self.assertIn('id="tree-recipe-meta"', body)
         self.assertIn('class="tree-cb"', body)
         self.assertIn('id="tree-bulk-form"', body)
-        self.assertIn('formaction="/recipes-ds-preview/bulk-delete/"', body)
+        self.assertIn('formaction="/recipes/bulk-delete/"', body)
         # Tabs use class="on" active markup; recipe links self-link to preview.
-        self.assertRegex(body, r'href="/recipes-ds-preview/"[^>]*class="on"')
-        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/"', body)
+        self.assertRegex(body, r'href="/recipes/"[^>]*class="on"')
+        self.assertIn(f'href="/recipes/{self.loaf.pk}/"', body)
         self.assertIn("NPD-R800", body)
 
     def test_flat_preview_renders_table_with_sold_column(self):
-        body = self.client.get("/recipes-ds-preview/?view=flat").content.decode()
+        body = self.client.get("/recipes/?view=flat").content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn('id="recipes-tbl"', body)
         self.assertIn('data-filter="recipes-tbl"', body)
@@ -2727,30 +2726,30 @@ class RecipesDsPreviewTests(TestCase):
         self.assertRegex(body, r'\?view=flat"[^>]*class="on"')
 
     def test_archived_preview_renders(self):
-        body = self.client.get("/recipes-ds-preview/?view=archived").content.decode()
+        body = self.client.get("/recipes/?view=archived").content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("NPD-R900", body)
         self.assertIn('id="recipes-tbl"', body)
 
     def test_detail_preview_renders_nested_node(self):
-        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/")
+        r = self.client.get(f"/recipes/{self.loaf.pk}/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("NPD-R800", body)
         self.assertIn("recipe-block", body)         # nested breakdown node
         # Sub-recipe link self-links into the preview.
-        self.assertIn(f'href="/recipes-ds-preview/{self.dough.pk}/"', body)
+        self.assertIn(f'href="/recipes/{self.dough.pk}/"', body)
         # Structure tab active; flat tab links within the preview.
         self.assertRegex(body, r'\?view=flat"')
 
 
-class RecipesDs2bPreviewTests(TestCase):
-    """Recipes 2b — edit / upload / confirm flows rebuilt on the design system,
-    exercised via the /recipes-ds-preview/* routes. Verifies the BP templates
+class RecipesBpFlowsTests(TestCase):
+    """Recipes edit / upload / confirm flows on the Business Performance design
+    system (the live /recipes/ routes since cutover). Verifies the BP templates
     render, the soft (archive/restore) actions are wired to the shared confirm
     dialog, the hard-delete pages keep their typed-code guard, and that every
-    flow actually commits against the preview routes (not just renders).
+    flow actually commits against the real routes (not just renders).
     """
 
     def setUp(self):
@@ -2775,7 +2774,7 @@ class RecipesDs2bPreviewTests(TestCase):
 
     # --- edit -------------------------------------------------------------
     def test_edit_preview_renders_bp_form_with_fields_and_lock_note(self):
-        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/edit/")
+        r = self.client.get(f"/recipes/{self.loaf.pk}/edit/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -2787,15 +2786,15 @@ class RecipesDs2bPreviewTests(TestCase):
         # The import-lock helper note is preserved.
         self.assertIn("locks these fields against the next bulk re-import", body)
         # Cancel returns to the detail preview.
-        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/"', body)
+        self.assertIn(f'href="/recipes/{self.loaf.pk}/"', body)
 
     def test_edit_preview_saves_and_sets_manual_flags(self):
-        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/edit/", {
+        r = self.client.post(f"/recipes/{self.loaf.pk}/edit/", {
             "name": "Renamed Loaf", "finished_weight_g": "650",
             "deposit_weight_g": "", "cook_loss_pct": "12.5",
             "sold_as_product": "on"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], f"/recipes-ds-preview/{self.loaf.pk}/")
+        self.assertEqual(r.headers["Location"], f"/recipes/{self.loaf.pk}/")
         self.loaf.refresh_from_db()
         self.assertEqual(self.loaf.name, "Renamed Loaf")
         self.assertEqual(self.loaf.finished_weight_g, Decimal("650"))
@@ -2804,13 +2803,13 @@ class RecipesDs2bPreviewTests(TestCase):
 
     # --- upload (two-step, real parse→preview→commit via preview routes) ---
     def test_upload_step1_renders_bp(self):
-        r = self.client.get("/recipes-ds-preview/upload/")
+        r = self.client.get("/recipes/upload/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn('name="file"', body)
         self.assertIn('enctype="multipart/form-data"', body)
-        self.assertIn('href="/recipes-ds-preview/"', body)  # cancel
+        self.assertIn('href="/recipes/"', body)  # cancel
 
     def test_upload_chain_commits_via_preview_routes(self):
         for code, name in (("NPD-I10758", "Bread Flour"), ("NPD-I10756", "Water")):
@@ -2820,12 +2819,12 @@ class RecipesDs2bPreviewTests(TestCase):
             upload = SimpleUploadedFile(
                 "recipe_sample.xlsx", f.read(),
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        r = self.client.post("/recipes-ds-preview/upload/", {"file": upload})
+        r = self.client.post("/recipes/upload/", {"file": upload})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/upload/preview/")
+        self.assertEqual(r.headers["Location"], "/recipes/upload/preview/")
         # Nothing committed yet; sample-only recipe absent.
         self.assertFalse(Recipe.objects.filter(code="NPD-R364").exists())
-        r = self.client.get("/recipes-ds-preview/upload/preview/")
+        r = self.client.get("/recipes/upload/preview/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -2836,7 +2835,7 @@ class RecipesDs2bPreviewTests(TestCase):
         self.assertIn('<div class="k">Recipes parsed</div><div class="v">7</div>', body)
         self.assertNotIn('<div class="k">Recipes parsed</div><div class="v">0</div>', body)
         # Commit — single-sheet sample lands on the main recipe detail preview.
-        r = self.client.post("/recipes-ds-preview/upload/preview/", {})
+        r = self.client.post("/recipes/upload/preview/", {})
         self.assertEqual(r.status_code, 302)
         # All 7 parsed codes are committed (commit iterates the list, not the count).
         sample_codes = ["NPD-R800", "NPD-R364", "NPD-R2031", "NPD-R2082",
@@ -2845,11 +2844,11 @@ class RecipesDs2bPreviewTests(TestCase):
             self.assertTrue(Recipe.objects.filter(code=code).exists(),
                             f"{code} should have been committed")
         main = Recipe.objects.get(code="NPD-R800")
-        self.assertEqual(r.headers["Location"], f"/recipes-ds-preview/{main.pk}/")
+        self.assertEqual(r.headers["Location"], f"/recipes/{main.pk}/")
 
     # --- hard delete (single) keeps the typed-code guard -------------------
     def test_delete_confirm_preview_renders_guard_and_commits(self):
-        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/delete/")
+        r = self.client.get(f"/recipes/{self.loaf.pk}/delete/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -2857,63 +2856,63 @@ class RecipesDs2bPreviewTests(TestCase):
         self.assertIn('id="hard-delete-code"', body)
         self.assertIn("disabled", body)  # button starts disabled
         # Commit with the acknowledge + typed code.
-        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/delete/",
+        r = self.client.post(f"/recipes/{self.loaf.pk}/delete/",
                              {"acknowledge": "on", "confirm_code": "NPD-R800"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/")
+        self.assertEqual(r.headers["Location"], "/recipes/")
         self.assertFalse(Recipe.objects.filter(code="NPD-R800").exists())
         self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R800").exists())
 
     def test_delete_confirm_preview_blocks_without_typed_code(self):
-        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/delete/",
+        r = self.client.post(f"/recipes/{self.loaf.pk}/delete/",
                              {"acknowledge": "on", "confirm_code": "WRONG"})
         self.assertEqual(r.status_code, 200)  # re-renders with error
         self.assertTrue(Recipe.objects.filter(code="NPD-R800").exists())
 
     # --- hard delete (bulk) keeps the typed-code page ----------------------
     def test_bulk_delete_preview_typed_code_page_then_commit(self):
-        r = self.client.post("/recipes-ds-preview/bulk-delete/",
+        r = self.client.post("/recipes/bulk-delete/",
                              {"recipe_ids": [self.dough.pk]})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn('id="bulk-hard-delete-ack"', body)
         self.assertIn("Type", body)
-        self.assertIn('action="/recipes-ds-preview/bulk-delete/"', body)
+        self.assertIn('action="/recipes/bulk-delete/"', body)
         # Loaf references dough → surfaced as an external parent.
         self.assertIn("NPD-R800", body)
-        r = self.client.post("/recipes-ds-preview/bulk-delete/", {
+        r = self.client.post("/recipes/bulk-delete/", {
             "recipe_ids": [self.dough.pk], "confirm": "1",
             "acknowledge": "on", "confirm_phrase": "DELETE"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.assertEqual(r.headers["Location"], "/recipes/?view=flat")
         self.assertFalse(Recipe.objects.filter(code="NPD-R100").exists())
         self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R100").exists())
 
     # --- soft archive / restore (dialog, confirm=1 / single-step) ----------
     def test_bulk_archive_preview_commits_with_confirm(self):
-        r = self.client.post("/recipes-ds-preview/bulk-archive/", {
+        r = self.client.post("/recipes/bulk-archive/", {
             "recipe_ids": [self.loaf.pk], "confirm": "1"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.assertEqual(r.headers["Location"], "/recipes/?view=flat")
         self.loaf.refresh_from_db()
         self.assertTrue(self.loaf.archived)
 
     def test_bulk_restore_preview_commits(self):
         self.loaf.archived = True
         self.loaf.save(update_fields=["archived"])
-        r = self.client.post("/recipes-ds-preview/bulk-restore/",
+        r = self.client.post("/recipes/bulk-restore/",
                              {"recipe_ids": [self.loaf.pk]})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.assertEqual(r.headers["Location"], "/recipes/?view=flat")
         self.loaf.refresh_from_db()
         self.assertFalse(self.loaf.archived)
 
     # --- dialog wiring on list + detail ------------------------------------
     def test_flat_list_wires_archive_to_dialog(self):
-        body = self.client.get("/recipes-ds-preview/?view=flat").content.decode()
+        body = self.client.get("/recipes/?view=flat").content.decode()
         self.assertIn('data-testid="confirm-dialog"', body)
-        self.assertIn('action="/recipes-ds-preview/bulk-archive/"', body)
+        self.assertIn('action="/recipes/bulk-archive/"', body)
         # The per-row + bulk archive triggers use the dialog as a reversible
         # (primary) action, not a delete.
         self.assertIn("data-confirm-delete", body)
@@ -2922,12 +2921,12 @@ class RecipesDs2bPreviewTests(TestCase):
 
     def test_detail_wires_archive_and_links_to_preview_edit_delete(self):
         body = self.client.get(
-            f"/recipes-ds-preview/{self.loaf.pk}/").content.decode()
+            f"/recipes/{self.loaf.pk}/").content.decode()
         self.assertIn('data-testid="confirm-dialog"', body)
         self.assertIn("data-confirm-delete", body)
         self.assertIn('data-confirm-variant="primary"', body)
-        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/edit/"', body)
-        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/delete/"', body)
+        self.assertIn(f'href="/recipes/{self.loaf.pk}/edit/"', body)
+        self.assertIn(f'href="/recipes/{self.loaf.pk}/delete/"', body)
 
 
 class RecipesSectionViewTests(TestCase):
@@ -2954,10 +2953,12 @@ class RecipesSectionViewTests(TestCase):
     def test_list_navbar_has_home_recipes_import(self):
         r = self.client.get("/recipes/")
         body = r.content.decode()
-        nav = body[body.index("<nav>"):body.index("</nav>")]
-        self.assertIn(">Home<", nav)
-        self.assertIn(">Recipes<", nav)
-        self.assertIn(">Import<", nav)
+        # BP shell: the sidebar links Home (logo) + Recipes, and the Import CTA
+        # is a header button. (Pre-cutover this was a per-section <nav> holding
+        # Home / Recipes / Import tabs.)
+        self.assertIn('href="/home/"', body)
+        self.assertIn(">Recipes<", body)
+        self.assertIn(">Import<", body)
 
     def test_list_page_shows_imported_recipes(self):
         Recipe.objects.create(
@@ -3337,8 +3338,11 @@ class RecipeDetailLayoutTests(TestCase):
         # `open` attribute — so the user clicks to expand.
         self.assertIn('<details class="rec-sub">', body)
         self.assertNotIn('<details class="rec-sub" open', body)
-        # The "expand" affordance is shown
-        self.assertIn("expand", body)
+        # The expand affordance (the chevron on the collapsed sub-recipe row)
+        # is shown. (Pre-cutover this asserted the literal word "expand", which
+        # only appeared in the old shell's inline CSS comment; the BP markup
+        # carries the affordance as the .rec-chev chevron.)
+        self.assertIn("rec-chev", body)
         # And nothing on the page auto-opens the sub-recipe
         # (the depth-0 recipe-block isn't wrapped in <details> at all)
 
@@ -3373,7 +3377,7 @@ class RecipeDetailLayoutTests(TestCase):
         Recipe.recompute_all_sold_defaults()
         r = self.client.get(f"/recipes/{self.main.pk}/")
         body = r.content.decode()
-        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        header = body[body.index("<h2"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Sold product", header)
         self.assertNotIn("Component", header)
         self.assertNotIn("Used in:", body)
@@ -3386,7 +3390,7 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertFalse(self.sub.sold_as_product)
         r = self.client.get(f"/recipes/{self.sub.pk}/")
         body = r.content.decode()
-        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        header = body[body.index("<h2"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Component", header)
         self.assertNotIn("Sold product", header)
         self.assertIn("Used in:", body)
@@ -3402,7 +3406,7 @@ class RecipeDetailLayoutTests(TestCase):
         self.sub.save(update_fields=["sold_as_product", "is_sold_manual"])
         r = self.client.get(f"/recipes/{self.sub.pk}/")
         body = r.content.decode()
-        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        header = body[body.index("<h2"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Sold product", header)
         self.assertIn("Component", header)
         self.assertIn("Used in:", body)
@@ -3432,7 +3436,7 @@ class RecipeDetailLayoutTests(TestCase):
         self.assertTrue(list(self.sub.parents()))
         r = self.client.get(f"/recipes/{self.sub.pk}/")
         body = r.content.decode()
-        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        header = body[body.index("<h2"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Component", header)
         self.assertNotIn("Sold product", header)
 
@@ -3444,7 +3448,7 @@ class RecipeDetailLayoutTests(TestCase):
         self.main.save(update_fields=["sold_as_product", "is_sold_manual"])
         r = self.client.get(f"/recipes/{self.main.pk}/")
         body = r.content.decode()
-        header = body[body.index("<h2>"):body.index("</h2>") + len("</h2>")]
+        header = body[body.index("<h2"):body.index("</h2>") + len("</h2>")]
         self.assertIn("Sold product", header)
         self.assertNotIn("Component", header)
 
@@ -3911,6 +3915,11 @@ class RecipesByProductTreeTests(TestCase):
         # the sub-recipe codes.
         r = self.client.get("/recipes/")
         body = r.content.decode()
+        # Scope to the tree container: the page-level tree-recipe-meta <script>
+        # legitimately serialises {pk: {code, name}} for every recipe (the tree
+        # JS reads it), which sits after the tree and would otherwise show every
+        # code "outside" the details walk. Walk only the #tree-root region.
+        body = body[body.index('id="tree-root"'):body.index('id="tree-recipe-meta"')]
         out = []
         depth = 0
         i = 0
@@ -6236,7 +6245,10 @@ class RecipeDeleteEditTests(TestCase):
         self.assertIn('id="tree-bulk-form"', body)
         self.assertIn("Archive selected", body)
         self.assertIn("Delete selected", body)
-        self.assertIn('formaction="/recipes/bulk-archive/"', body)
+        # Archive is a reversible action → confirm dialog submitting the
+        # tree-bulk-form (action=bulk-archive); delete keeps its high-friction
+        # typed-code page, reached via the button's formaction override.
+        self.assertIn('action="/recipes/bulk-archive/"', body)
         self.assertIn('formaction="/recipes/bulk-delete/"', body)
         # Each active recipe in the tree is rendered with a tree-cb
         # checkbox carrying its data attributes.
@@ -8095,11 +8107,11 @@ class OrdersTests(TestCase):
 
     def test_other_pages_do_not_opt_into_wide_layout(self):
         # The wide layout is scoped to the orders weekly view ONLY —
-        # other still-old-shell pages (New order form, Recipes) keep the
-        # default centred 1100px container. Assert their <main> carries an
-        # empty class attribute (no `wide`). Products and Home have since
-        # moved to the design-system shell, covered by their own tests.
-        for path in ("/orders/new/", "/recipes/"):
+        # other still-old-shell pages (the New order form) keep the default
+        # centred 1100px container. Assert their <main> carries an empty class
+        # attribute (no `wide`). Products, Home and Recipes have since moved to
+        # the design-system shell, covered by their own tests.
+        for path in ("/orders/new/",):
             body = self.client.get(path).content.decode()
             self.assertIn('<main class="">', body,
                           f"{path} should not opt into the wide layout")

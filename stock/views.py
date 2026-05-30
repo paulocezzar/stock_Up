@@ -524,7 +524,7 @@ def _by_product_forest(recipes):
 
 
 @login_required
-def recipes_home(request, template_name="stock/recipes.html",
+def recipes_home(request, template_name="stock/recipes_bp.html",
                  list_url="recipes", detail_url="recipe_detail"):
     """Three sibling views over the same recipe set:
 
@@ -617,16 +617,6 @@ def recipes_home(request, template_name="stock/recipes.html",
     return render(request, template_name, context)
 
 
-@login_required
-def recipes_ds_preview(request):
-    """TEMPORARY design-system preview of the recipes list (2a). Remove on
-    cutover. Distinct route namespace so it never collides with the existing
-    recipe_upload_preview (the import's step-2 commit screen)."""
-    return recipes_home(request, template_name="stock/recipes_bp.html",
-                        list_url="recipes_ds_preview",
-                        detail_url="recipe_detail_ds_preview")
-
-
 @require_POST
 @login_required
 def recipe_set_sold(request, pk):
@@ -652,7 +642,7 @@ def recipe_set_sold(request, pk):
 
 
 @login_required
-def recipe_upload(request, template_name="stock/recipe_upload.html",
+def recipe_upload(request, template_name="stock/recipe_upload_bp.html",
                   preview_url="recipe_upload_preview", cancel_url="recipes",
                   upload_url="recipe_upload"):
     """Step 1 of import: pick a workbook; parse all sheets and stash for preview.
@@ -695,7 +685,7 @@ def recipe_upload(request, template_name="stock/recipe_upload.html",
 
 
 @login_required
-def recipe_upload_preview(request, template_name="stock/recipe_upload_preview.html",
+def recipe_upload_preview(request, template_name="stock/recipe_upload_preview_bp.html",
                           list_url="recipes", detail_url="recipe_detail",
                           upload_url="recipe_upload",
                           self_url="recipe_upload_preview"):
@@ -755,7 +745,7 @@ def recipe_upload_preview(request, template_name="stock/recipe_upload_preview.ht
 
 
 @login_required
-def recipe_detail(request, pk, template_name="stock/recipe_detail.html",
+def recipe_detail(request, pk, template_name="stock/recipe_detail_bp.html",
                   list_url="recipes", detail_url="recipe_detail",
                   edit_url="recipe_edit", delete_url="recipe_delete"):
     dept = current_department(request)
@@ -787,77 +777,7 @@ def recipe_detail(request, pk, template_name="stock/recipe_detail.html",
 
 
 @login_required
-def recipe_detail_ds_preview(request, pk):
-    """TEMPORARY design-system preview of the recipe detail page (2a)."""
-    return recipe_detail(request, pk, template_name="stock/recipe_detail_bp.html",
-                         list_url="recipes_ds_preview",
-                         detail_url="recipe_detail_ds_preview",
-                         edit_url="recipe_edit_ds_preview",
-                         delete_url="recipe_delete_ds_preview")
-
-
-# TEMPORARY design-system previews — Recipes 2b (edit + upload + confirm flows).
-# Each delegates to the real view with BP templates + the preview namespace so
-# the whole flow self-links and lands back on the preview. Remove on cutover.
-@login_required
-def recipe_edit_ds_preview(request, pk):
-    return recipe_edit(request, pk, template_name="stock/recipe_edit_bp.html",
-                       detail_url="recipe_detail_ds_preview")
-
-
-@login_required
-def recipe_upload_ds_preview(request):
-    return recipe_upload(request, template_name="stock/recipe_upload_bp.html",
-                         preview_url="recipe_upload_preview_ds_preview",
-                         cancel_url="recipes_ds_preview",
-                         upload_url="recipe_upload_ds_preview")
-
-
-@login_required
-def recipe_upload_preview_ds_preview(request):
-    return recipe_upload_preview(
-        request, template_name="stock/recipe_upload_preview_bp.html",
-        list_url="recipes_ds_preview", detail_url="recipe_detail_ds_preview",
-        upload_url="recipe_upload_ds_preview",
-        self_url="recipe_upload_preview_ds_preview")
-
-
-@login_required
-def recipe_delete_ds_preview(request, pk):
-    return recipe_delete(request, pk,
-                         template_name="stock/recipe_delete_confirm_bp.html",
-                         list_url="recipes_ds_preview",
-                         detail_url="recipe_detail_ds_preview")
-
-
-@require_POST
-@login_required
-def recipe_bulk_delete_ds_preview(request):
-    return recipe_bulk_delete(
-        request, template_name="stock/recipe_bulk_delete_confirm_bp.html",
-        list_path="/recipes-ds-preview/", detail_url="recipe_detail_ds_preview",
-        self_url="recipe_bulk_delete_ds_preview")
-
-
-@require_POST
-@login_required
-def recipe_bulk_archive_ds_preview(request):
-    # Soft/reversible: the BP list confirms via the dialog and posts confirm=1,
-    # so this commits directly — the server confirm page is bypassed.
-    return recipe_bulk_archive(
-        request, list_path="/recipes-ds-preview/",
-        detail_url="recipe_detail_ds_preview",
-        self_url="recipe_bulk_archive_ds_preview")
-
-
-@require_POST
-@login_required
-def recipe_bulk_restore_ds_preview(request):
-    return recipe_bulk_restore(request, list_path="/recipes-ds-preview/")
-
-
-@login_required
-def recipe_delete(request, pk, template_name="stock/recipe_delete_confirm.html",
+def recipe_delete(request, pk, template_name="stock/recipe_delete_confirm_bp.html",
                   list_url="recipes", detail_url="recipe_detail"):
     """Permanent (hard) delete escape hatch.
 
@@ -1067,7 +987,7 @@ def recipe_bulk_restore(request, list_path="/recipes/"):
 
 @require_POST
 @login_required
-def recipe_bulk_delete(request, template_name="stock/recipe_bulk_delete_confirm.html",
+def recipe_bulk_delete(request, template_name="stock/recipe_bulk_delete_confirm_bp.html",
                        list_path="/recipes/", detail_url="recipe_detail",
                        self_url="recipe_bulk_delete"):
     """Bulk-delete recipes selected on the flat list page.
@@ -1170,7 +1090,7 @@ def recipe_bulk_delete(request, template_name="stock/recipe_bulk_delete_confirm.
 
 
 @login_required
-def recipe_edit(request, pk, template_name="stock/recipe_edit.html",
+def recipe_edit(request, pk, template_name="stock/recipe_edit_bp.html",
                 detail_url="recipe_detail"):
     """Edit a recipe's basic fields by hand.
 
