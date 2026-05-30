@@ -1,0 +1,176 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Recipe detail rebuilt on the shared Business Performance design system (2a).
+Structure/flat ingredient tabs, the recursive nested breakdown (via
+_recipe_node_bp.html), parents, packaging union and role tags are preserved
+from recipe_detail.html. The old-shell CSS tokens are rehomed onto a `.rds`
+wrapper (BP light/dark) plus a compat block for the old component classes;
+the rec-* grid CSS is kept verbatim. Recipe links route through detail_url
+(preview self-links); ingredient/packaging links stay on real product_detail.
+Edit / archive / restore / delete still point at the real endpoints — the
+confirm flows are Phase 2b.
+{% endcomment %}
+{% block title %}{{ recipe.code }} · Recipes · StockUp{% endblock %}
+
+{% block body %}
+<style>
+  .rds{--bg:#f8fafc;--panel:#ffffff;--panel2:#f8fafc;--line:#e2e8f0;--ink:#0f172a;
+    --muted:#64748b;--amber:#b45309;--red:#e11d48;--green:#059669;--low-bg:#f1f5f9;
+    --disp:"Space Grotesk",system-ui,sans-serif;--mono:"DM Mono",ui-monospace,monospace}
+  .dark .rds{--bg:#020617;--panel:#0f172a;--panel2:#020617;--line:#1e293b;--ink:#f1f5f9;
+    --muted:#94a3b8;--amber:#fbbf24;--red:#fb7185;--green:#34d399;--low-bg:#1e293b}
+  .rds{color:var(--ink);font-size:14px}
+  .rds a{color:var(--amber);text-decoration:none}
+  .rds .muted{color:var(--muted)}
+  .rds table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 16px}
+  .rds th,.rds td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .rds tbody tr:last-child td{border-bottom:0}
+  .rds th{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600}
+  .rds td.num,.rds th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .rds .tag{font-size:10px;padding:2px 7px;border:1px solid;border-radius:999px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+  .rds .tag.low{color:var(--red);border-color:var(--red)}
+  .rds .tag.prov{color:var(--muted);border-color:var(--muted);border-style:dashed}
+  .rds .btn{display:inline-block;background:var(--amber);color:#fff;padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-family:var(--disp);font-weight:600;font-size:12px}
+  .rds .btn.ghost{background:transparent;color:var(--amber);border:1px solid var(--amber)}
+  .rds .card{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:12px;margin:0 0 16px}
+  .rds .card h3{margin:0 0 14px;font-family:var(--disp);font-size:13px;color:var(--ink);font-weight:600}
+
+  .role-tag{font-family:var(--disp);font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    padding:3px 8px;border:1px solid;border-radius:999px;display:inline-block;margin-left:8px;vertical-align:middle}
+  .role-tag.sold{color:var(--amber);border-color:var(--amber)}
+  .role-tag.component{color:var(--muted);border-color:var(--muted)}
+
+  .view-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:0 0 14px}
+  .view-toggle a{padding:6px 14px;font-family:var(--disp);font-size:11px;text-transform:uppercase;
+    letter-spacing:1px;color:var(--muted);border-right:1px solid var(--line)}
+  .view-toggle a:last-child{border-right:0}
+  .view-toggle a.on{background:var(--amber);color:#fff}
+
+  .recipe-block{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:8px;padding:14px 16px;margin:0}
+  .recipe-block.depth-1,.recipe-block.depth-2,.recipe-block.depth-3,
+  .recipe-block.depth-4,.recipe-block.depth-5,.recipe-block.depth-6,
+  .recipe-block.depth-7{background:var(--panel2);margin-top:8px}
+  .rec-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .rec-code{font-family:var(--disp);font-weight:600;color:var(--amber);letter-spacing:.5px}
+  .rec-name{flex:1;min-width:0}
+  .rec-meta{font-size:12px}
+  .rec-open{font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-left:auto}
+  .rec-section-label{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 6px}
+  .rec-lines{margin:0;border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+  .rec-row,.rec-sub > .rec-row-inner{
+    display:grid;grid-template-columns:16px minmax(80px,max-content) minmax(110px,max-content) 1fr;
+    column-gap:14px;align-items:baseline;padding:7px 12px;border-bottom:1px solid var(--line)}
+  .rec-lines > .rec-row:last-child,.rec-lines > .rec-sub:last-child{border-bottom:0}
+  .rec-lines > .rec-sub:last-child > .rec-row-inner{border-bottom:0}
+  .rec-row--head > *{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500}
+  .rec-cell--weight{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rec-cell--code{font-family:var(--disp);color:var(--amber);white-space:nowrap;letter-spacing:.5px}
+  .rec-cell--name{min-width:0;overflow-wrap:anywhere}
+  .rec-cell--name .tag{margin-left:6px;vertical-align:middle}
+  .rec-gutter{align-self:center;font-size:11px;color:var(--amber);line-height:1}
+  .rec-sub{margin:0;padding:0;border-bottom:1px solid var(--line);background:transparent}
+  .rec-sub > .rec-row-inner{cursor:pointer;list-style:none;border-bottom:0}
+  .rec-sub > .rec-row-inner::-webkit-details-marker{display:none}
+  .rec-sub > .rec-row-inner:hover{background:var(--low-bg)}
+  .rec-chev::before{content:"\25B8"}
+  .rec-sub[open] > .rec-row-inner .rec-chev::before{content:"\25BE"}
+  .rec-sub > .rec-sub-body{padding:10px 12px 12px 42px;border-top:1px solid var(--line)}
+  .rec-method{margin:12px 0 0}
+  .rec-method > summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+    padding:6px 12px;background:transparent;color:var(--amber);border:1px solid var(--amber);border-radius:8px;
+    font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .rec-method > summary::-webkit-details-marker{display:none}
+  .rec-method > summary::before{content:"+";font-weight:700}
+  .rec-method[open] > summary::before{content:"−"}
+  .rec-method[open] > summary{background:var(--amber);color:#fff}
+  .rec-method .when-open{display:none}
+  .rec-method[open] .when-open{display:inline}
+  .rec-method[open] .when-closed{display:none}
+  .rec-method pre{margin:10px 0 0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+    white-space:pre-wrap;font-family:var(--mono);font-size:12px;color:var(--ink)}
+</style>
+
+<div class="rds">
+<h2 style="font-family:var(--disp);font-weight:600;color:var(--ink);margin:0 0 14px">{{ recipe.code }} <span class="muted" style="font-size:14px">{{ recipe.name }}</span>
+  {% if recipe.sold_as_product %}<span class="role-tag sold" title="Sold as a standalone product{% if recipe.is_sold_manual %} (manually set){% endif %}">Sold product</span>{% endif %}
+  {% if parents %}<span class="role-tag component" title="Used by {{ parents|length }} recipe{{ parents|length|pluralize }}">Component</span>{% endif %}
+</h2>
+{% if parents %}
+<p class="muted" style="margin:-8px 0 14px;font-size:12px">Used in: {% for p in parents %}<a href="{% url detail_url p.pk %}">{{ p.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+{% endif %}
+
+<div class="view-toggle" role="tablist">
+  <a href="{% url detail_url recipe.pk %}" class="{% if view_mode == 'structure' %}on{% endif %}">Structure</a>
+  <a href="{% url detail_url recipe.pk %}?view=flat" class="{% if view_mode == 'flat' %}on{% endif %}">All ingredients</a>
+</div>
+
+{% if view_mode == "flat" %}
+<div class="card"><h3>All raw ingredients <span class="muted" style="font-size:11px">per stated batch · exploded across every sub-recipe</span></h3>
+{% if flat_ingredients %}
+<table>
+  <thead><tr><th>Code</th><th>Ingredient</th><th class="num">Total grams</th></tr></thead>
+  <tbody>
+  {% for row in flat_ingredients %}
+    <tr>
+      <td><a href="{% url 'product_detail' row.ingredient.pk %}">{{ row.ingredient.code }}</a></td>
+      <td>{{ row.ingredient.name }}</td>
+      <td class="num">{{ row.weight_g|floatformat:2 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Same ingredient appearing in several sub-recipes is summed; weights are scaled by each parent line's share of the sub-recipe's finished output.</p>
+{% else %}
+<p class="muted">No raw ingredients yet — this recipe has no leaf NPD-I lines.</p>
+{% endif %}
+</div>
+{% else %}
+<div class="card"><h3>Nested breakdown</h3>
+{% include "stock/_recipe_node_bp.html" with node=tree detail_url=detail_url %}
+</div>
+{% endif %}
+
+{% if packaging_items %}
+<div class="card"><h3>Packaging <span class="muted" style="font-size:11px">linked items · quantities are display-only for now</span></h3>
+<table>
+  <thead><tr><th>Code</th><th>Item</th><th></th></tr></thead>
+  <tbody>
+  {% for p in packaging_items %}
+    <tr>
+      <td><a href="{% url 'product_detail' p.pk %}">{{ p.code }}</a></td>
+      <td>{{ p.name }}</td>
+      <td><a href="{% url 'product_detail' p.pk %}">open →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="margin:10px 0 0;font-size:12px">Includes packaging from every sub-recipe used by this product. Per-unit consumption maths will live with production later.</p>
+</div>
+{% endif %}
+
+<p>
+  <a href="{% url list_url %}">← all recipes</a>
+  &nbsp;·&nbsp;
+  <a href="{% url 'recipe_edit' recipe.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  &nbsp;
+  {% if recipe.archived %}
+    <form method="post" action="{% url 'recipe_restore' recipe.pk %}" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="next" value="/recipes/">
+      <button class="btn ghost" type="submit" style="padding:4px 12px">restore</button>
+    </form>
+  {% else %}
+    <form method="post" action="{% url 'recipe_archive' recipe.pk %}" style="display:inline"
+          onsubmit="return confirm('Archive {{ recipe.code }}? It will be hidden from the main views but kept in the database — restore from the Archived tab anytime.')">{% csrf_token %}
+      <input type="hidden" name="next" value="/recipes/">
+      <button class="btn" type="submit" style="padding:4px 12px">archive</button>
+    </form>
+  {% endif %}
+</p>
+{% if recipe.archived %}
+<p class="muted" style="font-size:12px;margin:6px 0 0">Archived{% if recipe.archived_at %} on {{ recipe.archived_at|date:"d M Y, H:i" }}{% endif %} — hidden from main views, restorable any time.</p>
+{% endif %}
+<p style="margin:14px 0 0">
+  <a href="{% url 'recipe_delete' recipe.pk %}" class="muted" style="font-size:12px">Permanently delete this recipe (requires extra confirmation) →</a>
+</p>
+</div>
+{% endblock %}

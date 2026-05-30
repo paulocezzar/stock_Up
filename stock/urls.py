@@ -16,6 +16,10 @@ urlpatterns = [
     path("home/", views.home, name="home"),
     path("stock/", views.stock_home, name="stock_home"),
     path("recipes/", views.recipes_home, name="recipes"),
+    # TEMP: design-system previews (2a: list + detail). Distinct namespace so
+    # they never collide with recipe_upload_preview. Remove on cutover.
+    path("recipes-ds-preview/", views.recipes_ds_preview, name="recipes_ds_preview"),
+    path("recipes-ds-preview/<int:pk>/", views.recipe_detail_ds_preview, name="recipe_detail_ds_preview"),
     path("recipes/upload/", views.recipe_upload, name="recipe_upload"),
     path("recipes/upload/preview/", views.recipe_upload_preview, name="recipe_upload_preview"),
     path("recipes/bulk-delete/", views.recipe_bulk_delete, name="recipe_bulk_delete"),

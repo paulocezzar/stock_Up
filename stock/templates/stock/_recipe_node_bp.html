@@ -1,0 +1,63 @@
+{% comment %}
+BP design-system copy of _recipe_node.html (the nested ingredient/sub-recipe
+breakdown on the detail page). Structure + classes identical to the original
+(styled via the BP token wrapper in recipe_detail_bp.html); recipe links use
+the `detail_url` route from context and recursion targets this _bp partial.
+Ingredient (product) links stay on the real product_detail route. Expects
+``node`` + ``detail_url``.
+{% endcomment %}<div class="recipe-block depth-{{ node.depth }}">
+  <div class="rec-head">
+    <span class="rec-code">{{ node.recipe.code }}</span>
+    <span class="rec-name">{{ node.recipe.name }}</span>
+    {% if node.recipe.finished_weight_g %}<span class="muted rec-meta">finished {{ node.recipe.finished_weight_g|floatformat:1 }}g</span>{% endif %}
+    {% if node.recipe.cook_loss_pct %}<span class="muted rec-meta">· cook loss {{ node.recipe.cook_loss_pct|floatformat:2 }}%</span>{% endif %}
+    {% if node.depth > 0 %}<a href="{% url detail_url node.recipe.pk %}" class="rec-open">open →</a>{% endif %}
+  </div>
+
+  <div class="rec-section-label">Ingredients</div>
+  {% if node.lines %}
+  <div class="rec-lines">
+    <div class="rec-row rec-row--head">
+      <span class="rec-gutter" aria-hidden="true"></span>
+      <span class="rec-cell--weight">Weight</span>
+      <span class="rec-cell--code">Code</span>
+      <span class="rec-cell--name">Component</span>
+    </div>
+    {% for entry in node.lines %}
+      {% if entry.line.sub_recipe_id %}
+      <details class="rec-sub">
+        <summary class="rec-row rec-row-inner">
+          <span class="rec-gutter rec-chev" aria-hidden="true"></span>
+          <span class="rec-cell--weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
+          <span class="rec-cell--code"><a href="{% url detail_url entry.line.sub_recipe.pk %}">{{ entry.line.sub_recipe.code }}</a></span>
+          <span class="rec-cell--name">{{ entry.line.sub_recipe.name }} <span class="tag prov">sub-recipe</span>{% if entry.cycle %} <span class="tag low">cycle</span>{% endif %}</span>
+        </summary>
+        <div class="rec-sub-body">
+          {% if entry.cycle %}
+            <p class="muted" style="margin:0">Cycle detected — this sub-recipe is already on the current path. Inline expansion stops here to keep the page finite.</p>
+          {% elif entry.subtree %}
+            {% include "stock/_recipe_node_bp.html" with node=entry.subtree detail_url=detail_url %}
+          {% endif %}
+        </div>
+      </details>
+      {% else %}
+      <div class="rec-row">
+        <span class="rec-gutter" aria-hidden="true"></span>
+        <span class="rec-cell--weight num">{{ entry.line.weight_g|floatformat:1 }}g</span>
+        <span class="rec-cell--code"><a href="{% url 'product_detail' entry.line.ingredient.pk %}">{{ entry.line.ingredient.code }}</a></span>
+        <span class="rec-cell--name">{{ entry.line.ingredient.name }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" style="margin:6px 0 0">No lines yet — this recipe is a stub.</p>
+  {% endif %}
+
+  {% if node.recipe.method_text %}
+  <details class="rec-method">
+    <summary><span class="when-closed">show method</span><span class="when-open">hide method</span></summary>
+    <pre>{{ node.recipe.method_text }}</pre>
+  </details>
+  {% endif %}
+</div>

@@ -1,0 +1,54 @@
+{% comment %}
+BP design-system copy of _recipe_forest_node.html. STRUCTURE, IDs, classes
+and data-* hooks are identical to the original (the tree JS + tests depend
+on them verbatim) — the only change is that the recipe link uses the
+`detail_url` route name from context (so the preview self-links) and the
+recursion targets this _bp partial. Styling comes from the BP token wrapper
+in recipes_bp.html. Expects ``node`` + ``detail_url`` in context.
+{% endcomment %}<li class="tree-node" data-tree-node-recipe-id="{{ node.recipe.pk }}">
+{% if node.children and not node.cycle %}
+  <details class="tree-details">
+    <summary class="tree-row tree-row--expandable">
+      <span class="tree-chevron" aria-hidden="true"></span>
+      <input type="checkbox" form="tree-bulk-form" class="tree-cb"
+             name="recipe_ids" value="{{ node.recipe.pk }}"
+             data-recipe-id="{{ node.recipe.pk }}"
+             data-depth="{{ node.depth }}"
+             data-code="{{ node.recipe.code }}"
+             data-name="{{ node.recipe.name }}"
+             data-active-parents="{{ node.active_parent_ids|stringformat:'s' }}"
+             data-roots-using="{{ node.roots_using|stringformat:'s' }}"
+             aria-label="Select {{ node.recipe.code }}"
+             onclick="event.stopPropagation()">
+      <a class="tree-code" href="{% url detail_url node.recipe.pk %}">{{ node.recipe.code }}</a>
+      <span class="tree-name">{{ node.recipe.name }}</span>
+      {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
+      {% if node.depth == 0 %}<span class="role-tag sold">sold product</span>{% elif node.recipe.sold_as_product %}<span class="role-tag sold" title="Also sold as a standalone product">also sold</span>{% endif %}
+      <span class="tree-also-used" aria-live="polite"></span>
+    </summary>
+    <ul class="tree-list">
+      {% for child in node.children %}{% include "stock/_recipe_forest_node_bp.html" with node=child detail_url=detail_url %}{% endfor %}
+    </ul>
+  </details>
+{% else %}
+  <div class="tree-row">
+    <span class="tree-chevron tree-chevron--leaf" aria-hidden="true"></span>
+    <input type="checkbox" form="tree-bulk-form" class="tree-cb"
+           name="recipe_ids" value="{{ node.recipe.pk }}"
+           data-recipe-id="{{ node.recipe.pk }}"
+           data-depth="{{ node.depth }}"
+           data-code="{{ node.recipe.code }}"
+           data-name="{{ node.recipe.name }}"
+           data-active-parents="{{ node.active_parent_ids|stringformat:'s' }}"
+           data-roots-using="{{ node.roots_using|stringformat:'s' }}"
+           {% if node.cycle %}disabled{% endif %}
+           aria-label="Select {{ node.recipe.code }}">
+    <a class="tree-code" href="{% url detail_url node.recipe.pk %}">{{ node.recipe.code }}</a>
+    <span class="tree-name">{{ node.recipe.name }}</span>
+    {% if node.recipe.finished_weight_g %}<span class="muted tree-meta">{{ node.recipe.finished_weight_g|floatformat:0 }}g finished</span>{% endif %}
+    {% if node.depth == 0 %}<span class="role-tag sold">sold product</span>{% elif node.recipe.sold_as_product %}<span class="role-tag sold" title="Also sold as a standalone product">also sold</span>{% endif %}
+    {% if node.cycle %}<span class="tag low">cycle — stops here</span>{% endif %}
+    <span class="tree-also-used" aria-live="polite"></span>
+  </div>
+{% endif %}
+</li>

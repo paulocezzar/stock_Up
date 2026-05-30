@@ -524,7 +524,8 @@ def _by_product_forest(recipes):
 
 
 @login_required
-def recipes_home(request):
+def recipes_home(request, template_name="stock/recipes.html",
+                 list_url="recipes", detail_url="recipe_detail"):
     """Three sibling views over the same recipe set:
 
     * ``by_product`` (default) — structural tree of active recipes.
@@ -563,6 +564,8 @@ def recipes_home(request):
         "n_recipes": len(recipes),
         "n_archived": n_archived,
         "view_mode": view_mode,
+        "list_url": list_url,
+        "detail_url": detail_url,
     }
 
     if view_mode == "by_product":
@@ -611,7 +614,17 @@ def recipes_home(request):
             rows.append({"r": r, "parents": parents})
         context["rows"] = rows
 
-    return render(request, "stock/recipes.html", context)
+    return render(request, template_name, context)
+
+
+@login_required
+def recipes_ds_preview(request):
+    """TEMPORARY design-system preview of the recipes list (2a). Remove on
+    cutover. Distinct route namespace so it never collides with the existing
+    recipe_upload_preview (the import's step-2 commit screen)."""
+    return recipes_home(request, template_name="stock/recipes_bp.html",
+                        list_url="recipes_ds_preview",
+                        detail_url="recipe_detail_ds_preview")
 
 
 @require_POST
@@ -736,7 +749,8 @@ def recipe_upload_preview(request):
 
 
 @login_required
-def recipe_detail(request, pk):
+def recipe_detail(request, pk, template_name="stock/recipe_detail.html",
+                  list_url="recipes", detail_url="recipe_detail"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -749,6 +763,8 @@ def recipe_detail(request, pk):
     context = {
         "recipe": recipe,
         "view_mode": view_mode,
+        "list_url": list_url,
+        "detail_url": detail_url,
     }
     if view_mode == "flat":
         context["flat_ingredients"] = recipe.exploded_ingredients()
@@ -758,7 +774,15 @@ def recipe_detail(request, pk):
     # Packaging linked by this recipe OR any of its sub-recipes — for a
     # sold product the union is what the bakery actually needs.
     context["packaging_items"] = recipe.all_packaging()
-    return render(request, "stock/recipe_detail.html", context)
+    return render(request, template_name, context)
+
+
+@login_required
+def recipe_detail_ds_preview(request, pk):
+    """TEMPORARY design-system preview of the recipe detail page (2a)."""
+    return recipe_detail(request, pk, template_name="stock/recipe_detail_bp.html",
+                         list_url="recipes_ds_preview",
+                         detail_url="recipe_detail_ds_preview")
 
 
 @login_required

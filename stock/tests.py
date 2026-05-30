@@ -2665,6 +2665,86 @@ class RecipeSaveCycleProtectionTests(TestCase):
             save_recipes(parsed, dept)
 
 
+class RecipesDsPreviewTests(TestCase):
+    """Recipes list + detail rebuilt on the design system (2a), exercised via
+    the temporary /recipes-ds-preview* routes. Confirms the BP shell renders
+    and the test-coupled hooks are preserved (tree #tree-root /
+    tree-recipe-meta / .tree-cb / #tree-bulk-form formaction overrides;
+    #recipes-tbl / .bulk-cb / #bulk-form / data-filter; class="on" tabs; the
+    Sold column; the nested detail node). Real /recipes/... stays old-shell.
+    Tree JS is ported verbatim — not re-asserted here (DOM behaviour), but
+    its hooks are.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.flour = Product.objects.create(
+            name="Flour", code="NPD-I1", department=self.dept, unit="g", minimum=0)
+        self.loaf = Recipe.objects.create(
+            code="NPD-R800", name="Sourdough Loaf", department=self.dept,
+            sold_as_product=True, finished_weight_g=Decimal("600"))
+        self.dough = Recipe.objects.create(
+            code="NPD-R100", name="Sourdough Dough", department=self.dept)
+        RecipeLine.objects.create(recipe=self.loaf, sub_recipe=self.dough,
+                                  weight_g=Decimal("700"))
+        RecipeLine.objects.create(recipe=self.dough, ingredient=self.flour,
+                                  weight_g=Decimal("500"))
+        self.archived = Recipe.objects.create(
+            code="NPD-R900", name="Old Bun", department=self.dept, archived=True)
+
+    def test_by_product_preview_renders_tree_with_hooks(self):
+        r = self.client.get("/recipes-ds-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        # Tree hooks preserved verbatim.
+        self.assertIn('id="tree-root"', body)
+        self.assertIn('id="tree-recipe-meta"', body)
+        self.assertIn('class="tree-cb"', body)
+        self.assertIn('id="tree-bulk-form"', body)
+        self.assertIn('formaction="/recipes/bulk-delete/"', body)
+        # Tabs use class="on" active markup; recipe links self-link to preview.
+        self.assertRegex(body, r'href="/recipes-ds-preview/"[^>]*class="on"')
+        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/"', body)
+        self.assertIn("NPD-R800", body)
+
+    def test_flat_preview_renders_table_with_sold_column(self):
+        body = self.client.get("/recipes-ds-preview/?view=flat").content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('id="recipes-tbl"', body)
+        self.assertIn('data-filter="recipes-tbl"', body)
+        self.assertIn('class="bulk-cb"', body)
+        self.assertIn('id="bulk-form"', body)
+        # Sold column + per-row toggle hooks.
+        self.assertIn(f'action="/recipes/{self.loaf.pk}/sold/"', body)
+        self.assertIn("role-tag sold", body)
+        self.assertRegex(body, r'\?view=flat"[^>]*class="on"')
+
+    def test_archived_preview_renders(self):
+        body = self.client.get("/recipes-ds-preview/?view=archived").content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("NPD-R900", body)
+        self.assertIn('id="recipes-tbl"', body)
+
+    def test_detail_preview_renders_nested_node(self):
+        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("NPD-R800", body)
+        self.assertIn("recipe-block", body)         # nested breakdown node
+        # Sub-recipe link self-links into the preview.
+        self.assertIn(f'href="/recipes-ds-preview/{self.dough.pk}/"', body)
+        # Structure tab active; flat tab links within the preview.
+        self.assertRegex(body, r'\?view=flat"')
+
+
 class RecipesSectionViewTests(TestCase):
     """List page, upload form, preview-then-confirm flow, detail view."""
 
