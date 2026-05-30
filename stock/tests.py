@@ -566,11 +566,11 @@ class ReorderTests(TestCase):
 
 
 class WaveARebuildTests(TestCase):
-    """Suppliers / Adjustments / Reorder rebuilt on the design system,
-    exercised via the temporary -preview routes until cutover. Confirms the
-    BP shell renders and the behaviour-carrying markup is preserved (add /
-    delete suppliers, the adjustment log's signed quantity, and Reorder's
-    editable-qty hooks + CSV form action).
+    """Suppliers / Adjustments / Reorder on the design system. The real
+    /suppliers/, /adjustments/, /reorder/ routes now serve the BP templates.
+    Confirms the BP shell renders and the behaviour-carrying markup is
+    preserved (add / delete suppliers, the adjustment log's signed quantity,
+    and Reorder's editable-qty hooks + CSV form action).
     """
 
     def setUp(self):
@@ -593,8 +593,8 @@ class WaveARebuildTests(TestCase):
         assert self.client.login(username="alice", password="pw")
         self.client.get(f"/switch/{self.dept.pk}/")
 
-    def test_suppliers_preview_renders_with_add_and_delete(self):
-        r = self.client.get("/suppliers-preview/")
+    def test_suppliers_renders_with_add_and_delete(self):
+        r = self.client.get("/suppliers/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -603,12 +603,12 @@ class WaveARebuildTests(TestCase):
         self.assertIn("Acme Mill", body)
         self.assertIn(f'/suppliers/{self.sup.pk}/delete/', body)
 
-    def test_adjustments_preview_renders_form_and_signed_log(self):
+    def test_adjustments_renders_form_and_signed_log(self):
         Adjustment.objects.create(
             department=self.dept, product=self.flour, quantity=Decimal("3"),
             reason="waste", user=self.user, date=datetime.date(2026, 5, 20),
             note="dropped bag")
-        r = self.client.get("/adjustments-preview/")
+        r = self.client.get("/adjustments/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -617,19 +617,14 @@ class WaveARebuildTests(TestCase):
         self.assertIn("dropped bag", body)
         self.assertIn("−3", body)   # reducing reason renders with a leading minus
 
-    def test_adjustments_preview_post_round_trips_to_preview(self):
-        # Logging from the preview returns to the preview (so the new row
-        # shows there); the live page still redirects to itself.
-        r = self.client.post("/adjustments-preview/", {
+    def test_adjustments_post_redirects_to_self(self):
+        r = self.client.post("/adjustments/", {
             "product": str(self.flour.pk), "quantity": "2", "reason": "waste"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(r["Location"], "/adjustments-preview/")
-        r2 = self.client.post("/adjustments/", {
-            "product": str(self.flour.pk), "quantity": "2", "reason": "waste"})
-        self.assertEqual(r2["Location"], "/adjustments/")
+        self.assertEqual(r["Location"], "/adjustments/")
 
-    def test_reorder_preview_preserves_editable_qty_and_csv_form(self):
-        r = self.client.get("/reorder-preview/")
+    def test_reorder_preserves_editable_qty_and_csv_form(self):
+        r = self.client.get("/reorder/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -1472,9 +1467,6 @@ class SectionNavigationTests(TestCase):
         # `class="on"` nav — see test_products_highlights_itself_on_bp_rail.
         for path, link in (
             ("/deliveries/", '/deliveries/'),
-            ("/adjustments/", '/adjustments/'),
-            ("/reorder/", '/reorder/'),
-            ("/suppliers/", '/suppliers/'),
         ):
             r = self.client.get(path)
             body = r.content.decode()

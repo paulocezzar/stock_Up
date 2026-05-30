@@ -1173,22 +1173,16 @@ def dashboard(request):
 
 # ---- suppliers (global, shared by all departments) ----
 @login_required
-def suppliers(request, template_name="stock/suppliers.html"):
+def suppliers(request):
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
         if name:
             Supplier.objects.get_or_create(name=name)
             messages.success(request, f"Added supplier '{name}'.")
         return redirect("suppliers")
-    return render(request, template_name, {
+    return render(request, "stock/suppliers_bp.html", {
         "suppliers": Supplier.objects.annotate(n=Count("supplierprice")),
     })
-
-
-@login_required
-def suppliers_preview(request):
-    """TEMPORARY design-system preview of the Suppliers page. Remove on cutover."""
-    return suppliers(request, template_name="stock/suppliers_bp.html")
 
 
 @require_POST
@@ -1442,7 +1436,7 @@ def _reorder_rows(dept):
 
 
 @login_required
-def reorder(request, template_name="stock/reorder.html"):
+def reorder(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1454,15 +1448,9 @@ def reorder(request, template_name="stock/reorder.html"):
         groups.setdefault(r["supplier"], []).append(r)
         if r["est_cost"]:
             total += r["est_cost"]
-    return render(request, template_name, {
+    return render(request, "stock/reorder_bp.html", {
         "groups": groups, "rows": rows, "total": total, "dept": dept,
     })
-
-
-@login_required
-def reorder_preview(request):
-    """TEMPORARY design-system preview of the Reorder page. Remove on cutover."""
-    return reorder(request, template_name="stock/reorder_bp.html")
 
 
 @login_required
@@ -1514,8 +1502,7 @@ def deliveries(request):
 
 
 @login_required
-def adjustments(request, template_name="stock/adjustments.html",
-                redirect_route="adjustments"):
+def adjustments(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1529,7 +1516,7 @@ def adjustments(request, template_name="stock/adjustments.html",
         valid_reasons = {k for k, _ in Adjustment.REASON_CHOICES}
         if not product or qty is None or qty <= 0 or reason not in valid_reasons:
             messages.error(request, "Pick an ingredient, a positive quantity, and a reason.")
-            return redirect(redirect_route)
+            return redirect("adjustments")
         try:
             d = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
         except ValueError:
@@ -1540,25 +1527,16 @@ def adjustments(request, template_name="stock/adjustments.html",
         )
         label = dict(Adjustment.REASON_CHOICES)[reason]
         messages.success(request, f"Logged {label.lower()} of {qty} for {product.name}.")
-        return redirect(redirect_route)
+        return redirect("adjustments")
     log = list(dept.adjustments.select_related("product", "user")
                .order_by("-date", "-id")[:100])
-    return render(request, template_name, {
+    return render(request, "stock/adjustments_bp.html", {
         "log": log,
         "products": dept.products.order_by("name"),
         "reasons": Adjustment.REASON_CHOICES,
         "reducing": Adjustment.REDUCING_REASONS,
         "today": datetime.date.today().isoformat(),
     })
-
-
-@login_required
-def adjustments_preview(request):
-    """TEMPORARY design-system preview of the Adjustments page. Logging an
-    adjustment round-trips back to the preview (not the live page) so the
-    form + log panel can be reviewed end-to-end. Remove on cutover."""
-    return adjustments(request, template_name="stock/adjustments_bp.html",
-                       redirect_route="adjustments_preview")
 
 
 @login_required

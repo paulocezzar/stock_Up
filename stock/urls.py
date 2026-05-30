@@ -31,11 +31,6 @@ urlpatterns = [
     path("switch/<int:pk>/", views.switch_department, name="switch_department"),
     path("suppliers/", views.suppliers, name="suppliers"),
     path("suppliers/<int:pk>/delete/", views.supplier_delete, name="supplier_delete"),
-    # TEMP: Wave A design-system previews (Suppliers / Reorder / Adjustments).
-    # Remove all three on cutover.
-    path("suppliers-preview/", views.suppliers_preview, name="suppliers_preview"),
-    path("reorder-preview/", views.reorder_preview, name="reorder_preview"),
-    path("adjustments-preview/", views.adjustments_preview, name="adjustments_preview"),
     path("products/", views.products, name="products"),
     path("packaging/", views.packaging, name="packaging"),
     path("products/<int:pk>/", views.product_detail, name="product_detail"),
