@@ -5,8 +5,8 @@ system. Same behaviour as count.html: each row's number input saves itself
 via htmx (POST to save_count) and swaps in the status fragment; the
 name/code filter reuses the shared base table-filter JS; CSV export and the
 running total are preserved. htmx is loaded locally (the BP shell doesn't
-bundle it) and the CSRF token is supplied via hx-headers on the table. The
-input posts with ?bp=1 so save_count returns the BP-styled status fragment.
+bundle it) and the CSRF token is supplied via hx-headers on the table.
+save_count returns the BP-styled status fragment (_line_status_bp.html).
 {% endcomment %}
 {% load humanize design_nav %}
 {% block title %}Count {{ st.date|date:"d M Y" }} · StockUp{% endblock %}
@@ -52,7 +52,7 @@ input posts with ?bp=1 so save_count returns the BP-styled status fragment.
           <td class="py-2.5 px-2 text-right">
             <input type="number" step="any" inputmode="decimal" name="current"
                    value="{{ line.current|default_if_none:'' }}"
-                   hx-post="{% url 'save_count' line.id %}?bp=1" hx-trigger="change" hx-target="#s-{{ line.id }}" hx-swap="innerHTML"
+                   hx-post="{% url 'save_count' line.id %}" hx-trigger="change" hx-target="#s-{{ line.id }}" hx-swap="innerHTML"
                    onchange="this.classList.remove('border-amber-300','dark:border-amber-400/40');this.classList.add('border-slate-200','dark:border-slate-800')"
                    class="h-9 w-28 rounded-lg border bg-white px-2.5 text-right text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:text-slate-300 {% if line.carried_over %}border-amber-300 dark:border-amber-400/40{% else %}border-slate-200 dark:border-slate-800{% endif %}">
           </td>

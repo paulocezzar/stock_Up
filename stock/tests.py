@@ -852,10 +852,9 @@ class StocktakeCSVTests(TestCase):
 
 
 class StocktakesRebuildTests(TestCase):
-    """Stocktakes list + count-entry rebuilt on the design system, exercised
-    via the temporary /stocktakes-preview/ and /stocktakes/<pk>/count-preview/
-    routes until cutover. Preserves the AJAX save (save_count) — the BP count
-    page posts with ?bp=1 to get the BP-styled status fragment.
+    """Stocktakes list + count-entry on the design system. /stocktakes/ and
+    /stocktakes/<pk>/count/ now serve the BP templates, and save_count
+    always returns the BP-styled status fragment.
     """
 
     def setUp(self):
@@ -878,16 +877,16 @@ class StocktakesRebuildTests(TestCase):
         self.line = StockLine.objects.create(
             stocktake=self.st, product=self.flour, current=Decimal("3"))
 
-    def test_list_preview_renders_on_design_system(self):
-        r = self.client.get("/stocktakes-preview/")
+    def test_list_renders_on_design_system(self):
+        r = self.client.get("/stocktakes/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
         self.assertIn("Start a new weekly count", body)
         self.assertIn('data-testid="stocktakes-table"', body)
 
-    def test_count_preview_renders_with_total_csv_and_htmx(self):
-        r = self.client.get(f"/stocktakes/{self.st.pk}/count-preview/")
+    def test_count_renders_with_total_csv_and_htmx(self):
+        r = self.client.get(f"/stocktakes/{self.st.pk}/count/")
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         self.assertIn('<main class="ml-64 min-w-0">', body)
@@ -896,13 +895,12 @@ class StocktakesRebuildTests(TestCase):
         self.assertIn("£30.00", body)
         # CSV link preserved.
         self.assertIn(f'/stocktakes/{self.st.pk}/csv/', body)
-        # htmx wiring intact: input posts to save_count with the bp flag.
-        self.assertIn(f'/count/line/{self.line.id}/?bp=1', body)
+        # htmx wiring intact: input posts to save_count (no bp flag needed).
+        self.assertIn(f'/count/line/{self.line.id}/', body)
         self.assertIn("htmx.org", body)
 
-    def test_save_count_with_bp_flag_returns_bp_fragment(self):
-        r = self.client.post(f"/count/line/{self.line.id}/?bp=1",
-                             {"current": "3"})
+    def test_save_count_returns_bp_fragment(self):
+        r = self.client.post(f"/count/line/{self.line.id}/", {"current": "3"})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         # BP-styled "ok" badge (needed=0); not the old .tag markup.
@@ -911,21 +909,10 @@ class StocktakesRebuildTests(TestCase):
         self.line.refresh_from_db()
         self.assertEqual(self.line.current, Decimal("3"))
 
-    def test_save_count_without_flag_keeps_old_fragment(self):
-        # The still-live old count page must keep its original fragment.
-        r = self.client.post(f"/count/line/{self.line.id}/", {"current": "3"})
-        self.assertEqual(r.status_code, 200)
-        self.assertIn('class="tag', r.content.decode())
-
-    def test_starting_a_count_from_the_preview_lands_on_count_preview(self):
-        # The preview list redirects a started count to the count PREVIEW (so
-        # the rebuilt flow can be driven end-to-end); the live list still
-        # redirects to /count/.
-        r = self.client.post("/stocktakes-preview/", {"completed_by": "Paulo"})
+    def test_starting_a_count_redirects_to_count(self):
+        r = self.client.post("/stocktakes/", {"completed_by": "Paulo"})
         self.assertEqual(r.status_code, 302)
-        self.assertRegex(r["Location"], r"^/stocktakes/\d+/count-preview/$")
-        r2 = self.client.post("/stocktakes/", {"completed_by": "Paulo"})
-        self.assertRegex(r2["Location"], r"^/stocktakes/\d+/count/$")
+        self.assertRegex(r["Location"], r"^/stocktakes/\d+/count/$")
 
 
 class PackUnitConversionTests(TestCase):
@@ -1466,10 +1453,11 @@ class SectionNavigationTests(TestCase):
             self.assertIn(href, body)
 
     def test_stock_section_nav_shows_sub_items(self):
-        # Any Stock page (e.g. stocktakes) renders the Stock contextual
-        # sub-menu in the top nav: Home + Dashboard / Stocktakes / Deliveries
-        # / Adjustments / Reorder / Ingredients / Suppliers.
-        r = self.client.get("/stocktakes/")
+        # Any still-old-shell Stock page (Packaging is the stable one — it
+        # stays old-shell) renders the Stock contextual sub-menu in the top
+        # nav: Home + Dashboard / Stocktakes / Deliveries / Adjustments /
+        # Reorder / Ingredients / Suppliers.
+        r = self.client.get("/packaging/")
         body = r.content.decode()
         nav = body[body.index("<nav>"):body.index("</nav>")]
         for label in (">Home<", ">Dashboard<", ">Stocktakes<", ">Deliveries<",
@@ -1483,7 +1471,6 @@ class SectionNavigationTests(TestCase):
         # section is marked on the left rail (amber ring), not the old
         # `class="on"` nav — see test_products_highlights_itself_on_bp_rail.
         for path, link in (
-            ("/stocktakes/", '/stocktakes/'),
             ("/deliveries/", '/deliveries/'),
             ("/adjustments/", '/adjustments/'),
             ("/reorder/", '/reorder/'),
@@ -1525,7 +1512,7 @@ class SectionNavigationTests(TestCase):
         boss = U.objects.create_superuser("boss", password="pw")
         c = Client()
         c.login(username="boss", password="pw")
-        for path in ("/profile/", "/stocktakes/"):
+        for path in ("/profile/", "/packaging/"):
             self.assertIn('href="/admin/"', c.get(path).content.decode(),
                           f"{path} should expose /admin/ to a superuser")
 
@@ -3773,9 +3760,9 @@ class PackagingViewTests(TestCase):
         self.assertNotIn("NPD-P999", body)
 
     def test_stock_navbar_has_packaging_link(self):
-        # Root / now redirects to /home/; use a stock page to read the
-        # contextual nav (the Stock sub-menu is identical across them).
-        r = self.client.get("/stocktakes/")
+        # /stocktakes/ is on the BP shell now; read the contextual Stock
+        # sub-menu off /packaging/ (which stays old-shell).
+        r = self.client.get("/packaging/")
         body = r.content.decode()
         nav = body[body.index("<nav>"):body.index("</nav>")]
         self.assertIn(">Packaging<", nav)

@@ -1337,7 +1337,7 @@ def price_delete(request, price_id):
 
 # ---- stocktakes (per department) ----
 @login_required
-def stocktakes(request, template_name="stock/stocktakes.html", count_route="count"):
+def stocktakes(request):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1352,25 +1352,15 @@ def stocktakes(request, template_name="stock/stocktakes.html", count_route="coun
                 stocktake=st, product=p,
                 current=prev, carried_over=prev is not None))
         StockLine.objects.bulk_create(new_lines)
-        return redirect(count_route, pk=st.pk)
-    return render(request, template_name, {
+        return redirect("count", pk=st.pk)
+    return render(request, "stock/stocktakes_bp.html", {
         "stocktakes": dept.stocktakes.all(),
         "has_products": dept.products.exists(),
     })
 
 
 @login_required
-def stocktakes_preview(request):
-    """TEMPORARY live preview of the Stocktakes list rebuilt on the shared
-    design system. Same context + POST behaviour as stocktakes(), except a
-    started count redirects to the count PREVIEW so the whole rebuilt flow
-    can be driven end-to-end. Remove this view + its URL on cutover."""
-    return stocktakes(request, template_name="stock/stocktakes_bp.html",
-                      count_route="count_preview")
-
-
-@login_required
-def count(request, pk, template_name="stock/count.html"):
+def count(request, pk):
     st = get_object_or_404(Stocktake, pk=pk)
     if st.department and not st.department.accessible_to(request.user):
         return HttpResponseForbidden("Not your department.")
@@ -1384,18 +1374,9 @@ def count(request, pk, template_name="stock/count.html"):
             current=prev, carried_over=prev is not None))
     StockLine.objects.bulk_create(extra_lines)
     lines = list(st.lines.select_related("product").order_by("product__name"))
-    return render(request, template_name, {
+    return render(request, "stock/count_bp.html", {
         "st": st, "lines": lines, "total_value": st.total_value,
     })
-
-
-@login_required
-def count_preview(request, pk):
-    """TEMPORARY live preview of the count-entry screen rebuilt on the shared
-    design system. Same context + AJAX save (count_bp posts to
-    save_count?bp=1 for the BP status fragment). Remove this view + its URL
-    on cutover to count_bp.html."""
-    return count(request, pk, template_name="stock/count_bp.html")
 
 
 @login_required
@@ -1432,11 +1413,8 @@ def save_count(request, line_id):
     line.current = _dec(request.POST.get("current"))
     line.carried_over = False
     line.save()
-    # The design-system count page posts with ?bp=1 to get the BP-styled
-    # status fragment; the old count page gets the original fragment.
-    template = ("stock/_line_status_bp.html" if request.GET.get("bp")
-                else "stock/_line_status.html")
-    return render(request, template, {"line": line})
+    # Count screen is on the design system now — always the BP fragment.
+    return render(request, "stock/_line_status_bp.html", {"line": line})
 
 
 # ---- reorder / shopping list ----
