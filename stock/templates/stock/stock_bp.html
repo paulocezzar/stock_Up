@@ -1,0 +1,174 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Stock — the inventory landing rebuilt on the shared Business Performance
+design system. KPI tiles (stock value / items in stock / below-minimum /
+expiry) + a filterable holdings table + workflow links + a recent-activity
+feed. on-hand uses the latest counted value (Product.latest_line.current),
+the same convention as the dashboard/reorder pages; value = on-hand x
+cheapest pack price. Expiry is read from delivery batches (use_by); stock
+counted without dated batches shows "no expiry data". data-testid hooks
+are inert test anchors. The holdings filter/search JS is local to this page.
+{% endcomment %}
+{% load humanize design_nav %}
+{% block title %}Stock · StockUp{% endblock %}
+
+{% block body %}
+{% comment %} Title + workflow links {% endcomment %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Stock</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Current inventory · on-hand from the latest count, valued at the cheapest supplier</p>
+  </div>
+  <div data-testid="stock-workflows" class="flex flex-wrap items-center gap-2">
+    {% for label, href in workflow_links %}
+      <a href="{{ href }}" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+{% comment %} Row 1 — KPI tiles (BP 4-up KpiRow grid) {% endcomment %}
+<div data-testid="stock-kpis" class="mb-5 grid w-full grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+  {% include "design_system/components/kpi_tile.html" with label="Stock value" value=kpis.stock_value|gbp subline="at cheapest supplier" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7c0-5.333-8-5.333-8 0"/><path d="M10 7v14"/><path d="M6 21h12"/><path d="M6 13h10"/></svg>' %}
+  {% include "design_system/components/kpi_tile.html" with label="Items in stock" value=kpis.items_in_stock subline="ingredients on hand" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/></svg>' %}
+  {% include "design_system/components/kpi_tile.html" with label="Below minimum" value=kpis.below_min subline="need reorder" icon='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>' %}
+  {% comment %} Expiry tile — custom (two figures + coverage caveat); matches kpi_tile styling {% endcomment %}
+  <div data-testid="kpi-expiry" class="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <div class="text-xs font-medium text-slate-500 dark:text-slate-400">Expiring / expired</div>
+        <div class="mt-2 break-words font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">{{ kpis.expiring_ct }} <span class="text-base font-medium text-slate-400">exp</span> / {{ kpis.expired_ct }} <span class="text-base font-medium text-slate-400">over</span></div>
+      </div>
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+    </div>
+    <div class="mt-4 min-h-6 text-xs text-slate-500 dark:text-slate-400">
+      {% if kpis.no_date_ct %}{{ kpis.no_date_ct }} batch{{ kpis.no_date_ct|pluralize }} have no expiry date — not counted{% else %}all in-stock batches have dates{% endif %}
+    </div>
+  </div>
+</div>
+
+{% comment %} Holdings table {% endcomment %}
+<div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <h3 class="font-display text-base font-semibold text-slate-950 dark:text-slate-100">Holdings</h3>
+    <div class="flex flex-wrap items-center gap-2.5">
+      <div data-testid="status-filter" class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs font-medium dark:border-slate-800 dark:bg-slate-950">
+        {% for key, lbl in status_filters %}
+          <button type="button" data-status-filter="{{ key }}" class="rounded-md px-2.5 py-1 text-slate-600 transition hover:text-slate-950 dark:text-slate-400 dark:hover:text-slate-100{% if forloop.first %} bg-white text-slate-950 shadow-sm dark:bg-slate-800 dark:text-slate-100{% endif %}">{{ lbl }}</button>
+        {% endfor %}
+      </div>
+      <input type="search" id="holdings-search" placeholder="Filter by name or code…" autocomplete="off"
+             class="h-10 w-[240px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      <span id="holdings-count" class="text-xs text-slate-500 dark:text-slate-400"></span>
+    </div>
+  </div>
+  <div class="overflow-x-auto">
+    <table id="holdings-tbl" data-testid="holdings-table" class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-left text-xs font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          <th class="py-2.5 pr-2">Ingredient</th>
+          <th class="py-2.5 px-2 text-right">On hand</th>
+          <th class="py-2.5 px-2">Unit</th>
+          <th class="py-2.5 px-2">Cheapest</th>
+          <th class="py-2.5 px-2 text-right">Value</th>
+          <th class="py-2.5 px-2">Status</th>
+          <th class="py-2.5 pl-2 text-right">Last counted</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr data-search="{{ r.p.name|lower }} {{ r.p.code|default:''|lower }}"
+              data-status="{% if r.below_min %}below-min {% endif %}{% if r.expiring or r.expired %}expiring {% endif %}{% if r.no_expiry %}no-expiry{% endif %}"
+              class="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/50">
+            <td class="py-2.5 pr-2">
+              <a href="{% url 'product_detail' r.p.pk %}" class="font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200">{{ r.p.name }}</a>
+              {% if r.p.code %}<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">{{ r.p.code }}</span>{% endif %}
+            </td>
+            <td class="py-2.5 px-2 text-right tabular text-slate-700 dark:text-slate-300">{{ r.current|floatformat:0|intcomma }}</td>
+            <td class="py-2.5 px-2 text-slate-500 dark:text-slate-400">{{ r.p.unit }}</td>
+            <td class="py-2.5 px-2 text-slate-600 dark:text-slate-400">{% if r.cheap %}{{ r.cheap.supplier.name }} <span class="text-slate-400 dark:text-slate-500">· {{ r.cheap.pack_price|gbp }}</span>{% else %}<span class="text-slate-400 dark:text-slate-500">no price</span>{% endif %}</td>
+            <td class="py-2.5 px-2 text-right tabular font-medium text-slate-800 dark:text-slate-200">{{ r.value|gbp }}</td>
+            <td class="py-2.5 px-2">
+              <span class="flex flex-wrap gap-1">
+                {% if r.below_min %}<span class="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/30">Below min</span>{% endif %}
+                {% if r.expired %}<span class="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800 ring-1 ring-rose-300 dark:bg-rose-500/20 dark:text-rose-200 dark:ring-rose-500/40">Expired</span>{% elif r.expiring %}<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/20">Expiring</span>{% endif %}
+                {% if r.low_cover %}<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/20" title="~{{ r.days_cover }} days of cover left">~{{ r.days_cover }}d cover</span>{% endif %}
+                {% if r.no_expiry %}<span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700">No expiry data</span>{% endif %}
+                {% if not r.below_min and not r.expired and not r.expiring and not r.low_cover and not r.no_expiry %}<span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30">OK</span>{% endif %}
+              </span>
+            </td>
+            <td class="py-2.5 pl-2 text-right tabular text-slate-500 dark:text-slate-400">{{ r.last_counted|date:"d M Y" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="py-4 text-sm text-slate-400 dark:text-slate-500">No ingredients in stock. Start a <a href="/stocktakes/" class="font-medium text-slate-600 underline dark:text-slate-300">stocktake</a> to record what's on hand.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Sorted by value. Packaging is shown on its own page. Expiry comes from dated delivery batches — items counted without dated batches show “No expiry data”.</p>
+</div>
+
+{% comment %} Recent activity {% endcomment %}
+<div data-testid="recent-activity" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <h3 class="mb-3 font-display text-base font-semibold text-slate-950 dark:text-slate-100">Recent activity</h3>
+  {% if recent %}
+    <ul class="space-y-1.5">
+      {% for a in recent %}
+        <li>
+          <a href="{{ a.href }}" class="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm transition hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-800/50 dark:hover:bg-slate-800">
+            <span class="min-w-0 truncate text-slate-700 dark:text-slate-200"><span class="font-medium">{{ a.kind }}</span> · {{ a.detail }}</span>
+            <span class="shrink-0 text-xs tabular text-slate-400 dark:text-slate-500">{{ a.date|date:"d M Y" }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-400 dark:text-slate-500">No recent stocktakes, adjustments or deliveries.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Local holdings filter: text (name/code) AND status chips combine. Kept
+  // out of the shared base filter so the status chips and search share one
+  // pass and one "N shown" count.
+  (function () {
+    var table = document.getElementById("holdings-tbl");
+    if (!table) return;
+    var search = document.getElementById("holdings-search");
+    var count = document.getElementById("holdings-count");
+    var chips = document.querySelectorAll("[data-status-filter]");
+    var active = "all";
+
+    function apply() {
+      var q = (search.value || "").trim().toLowerCase();
+      var shown = 0;
+      table.querySelectorAll("tbody tr").forEach(function (row) {
+        if (row.dataset.search === undefined) return;
+        var textOk = !q || row.dataset.search.indexOf(q) >= 0;
+        var statusOk = active === "all" ||
+          (row.dataset.status || "").indexOf(active) >= 0;
+        var show = textOk && statusOk;
+        row.style.display = show ? "" : "none";
+        if (show) shown++;
+      });
+      if (count) count.textContent = shown + " shown";
+    }
+
+    chips.forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        active = chip.dataset.statusFilter;
+        chips.forEach(function (c) {
+          c.classList.remove("bg-white", "text-slate-950", "shadow-sm",
+            "dark:bg-slate-800", "dark:text-slate-100");
+        });
+        chip.classList.add("bg-white", "text-slate-950", "shadow-sm",
+          "dark:bg-slate-800", "dark:text-slate-100");
+        apply();
+      });
+    });
+    if (search) search.addEventListener("input", apply);
+    apply();
+  })();
+</script>
+{% endblock %}

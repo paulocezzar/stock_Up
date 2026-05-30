@@ -312,6 +312,115 @@ def stock_home(request):
     return render(request, "stock/section_stock.html", {})
 
 
+# Expiry: batches whose use_by lands within this many days are "expiring".
+# Matches the /home/ stock-alerts window. Not configurable by design.
+STOCK_EXPIRING_WINDOW_DAYS = 7
+
+
+def _stock_overview(dept):
+    """Inventory snapshot for the Stock landing page.
+
+    Holdings are ingredients (packaging has its own page) whose on-hand is
+    > 0, where on-hand = latest counted value (Product.latest_line.current)
+    — the SAME convention as the dashboard / reorder pages. Value =
+    on-hand x cheapest pack price. Expiry is read from delivery Batches
+    (batch-level use_by); it is independent of the stocktake-based on-hand,
+    so ingredients counted without dated batches show "no expiry data".
+
+    Returns (rows, kpis) where kpis carries the four tile figures plus the
+    batch-expiry breakdown (expiring / expired / undated counts).
+    """
+    today = datetime.date.today()
+    horizon = today + datetime.timedelta(days=STOCK_EXPIRING_WINDOW_DAYS)
+    rows, total_value, below_min = [], Decimal("0"), 0
+    for p in (dept.products.exclude(category="packaging")
+              .prefetch_related("prices__supplier", "batches")):
+        line = p.latest_line
+        cur = line.current if line else None
+        if cur is None or cur <= 0:
+            continue
+        cheap = p.cheapest_price
+        value = (cur * cheap.pack_price).quantize(Decimal("0.01")) if cheap else None
+        if value:
+            total_value += value
+        is_below = cur < p.minimum
+        if is_below:
+            below_min += 1
+        days_cover = p.days_of_cover(cur)
+        live = [b for b in p.batches.all() if b.qty_remaining and b.qty_remaining > 0]
+        dated = [b for b in live if b.use_by]
+        rows.append({
+            "p": p, "current": cur, "cheap": cheap, "value": value,
+            "below_min": is_below,
+            "days_cover": days_cover,
+            "low_cover": days_cover is not None and days_cover < 14,
+            "expired": any(b.use_by < today for b in dated),
+            "expiring": any(today <= b.use_by <= horizon for b in dated),
+            "no_expiry": not dated,
+            "last_counted": line.stocktake.date,
+        })
+    rows.sort(key=lambda r: r["value"] or Decimal("0"), reverse=True)
+
+    live_batches = Batch.objects.filter(product__department=dept, qty_remaining__gt=0)
+    kpis = {
+        "stock_value": total_value,
+        "items_in_stock": len(rows),
+        "below_min": below_min,
+        "expiring_ct": live_batches.filter(
+            use_by__gte=today, use_by__lte=horizon).count(),
+        "expired_ct": live_batches.filter(use_by__lt=today).count(),
+        "no_date_ct": live_batches.filter(use_by__isnull=True).count(),
+    }
+    return rows, kpis
+
+
+def _stock_recent_activity(dept, limit=5):
+    """Most recent stocktakes / adjustments / deliveries, newest first."""
+    items = []
+    for st in dept.stocktakes.order_by("-date", "-id")[:limit]:
+        items.append({"date": st.date, "kind": "Stocktake",
+                      "detail": f"{st.counted} lines counted",
+                      "href": f"/stocktakes/{st.pk}/count/"})
+    for a in (Adjustment.objects.filter(department=dept)
+              .select_related("product").order_by("-date", "-id")[:limit]):
+        items.append({"date": a.date, "kind": "Adjustment",
+                      "detail": f"{a.get_reason_display()} · {a.product.name}",
+                      "href": "/adjustments/"})
+    for d in (dept.deliveries.select_related("supplier")
+              .order_by("-date", "-id")[:limit]):
+        items.append({"date": d.date, "kind": "Delivery",
+                      "detail": d.supplier.name,
+                      "href": f"/deliveries/{d.pk}/"})
+    items.sort(key=lambda x: x["date"], reverse=True)
+    return items[:limit]
+
+
+@login_required
+def stock_preview(request):
+    """TEMPORARY live preview of the Stock landing rebuilt on the shared
+    design system (inventory KPIs + holdings table + workflow links +
+    recent activity). Remove this view + its URL on cutover to stock_bp.html.
+    """
+    dept = current_department(request)
+    if dept is None:
+        return render(request, "stock/no_department.html")
+    rows, kpis = _stock_overview(dept)
+    return render(request, "stock/stock_bp.html", {
+        "rows": rows,
+        "kpis": kpis,
+        "recent": _stock_recent_activity(dept),
+        "expiring_window": STOCK_EXPIRING_WINDOW_DAYS,
+        "workflow_links": [
+            ("Stocktakes", "/stocktakes/"), ("Adjustments", "/adjustments/"),
+            ("Reorder", "/reorder/"), ("Suppliers", "/suppliers/"),
+        ],
+        "status_filters": [
+            ("all", "All"), ("below-min", "Below min"),
+            ("expiring", "Expiring"), ("no-expiry", "No expiry data"),
+        ],
+    })
+
+
 # ---- recipes (per department) ----
 def _recipe_tree(recipe, depth=0, seen=None):
     """Build a nested {recipe, depth, lines:[{line, subtree?, cycle?}]} dict.

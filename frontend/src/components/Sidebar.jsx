@@ -18,7 +18,7 @@ import {
 const NAV = [
   { label: "Business Performance", icon: BarChart3, href: "/business-performance-dashboard/" },
   { label: "Orders",     icon: ScrollText,      href: "/orders/" },
-  { label: "Products",   icon: Package,         href: "/products/" },
+  { label: "Ingredients", icon: Package,        href: "/products/" },
   { label: "Recipes",    icon: ChefHat,         href: "/recipes/" },
   { label: "Stock",      icon: Boxes,           href: "/stock/" },
   { label: "Deliveries", icon: Truck,           href: "/deliveries/" },

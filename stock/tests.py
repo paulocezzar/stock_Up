@@ -1011,6 +1011,80 @@ class PriceHistoryTests(TestCase):
         self.assertEqual(ids, [self.sup.pk])
 
 
+class StockRebuildTests(TestCase):
+    """The Stock landing rebuilt on the design system: inventory KPIs +
+    holdings table (on-hand from latest count, value at cheapest price) +
+    workflow links + batch-expiry badges. Exercised via the temporary
+    /stock-preview/ route until cutover (retarget the URL to /stock/ then).
+    """
+
+    PREVIEW_URL = "/stock-preview/"
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        # Flour: on-hand 8 (above min 5), priced — value = 8 x £10 = £80.
+        self.flour = Product.objects.create(
+            code="NPD-I500", name="Flour", department=self.dept,
+            category="dry_goods", unit="kg", minimum=Decimal("5"))
+        sup = Supplier.objects.create(name="Mill")
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=sup,
+            pack_weight=Decimal("25"), pack_price=Decimal("10.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date.today())
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("8"))
+
+    def test_preview_renders_on_design_system_shell(self):
+        r = self.client.get(self.PREVIEW_URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('<main class="ml-64 min-w-0">', r.content.decode())
+
+    def test_preview_shows_the_four_inventory_kpis(self):
+        body = self.client.get(self.PREVIEW_URL).content.decode()
+        for label in ("Stock value", "Items in stock", "Below minimum",
+                      "Expiring / expired"):
+            self.assertIn(label, body, f"KPI '{label}' missing")
+
+    def test_holdings_row_shows_value_and_workflow_links(self):
+        body = self.client.get(self.PREVIEW_URL).content.decode()
+        self.assertIn("Flour", body)
+        self.assertIn("£80.00", body)              # 8 x £10 cheapest pack price
+        for href in ('href="/stocktakes/"', 'href="/adjustments/"',
+                     'href="/reorder/"', 'href="/suppliers/"'):
+            self.assertIn(href, body)
+
+    def test_stock_counted_without_dated_batches_shows_no_expiry_data(self):
+        # Flour has stock from a count but no dated delivery batch.
+        body = self.client.get(self.PREVIEW_URL).content.decode()
+        self.assertIn("No expiry data", body)
+
+    def test_expiring_batch_surfaces_badge_and_kpi(self):
+        Batch.objects.create(
+            product=self.flour, qty_received=Decimal("2"),
+            qty_remaining=Decimal("2"),
+            use_by=datetime.date.today() + datetime.timedelta(days=3))
+        body = self.client.get(self.PREVIEW_URL).content.decode()
+        self.assertIn("Expiring", body)
+
+    def test_below_minimum_ingredient_flagged(self):
+        low = Product.objects.create(
+            code="NPD-I501", name="Salt", department=self.dept,
+            category="dry_goods", unit="kg", minimum=Decimal("10"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date.today())
+        StockLine.objects.create(stocktake=st, product=low, current=Decimal("2"))
+        body = self.client.get(self.PREVIEW_URL).content.decode()
+        self.assertIn("Salt", body)
+        self.assertIn("Below min", body)
+
+
 class HomeRebuildTests(TestCase):
     """The merged /home/ rebuilt on the design system: KPI tiles (from the
     retired root dashboard) + staff-on-shift shell + stock alerts + urgent
