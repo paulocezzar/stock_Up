@@ -1173,16 +1173,22 @@ def dashboard(request):
 
 # ---- suppliers (global, shared by all departments) ----
 @login_required
-def suppliers(request):
+def suppliers(request, template_name="stock/suppliers.html"):
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
         if name:
             Supplier.objects.get_or_create(name=name)
             messages.success(request, f"Added supplier '{name}'.")
         return redirect("suppliers")
-    return render(request, "stock/suppliers.html", {
+    return render(request, template_name, {
         "suppliers": Supplier.objects.annotate(n=Count("supplierprice")),
     })
+
+
+@login_required
+def suppliers_preview(request):
+    """TEMPORARY design-system preview of the Suppliers page. Remove on cutover."""
+    return suppliers(request, template_name="stock/suppliers_bp.html")
 
 
 @require_POST
@@ -1458,7 +1464,7 @@ def _reorder_rows(dept):
 
 
 @login_required
-def reorder(request):
+def reorder(request, template_name="stock/reorder.html"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1470,9 +1476,15 @@ def reorder(request):
         groups.setdefault(r["supplier"], []).append(r)
         if r["est_cost"]:
             total += r["est_cost"]
-    return render(request, "stock/reorder.html", {
+    return render(request, template_name, {
         "groups": groups, "rows": rows, "total": total, "dept": dept,
     })
+
+
+@login_required
+def reorder_preview(request):
+    """TEMPORARY design-system preview of the Reorder page. Remove on cutover."""
+    return reorder(request, template_name="stock/reorder_bp.html")
 
 
 @login_required
@@ -1524,7 +1536,7 @@ def deliveries(request):
 
 
 @login_required
-def adjustments(request):
+def adjustments(request, template_name="stock/adjustments.html"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1552,13 +1564,19 @@ def adjustments(request):
         return redirect("adjustments")
     log = list(dept.adjustments.select_related("product", "user")
                .order_by("-date", "-id")[:100])
-    return render(request, "stock/adjustments.html", {
+    return render(request, template_name, {
         "log": log,
         "products": dept.products.order_by("name"),
         "reasons": Adjustment.REASON_CHOICES,
         "reducing": Adjustment.REDUCING_REASONS,
         "today": datetime.date.today().isoformat(),
     })
+
+
+@login_required
+def adjustments_preview(request):
+    """TEMPORARY design-system preview of the Adjustments page. Remove on cutover."""
+    return adjustments(request, template_name="stock/adjustments_bp.html")
 
 
 @login_required

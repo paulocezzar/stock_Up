@@ -565,6 +565,72 @@ class ReorderTests(TestCase):
         self.assertIn("Acme Mill,Flour,8.00,25 kg,30.00,240.00", body)
 
 
+class WaveARebuildTests(TestCase):
+    """Suppliers / Adjustments / Reorder rebuilt on the design system,
+    exercised via the temporary -preview routes until cutover. Confirms the
+    BP shell renders and the behaviour-carrying markup is preserved (add /
+    delete suppliers, the adjustment log's signed quantity, and Reorder's
+    editable-qty hooks + CSV form action).
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        self.sup = Supplier.objects.create(name="Acme Mill")
+        self.flour = Product.objects.create(
+            name="Flour", code="FLR1", department=self.dept,
+            unit="g", minimum=Decimal("10"))
+        SupplierPrice.objects.create(
+            product=self.flour, supplier=self.sup,
+            pack_weight=Decimal("25000"), pack_price=Decimal("30.00"))
+        st = Stocktake.objects.create(department=self.dept,
+                                      date=datetime.date(2026, 5, 22))
+        StockLine.objects.create(stocktake=st, product=self.flour,
+                                 current=Decimal("2"))
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+
+    def test_suppliers_preview_renders_with_add_and_delete(self):
+        r = self.client.get("/suppliers-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Add supplier", body)
+        self.assertIn('data-testid="suppliers-table"', body)
+        self.assertIn("Acme Mill", body)
+        self.assertIn(f'/suppliers/{self.sup.pk}/delete/', body)
+
+    def test_adjustments_preview_renders_form_and_signed_log(self):
+        Adjustment.objects.create(
+            department=self.dept, product=self.flour, quantity=Decimal("3"),
+            reason="waste", user=self.user, date=datetime.date(2026, 5, 20),
+            note="dropped bag")
+        r = self.client.get("/adjustments-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("Log an adjustment", body)
+        self.assertIn("Flour", body)
+        self.assertIn("dropped bag", body)
+        self.assertIn("−3", body)   # reducing reason renders with a leading minus
+
+    def test_reorder_preview_preserves_editable_qty_and_csv_form(self):
+        r = self.client.get("/reorder-preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn(f'name="qty_{self.flour.pk}"', body)
+        self.assertIn('value="8"', body)               # 10 - 2 suggested
+        self.assertIn('data-pack-price="30.00"', body)  # for the live recompute
+        self.assertIn('action="/reorder/csv/"', body)
+        self.assertEqual(body.count('id="reorder-tbl"'), 1)
+        self.assertIn('class="sup-row"', body)
+        self.assertIn("Acme Mill", body)
+
+
 class DeliveryDetailTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(name="Bakery")
