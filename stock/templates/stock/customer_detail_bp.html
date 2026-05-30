@@ -21,7 +21,7 @@ actions. The delete confirm text is preserved verbatim.
   </div>
   <div class="flex items-center gap-2">
     <a href="{% url urls.edit customer.pk %}" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:text-white">edit</a>
-    <form method="post" action="{% url urls.delete customer.pk %}" class="inline" onsubmit="return confirm('Delete {{ customer.name|escapejs }}? This can't be undone.')">{% csrf_token %}
+    <form method="post" action="{% url urls.delete customer.pk %}" class="inline" onsubmit="return confirm(&quot;Delete {{ customer.name|escapejs }}? This can't be undone.&quot;)">{% csrf_token %}
       <button type="submit" class="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-rose-300 hover:text-rose-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-rose-500/40 dark:hover:text-rose-300">delete</button>
     </form>
   </div>

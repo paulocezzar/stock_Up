@@ -4736,6 +4736,12 @@ class CustomersRebuildTests(TestCase):
         # hand-created tag (is_manual_entry) + edit link into the preview.
         self.assertIn("hand-created", body)
         self.assertIn(f'href="/customers-preview/{self.internal.pk}/edit/"', body)
+        # Delete guard must actually fire: the confirm JS string is double-
+        # quoted (&quot;) so the apostrophe in "can't" doesn't break it, and
+        # the visible text is unchanged.
+        self.assertIn("can't be undone", body)
+        self.assertIn('confirm(&quot;Delete GARDEN CAFE? This can', body)
+        self.assertNotIn("confirm('Delete", body)   # no broken single-quoted form
 
     def test_new_preview_defaults_type_and_posts_to_preview(self):
         r = self.client.get("/customers-preview/new/?type=wholesale")
