@@ -1,0 +1,37 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Recipe import — step 1 (pick a workbook) on the Business Performance design
+system (2b). Same file input (.xlsx, ≤20MB), the same parse-button disable JS
+and the two helper notes as recipe_upload.html. The form posts to the current
+URL (the preview route self-submits, then redirects to its own step-2 preview);
+cancel routes through cancel_url.
+{% endcomment %}
+{% block title %}Import recipe · Recipes · StockUp{% endblock %}
+
+{% block body %}
+{% include "stock/_recipe_bp_styles.html" %}
+
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Import recipe</h1>
+  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Upload a Recipe Breakdown <code>.xlsx</code> export — you'll preview the parsed tree and any unknown ingredient codes before anything is saved.</p>
+</div>
+
+<div class="rds">
+<form method="post" enctype="multipart/form-data"
+      onsubmit="var b=document.getElementById('upBtn'); b.disabled=true; b.textContent='parsing…';">{% csrf_token %}
+<div class="card">
+  <div class="row">
+    <div class="field" style="flex:1"><label>Recipe Breakdown (.xlsx) *</label>
+      <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+    </div>
+  </div>
+  <p class="muted" style="margin:14px 0 0;font-size:12px">Re-uploading an updated workbook for the same recipe code overwrites that recipe and its lines.</p>
+  <p class="muted" style="margin:6px 0 0;font-size:12px">Very large multi-sheet workbooks (dozens of recipes) should be loaded via deploy — the web request can't parse them within its timeout.</p>
+</div>
+<p>
+  <button id="upBtn" class="btn" type="submit">Parse and preview</button>
+  &nbsp;<a href="{% url cancel_url %}" class="muted">cancel</a>
+</p>
+</form>
+</div>
+{% endblock %}

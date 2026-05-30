@@ -652,7 +652,9 @@ def recipe_set_sold(request, pk):
 
 
 @login_required
-def recipe_upload(request):
+def recipe_upload(request, template_name="stock/recipe_upload.html",
+                  preview_url="recipe_upload_preview", cancel_url="recipes",
+                  upload_url="recipe_upload"):
     """Step 1 of import: pick a workbook; parse all sheets and stash for preview.
 
     The bulk parser handles both single-recipe and multi-recipe workbooks:
@@ -668,15 +670,15 @@ def recipe_upload(request):
         upload = request.FILES.get("file")
         if not upload:
             messages.error(request, "Pick a recipe .xlsx file to upload.")
-            return redirect("recipe_upload")
+            return redirect(upload_url)
         if upload.size > 20 * 1024 * 1024:
             messages.error(request, "That file is over 20 MB.")
-            return redirect("recipe_upload")
+            return redirect(upload_url)
         try:
             parsed, failures, sheets_processed = parse_recipe_workbook_bulk(upload)
         except Exception as e:
             messages.error(request, f"Could not open the workbook: {e}")
-            return redirect("recipe_upload")
+            return redirect(upload_url)
         if not parsed:
             # Show the failures so the operator knows why nothing came back.
             joined = "; ".join(f"{t}: {r}" for t, r in failures[:3])
@@ -684,16 +686,19 @@ def recipe_upload(request):
                 request,
                 "No recipes parsed from any sheet."
                 + (f" First failure(s): {joined}" if failures else ""))
-            return redirect("recipe_upload")
+            return redirect(upload_url)
         request.session["pending_recipe_import"] = serialize_parsed(parsed)
         request.session["pending_recipe_failures"] = failures
         request.session["pending_recipe_sheets"] = sheets_processed
-        return redirect("recipe_upload_preview")
-    return render(request, "stock/recipe_upload.html", {})
+        return redirect(preview_url)
+    return render(request, template_name, {"cancel_url": cancel_url})
 
 
 @login_required
-def recipe_upload_preview(request):
+def recipe_upload_preview(request, template_name="stock/recipe_upload_preview.html",
+                          list_url="recipes", detail_url="recipe_detail",
+                          upload_url="recipe_upload",
+                          self_url="recipe_upload_preview"):
     """Step 2: show the parsed summary (per-recipe + per-sheet); POST to commit."""
     dept = current_department(request)
     if dept is None:
@@ -701,7 +706,7 @@ def recipe_upload_preview(request):
     raw = request.session.get("pending_recipe_import")
     if not raw:
         messages.info(request, "Upload a recipe workbook first.")
-        return redirect("recipe_upload")
+        return redirect(upload_url)
     parsed = deserialize_parsed(raw)
     failures = request.session.get("pending_recipe_failures") or []
     sheets_processed = request.session.get("pending_recipe_sheets") or 1
@@ -711,7 +716,7 @@ def recipe_upload_preview(request):
             stats = save_recipes(parsed, dept)
         except RecipeCycleError as e:
             messages.error(request, f"Refused to save: {e}")
-            return redirect("recipe_upload_preview")
+            return redirect(self_url)
         request.session.pop("pending_recipe_import", None)
         request.session.pop("pending_recipe_failures", None)
         request.session.pop("pending_recipe_sheets", None)
@@ -730,7 +735,7 @@ def recipe_upload_preview(request):
             if stats["stub_products"]:
                 msg += f" {len(stats['stub_products'])} unknown ingredient(s) stubbed."
             messages.success(request, msg)
-            return redirect("recipes")
+            return redirect(list_url)
         # Single-sheet upload: land on the main recipe's detail page.
         main = parsed[0]
         msg = (f"Imported {main['code']} ({main['name']}): "
@@ -739,18 +744,20 @@ def recipe_upload_preview(request):
             msg += f" {len(stats['stub_products'])} unknown ingredient(s) stubbed."
         messages.success(request, msg)
         main_recipe = Recipe.objects.get(code=main["code"])
-        return redirect("recipe_detail", pk=main_recipe.pk)
+        return redirect(detail_url, pk=main_recipe.pk)
 
     summary = summarize_parse_bulk(parsed, failures, sheets_processed)
-    return render(request, "stock/recipe_upload_preview.html", {
+    return render(request, template_name, {
         "parsed": parsed,
         "summary": summary,
+        "upload_url": upload_url,
     })
 
 
 @login_required
 def recipe_detail(request, pk, template_name="stock/recipe_detail.html",
-                  list_url="recipes", detail_url="recipe_detail"):
+                  list_url="recipes", detail_url="recipe_detail",
+                  edit_url="recipe_edit", delete_url="recipe_delete"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -765,6 +772,8 @@ def recipe_detail(request, pk, template_name="stock/recipe_detail.html",
         "view_mode": view_mode,
         "list_url": list_url,
         "detail_url": detail_url,
+        "edit_url": edit_url,
+        "delete_url": delete_url,
     }
     if view_mode == "flat":
         context["flat_ingredients"] = recipe.exploded_ingredients()
@@ -782,11 +791,74 @@ def recipe_detail_ds_preview(request, pk):
     """TEMPORARY design-system preview of the recipe detail page (2a)."""
     return recipe_detail(request, pk, template_name="stock/recipe_detail_bp.html",
                          list_url="recipes_ds_preview",
-                         detail_url="recipe_detail_ds_preview")
+                         detail_url="recipe_detail_ds_preview",
+                         edit_url="recipe_edit_ds_preview",
+                         delete_url="recipe_delete_ds_preview")
+
+
+# TEMPORARY design-system previews — Recipes 2b (edit + upload + confirm flows).
+# Each delegates to the real view with BP templates + the preview namespace so
+# the whole flow self-links and lands back on the preview. Remove on cutover.
+@login_required
+def recipe_edit_ds_preview(request, pk):
+    return recipe_edit(request, pk, template_name="stock/recipe_edit_bp.html",
+                       detail_url="recipe_detail_ds_preview")
 
 
 @login_required
-def recipe_delete(request, pk):
+def recipe_upload_ds_preview(request):
+    return recipe_upload(request, template_name="stock/recipe_upload_bp.html",
+                         preview_url="recipe_upload_preview_ds_preview",
+                         cancel_url="recipes_ds_preview",
+                         upload_url="recipe_upload_ds_preview")
+
+
+@login_required
+def recipe_upload_preview_ds_preview(request):
+    return recipe_upload_preview(
+        request, template_name="stock/recipe_upload_preview_bp.html",
+        list_url="recipes_ds_preview", detail_url="recipe_detail_ds_preview",
+        upload_url="recipe_upload_ds_preview",
+        self_url="recipe_upload_preview_ds_preview")
+
+
+@login_required
+def recipe_delete_ds_preview(request, pk):
+    return recipe_delete(request, pk,
+                         template_name="stock/recipe_delete_confirm_bp.html",
+                         list_url="recipes_ds_preview",
+                         detail_url="recipe_detail_ds_preview")
+
+
+@require_POST
+@login_required
+def recipe_bulk_delete_ds_preview(request):
+    return recipe_bulk_delete(
+        request, template_name="stock/recipe_bulk_delete_confirm_bp.html",
+        list_path="/recipes-ds-preview/", detail_url="recipe_detail_ds_preview",
+        self_url="recipe_bulk_delete_ds_preview")
+
+
+@require_POST
+@login_required
+def recipe_bulk_archive_ds_preview(request):
+    # Soft/reversible: the BP list confirms via the dialog and posts confirm=1,
+    # so this commits directly — the server confirm page is bypassed.
+    return recipe_bulk_archive(
+        request, list_path="/recipes-ds-preview/",
+        detail_url="recipe_detail_ds_preview",
+        self_url="recipe_bulk_archive_ds_preview")
+
+
+@require_POST
+@login_required
+def recipe_bulk_restore_ds_preview(request):
+    return recipe_bulk_restore(request, list_path="/recipes-ds-preview/")
+
+
+@login_required
+def recipe_delete(request, pk, template_name="stock/recipe_delete_confirm.html",
+                  list_url="recipes", detail_url="recipe_detail"):
     """Permanent (hard) delete escape hatch.
 
     Archive is the prominent default everywhere; hard-delete is the
@@ -837,11 +909,13 @@ def recipe_delete(request, pk):
                         f"reference: {', '.join(p.code for p in parents)}.")
             msg += " The next re-import will skip this code."
             messages.success(request, msg)
-            return redirect("recipes")
-    return render(request, "stock/recipe_delete_confirm.html", {
+            return redirect(list_url)
+    return render(request, template_name, {
         "recipe": recipe,
         "parents": parents,
         "error": error,
+        "list_url": list_url,
+        "detail_url": detail_url,
     })
 
 
@@ -902,7 +976,9 @@ def _bulk_recipe_selection(request, dept):
 
 @require_POST
 @login_required
-def recipe_bulk_archive(request):
+def recipe_bulk_archive(request, template_name="stock/recipe_bulk_archive_confirm.html",
+                        list_path="/recipes/", detail_url="recipe_detail",
+                        self_url="recipe_bulk_archive"):
     """Bulk-archive recipes selected on the flat list page.
 
     Two-step POST mirrors the bulk-delete flow but without any of the
@@ -920,7 +996,7 @@ def recipe_bulk_archive(request):
                 if not r.archived]
     if not selected:
         messages.error(request, "Pick at least one active recipe to archive.")
-        return redirect("/recipes/?view=flat")
+        return redirect(list_path + "?view=flat")
     selected_pks = {r.pk for r in selected}
 
     if request.POST.get("confirm") == "1":
@@ -932,7 +1008,7 @@ def recipe_bulk_archive(request):
             f"Archived {len(selected)} recipe(s): "
             f"{', '.join(r.code for r in selected)}. "
             "Restore from the Archived tab.")
-        return redirect("/recipes/?view=flat")
+        return redirect(list_path + "?view=flat")
 
     # Informational note: which selected recipes are STILL referenced
     # by ACTIVE recipes outside the selection? Archiving doesn't break
@@ -953,15 +1029,18 @@ def recipe_bulk_archive(request):
         note_rows.append({"code": code,
                           "referenced_by": sorted(by_archived[code])})
 
-    return render(request, "stock/recipe_bulk_archive_confirm.html", {
+    return render(request, template_name, {
         "selected": selected,
         "note_rows": note_rows,
+        "detail_url": detail_url,
+        "self_url": self_url,
+        "list_path": list_path,
     })
 
 
 @require_POST
 @login_required
-def recipe_bulk_restore(request):
+def recipe_bulk_restore(request, list_path="/recipes/"):
     """Bulk-restore recipes from the archived list (single-step POST).
 
     Restore is harmless — the recipe just becomes visible again — so
@@ -975,7 +1054,7 @@ def recipe_bulk_restore(request):
                 if r.archived]
     if not selected:
         messages.error(request, "Pick at least one archived recipe to restore.")
-        return redirect("/recipes/?view=archived")
+        return redirect(list_path + "?view=archived")
     selected_pks = {r.pk for r in selected}
     Recipe.objects.filter(pk__in=selected_pks).update(
         archived=False, archived_at=None)
@@ -983,12 +1062,14 @@ def recipe_bulk_restore(request):
         request,
         f"Restored {len(selected)} recipe(s): "
         f"{', '.join(r.code for r in selected)}.")
-    return redirect("/recipes/?view=flat")
+    return redirect(list_path + "?view=flat")
 
 
 @require_POST
 @login_required
-def recipe_bulk_delete(request):
+def recipe_bulk_delete(request, template_name="stock/recipe_bulk_delete_confirm.html",
+                       list_path="/recipes/", detail_url="recipe_detail",
+                       self_url="recipe_bulk_delete"):
     """Bulk-delete recipes selected on the flat list page.
 
     Two-step POST: the first submission carries ``recipe_ids`` from the
@@ -1021,7 +1102,7 @@ def recipe_bulk_delete(request):
                     .order_by("code"))
     if not selected:
         messages.error(request, "Pick at least one recipe to delete.")
-        return redirect("/recipes/?view=flat")
+        return redirect(list_path + "?view=flat")
     selected_pks = {r.pk for r in selected}
 
     error = None
@@ -1059,7 +1140,7 @@ def recipe_bulk_delete(request):
                 f"Permanently deleted {len(selected)} recipe(s): "
                 f"{', '.join(codes)}. "
                 "The next re-import will skip these codes.")
-            return redirect("/recipes/?view=flat")
+            return redirect(list_path + "?view=flat")
 
     # Either first submission (no confirm) or confirm with a failed
     # acknowledgement gate — render the confirmation page. "External"
@@ -1078,15 +1159,19 @@ def recipe_bulk_delete(request):
             line.sub_recipe.code for line in parent.lines.all()
             if line.sub_recipe_id in selected_pks)
         external_rows.append({"parent": parent, "child_codes": child_codes})
-    return render(request, "stock/recipe_bulk_delete_confirm.html", {
+    return render(request, template_name, {
         "selected": selected,
         "external_rows": external_rows,
         "error": error,
+        "detail_url": detail_url,
+        "self_url": self_url,
+        "list_path": list_path,
     })
 
 
 @login_required
-def recipe_edit(request, pk):
+def recipe_edit(request, pk, template_name="stock/recipe_edit.html",
+                detail_url="recipe_detail"):
     """Edit a recipe's basic fields by hand.
 
     Editable: name, finished_weight_g, deposit_weight_g, cook_loss_pct,
@@ -1103,7 +1188,8 @@ def recipe_edit(request, pk):
         return HttpResponseForbidden("Not your department.")
 
     def _ctx(form, errors=None):
-        return {"recipe": recipe, "form": form, "errors": errors or {}}
+        return {"recipe": recipe, "form": form, "errors": errors or {},
+                "detail_url": detail_url}
 
     if request.method == "POST":
         form = {
@@ -1126,7 +1212,7 @@ def recipe_edit(request, pk):
         if form["cook_loss_pct"] and cook_loss is None:
             errors["cook_loss_pct"] = "Enter a number."
         if errors:
-            return render(request, "stock/recipe_edit.html", _ctx(form, errors))
+            return render(request, template_name, _ctx(form, errors))
         recipe.name = form["name"]
         recipe.finished_weight_g = finished
         recipe.deposit_weight_g = deposit
@@ -1140,7 +1226,7 @@ def recipe_edit(request, pk):
         messages.success(request,
                          f"Saved edits to {recipe.code}. "
                          "Re-imports will preserve these changes.")
-        return redirect("recipe_detail", pk=recipe.pk)
+        return redirect(detail_url, pk=recipe.pk)
 
     form = {
         "name": recipe.name,
@@ -1152,7 +1238,7 @@ def recipe_edit(request, pk):
                           if recipe.cook_loss_pct is not None else ""),
         "sold_as_product": recipe.sold_as_product,
     }
-    return render(request, "stock/recipe_edit.html", _ctx(form))
+    return render(request, template_name, _ctx(form))
 
 
 @login_required

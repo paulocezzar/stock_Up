@@ -1,0 +1,43 @@
+{% comment %}
+Shared <style> for the Recipes design-system form/confirm pages (edit, upload,
+upload-preview, delete-confirm, bulk-delete-confirm). Rehomes the old-shell CSS
+tokens onto a `.rds` wrapper (BP light/dark) and provides a compat block for the
+old component classes the BP shell doesn't define. Include once per page, then
+wrap the ported markup in <div class="rds">. The list/detail pages keep their
+own inline styles (they add page-specific tree/rec CSS on top of these tokens).
+{% endcomment %}
+<style>
+  .rds{--bg:#f8fafc;--panel:#ffffff;--panel2:#f8fafc;--line:#e2e8f0;--ink:#0f172a;
+    --muted:#64748b;--amber:#b45309;--red:#e11d48;--green:#059669;--low-bg:#fff1f2;
+    --disp:"Space Grotesk",system-ui,sans-serif;--mono:"DM Mono",ui-monospace,monospace}
+  .dark .rds{--bg:#020617;--panel:#0f172a;--panel2:#020617;--line:#1e293b;--ink:#f1f5f9;
+    --muted:#94a3b8;--amber:#fbbf24;--red:#fb7185;--green:#34d399;--low-bg:rgba(244,63,94,.10)}
+  .rds{color:var(--ink);font-size:14px}
+  .rds a{color:var(--amber);text-decoration:none}
+  .rds .muted{color:var(--muted)}
+  .rds h2{font-family:var(--disp);font-weight:600;color:var(--ink);margin:0 0 14px}
+  .rds code{font-family:var(--mono);color:var(--amber)}
+  .rds table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 16px}
+  .rds th,.rds td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .rds tbody tr:last-child td{border-bottom:0}
+  .rds th{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600}
+  .rds td.num,.rds th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .rds .tag{font-size:10px;padding:2px 7px;border:1px solid;border-radius:999px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+  .rds input,.rds select,.rds textarea{background:var(--panel);border:1px solid var(--line);color:var(--ink);font-family:inherit;padding:8px 10px;border-radius:8px}
+  .rds input:focus,.rds select:focus,.rds textarea:focus{outline:none;border-color:var(--amber)}
+  .rds .btn{display:inline-block;background:var(--amber);color:#fff;padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-family:var(--disp);font-weight:600;font-size:12px}
+  .rds .btn.ghost{background:transparent;color:var(--amber);border:1px solid var(--amber)}
+  .rds .btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+  .rds .btn:disabled{opacity:.5;cursor:not-allowed}
+  .rds .card{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:12px;margin:0 0 16px}
+  .rds .card h3{margin:0 0 14px;font-family:var(--disp);font-size:13px;color:var(--ink);font-weight:600}
+  .rds .row{display:flex;gap:16px;flex-wrap:wrap}
+  .rds .field{display:flex;flex-direction:column;gap:6px}
+  .rds .field label{font-family:var(--disp);font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .rds .stats{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+  .rds .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px}
+  .rds .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .rds .stat .v{font-family:var(--disp);font-size:22px;font-weight:600;color:var(--ink);margin-top:2px}
+  .rds .stat.warn{border-color:var(--red)}
+  .rds .stat.warn .v{color:var(--red)}
+</style>

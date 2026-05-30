@@ -1,9 +1,25 @@
 {% comment %}
-Reusable BP confirm dialog for destructive actions. Include once per page.
-Any <button data-confirm-delete data-confirm-name="…"> inside a <form> opens
-this dialog; "Delete" submits that form, "Cancel" / Esc / backdrop aborts.
-Vanilla JS, no dependencies. The guard is real: triggers are type="button",
-so a delete can never POST without the explicit confirm step.
+Reusable BP confirm dialog for guarded actions. Include once per page.
+A <button data-confirm-delete> opens this dialog; the primary button submits
+the associated form, Cancel / Esc / backdrop aborts. Vanilla JS, no
+dependencies. The guard is real: triggers are type="button", so the action
+can never POST without the explicit confirm step.
+
+Per-trigger overrides (all optional; the defaults reproduce the original
+delete-flavoured dialog, so existing callers — e.g. Customers — are
+unaffected):
+  data-confirm-name     interpolated into the default message
+  data-confirm-title    dialog heading (default "Confirm delete")
+  data-confirm-msg      full message text (overrides the name-based default)
+  data-confirm-label    primary button text (default "Delete")
+  data-confirm-variant  "delete" (rose, default) or "primary" (amber) — used
+                        for reversible actions like archive/restore
+  data-confirm-form     id of the form to submit; default is the nearest
+                        enclosing <form>. Needed when the trigger sits OUTSIDE
+                        its form (a bulk button attached via form="…")
+  data-confirm-action   override the target form's action before submitting
+  data-confirm-set      ";"-separated name=value pairs injected as hidden
+                        inputs just before submit (e.g. "confirm=1")
 {% endcomment %}
 <div id="su-confirm" data-testid="confirm-dialog" aria-hidden="true"
      class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/50 p-4">
@@ -21,31 +37,77 @@ so a delete can never POST without the explicit confirm step.
   (function () {
     var modal = document.getElementById("su-confirm");
     if (!modal) return;
+    var titleEl = document.getElementById("su-confirm-title");
     var msg = document.getElementById("su-confirm-msg");
     var okBtn = document.getElementById("su-confirm-ok");
     var cancelBtn = document.getElementById("su-confirm-cancel");
-    var pending = null;
-    function openDialog(form, name) {
-      pending = form;
-      msg.textContent = "Delete " + (name || "this") + "? This can't be undone.";
+    var DELETE_CLASSES = ["bg-rose-600", "hover:bg-rose-700"];
+    var PRIMARY_CLASSES = ["bg-amber-600", "hover:bg-amber-700"];
+    var pending = null;        // the form to submit on OK
+    var pendingSet = null;     // [[name,value],…] hidden fields to inject
+    var pendingAction = null;  // optional form.action override
+
+    function setOkVariant(variant) {
+      DELETE_CLASSES.concat(PRIMARY_CLASSES).forEach(function (c) {
+        okBtn.classList.remove(c);
+      });
+      (variant === "primary" ? PRIMARY_CLASSES : DELETE_CLASSES).forEach(
+        function (c) { okBtn.classList.add(c); });
+    }
+    function parseSet(s) {
+      if (!s) return null;
+      var out = [];
+      s.split(";").forEach(function (pair) {
+        pair = pair.trim();
+        if (!pair) return;
+        var i = pair.indexOf("=");
+        if (i === -1) out.push([pair, ""]);
+        else out.push([pair.slice(0, i), pair.slice(i + 1)]);
+      });
+      return out.length ? out : null;
+    }
+    function openDialog(trigger) {
+      var formId = trigger.getAttribute("data-confirm-form");
+      pending = formId ? document.getElementById(formId)
+                       : trigger.closest("form");
+      pendingSet = parseSet(trigger.getAttribute("data-confirm-set"));
+      pendingAction = trigger.getAttribute("data-confirm-action");
+      var name = trigger.getAttribute("data-confirm-name");
+      titleEl.textContent =
+        trigger.getAttribute("data-confirm-title") || "Confirm delete";
+      msg.textContent =
+        trigger.getAttribute("data-confirm-msg")
+        || ("Delete " + (name || "this") + "? This can't be undone.");
+      okBtn.textContent = trigger.getAttribute("data-confirm-label") || "Delete";
+      setOkVariant(trigger.getAttribute("data-confirm-variant"));
       modal.classList.remove("hidden");
       modal.classList.add("flex");
       modal.setAttribute("aria-hidden", "false");
     }
     function closeDialog() {
-      pending = null;
+      pending = null; pendingSet = null; pendingAction = null;
       modal.classList.add("hidden");
       modal.classList.remove("flex");
       modal.setAttribute("aria-hidden", "true");
     }
     document.addEventListener("click", function (e) {
       var t = e.target.closest("[data-confirm-delete]");
-      if (t) {
-        e.preventDefault();
-        openDialog(t.closest("form"), t.getAttribute("data-confirm-name"));
-      }
+      if (t) { e.preventDefault(); openDialog(t); }
     });
-    okBtn.addEventListener("click", function () { if (pending) pending.submit(); });
+    okBtn.addEventListener("click", function () {
+      if (!pending) return;
+      if (pendingAction) pending.setAttribute("action", pendingAction);
+      if (pendingSet) {
+        pendingSet.forEach(function (kv) {
+          var inp = document.createElement("input");
+          inp.type = "hidden";
+          inp.name = kv[0];
+          inp.value = kv[1];
+          pending.appendChild(inp);
+        });
+      }
+      pending.submit();
+    });
     cancelBtn.addEventListener("click", closeDialog);
     modal.addEventListener("click", function (e) { if (e.target === modal) closeDialog(); });
     document.addEventListener("keydown", function (e) {

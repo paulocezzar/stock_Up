@@ -1,0 +1,91 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Recipe import — step 2 (parsed preview + commit) on the Business Performance
+design system (2b). Mirrors recipe_upload_preview.html: summary stats, failed
+sheets, the parsed recipes table, unknown-ingredient and stub-sub-recipe
+callouts, then a commit form that posts to the current URL (the preview route
+self-submits to commit, landing on the detail/list preview). Cancel routes back
+to step 1 via upload_url.
+{% endcomment %}
+{% block title %}Preview import · Recipes · StockUp{% endblock %}
+
+{% block body %}
+{% include "stock/_recipe_bp_styles.html" %}
+
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Preview import</h1>
+  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+    {% if parsed|length == 1 %}{{ parsed.0.code }} · {{ parsed.0.name }}
+    {% else %}{{ parsed|length }} recipes across {{ summary.sheets_processed }} sheet{{ summary.sheets_processed|pluralize }}{% endif %}
+    — nothing is saved until you confirm</p>
+</div>
+
+<div class="rds">
+<div class="stats">
+  <div class="stat"><div class="k">Sheets processed</div><div class="v">{{ summary.sheets_processed }}</div></div>
+  <div class="stat"><div class="k">Recipes parsed</div><div class="v">{{ summary.unique_recipe_codes|default:parsed|length }}</div></div>
+  {% if summary.sheets_failed %}<div class="stat warn"><div class="k">Sheets failed</div><div class="v">{{ summary.sheets_failed }}</div></div>{% endif %}
+  {% if summary.unknown_ingredients %}<div class="stat warn"><div class="k">Unknown ingredients</div><div class="v">{{ summary.unknown_ingredients|length }}</div></div>{% endif %}
+  {% if summary.stub_subrecipes %}<div class="stat warn"><div class="k">Sub-recipe stubs</div><div class="v">{{ summary.stub_subrecipes|length }}</div></div>{% endif %}
+</div>
+
+{% if summary.failures %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>Sheets that failed to parse</h3>
+  <p class="muted" style="margin:0 0 10px">These sheets were skipped — the rest of the workbook imported normally. Common cause: a sheet that isn't actually a Recipe Report (no "Recipe Code:" header).</p>
+  <table>
+    <thead><tr><th>Sheet</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for title, reason in summary.failures %}<tr>
+      <td><code>{{ title }}</code></td>
+      <td class="muted">{{ reason }}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card"><h3>Recipes</h3>
+<table>
+  <thead><tr><th>Code</th><th>Name</th><th class="num">Deposit (g)</th><th class="num">Finished (g)</th><th class="num">Cook loss</th><th class="num">Lines</th></tr></thead>
+  <tbody>
+  {% for r in parsed %}<tr>
+    <td>{{ r.code }}</td>
+    <td>{{ r.name }}</td>
+    <td class="num">{% if r.deposit_weight_g is not None %}{{ r.deposit_weight_g|floatformat:1 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.finished_weight_g is not None %}{{ r.finished_weight_g|floatformat:1 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{{ r.lines|length }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if summary.unknown_ingredients %}
+<div class="card" style="border-left:3px solid var(--red)">
+  <h3>Unknown ingredient codes</h3>
+  <p class="muted" style="margin:0 0 10px">These NPD-I codes aren't in your ingredient master. They'll be created as stub Products so the recipe lines still save — you'll want to add a supplier price for each one.</p>
+  <ul style="margin:0;padding-left:20px;columns:3;column-gap:24px">
+  {% for code in summary.unknown_ingredients %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if summary.stub_subrecipes %}
+<div class="card" style="border-left:3px solid var(--amber)">
+  <h3>Stub sub-recipes</h3>
+  <p class="muted" style="margin:0 0 10px">These NPD-R codes are referenced but don't have their own section anywhere in this workbook. They'll be created as empty shell recipes so the parent's lines still save.</p>
+  <ul style="margin:0;padding-left:20px;columns:3;column-gap:24px">
+  {% for code in summary.stub_subrecipes %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post">{% csrf_token %}
+<p>
+  <button class="btn" type="submit">Confirm and save</button>
+  &nbsp;<a href="{% url upload_url %}" class="muted">cancel and re-upload</a>
+</p>
+</form>
+</div>
+{% endblock %}

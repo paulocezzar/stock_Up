@@ -151,18 +151,25 @@ confirm flows are Phase 2b.
 <p>
   <a href="{% url list_url %}">← all recipes</a>
   &nbsp;·&nbsp;
-  <a href="{% url 'recipe_edit' recipe.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
+  <a href="{% url edit_url recipe.pk %}" class="btn ghost" style="padding:4px 12px">edit</a>
   &nbsp;
   {% if recipe.archived %}
     <form method="post" action="{% url 'recipe_restore' recipe.pk %}" style="display:inline">{% csrf_token %}
-      <input type="hidden" name="next" value="/recipes/">
-      <button class="btn ghost" type="submit" style="padding:4px 12px">restore</button>
+      <input type="hidden" name="next" value="{% url list_url %}">
+      <button class="btn ghost" type="button" style="padding:4px 12px"
+              data-confirm-delete data-confirm-variant="primary" data-confirm-label="Restore"
+              data-confirm-name="{{ recipe.code }}"
+              data-confirm-title="Restore recipe?"
+              data-confirm-msg="Restore {{ recipe.code }} to active? It will reappear in the main lists.">restore</button>
     </form>
   {% else %}
-    <form method="post" action="{% url 'recipe_archive' recipe.pk %}" style="display:inline"
-          onsubmit="return confirm('Archive {{ recipe.code }}? It will be hidden from the main views but kept in the database — restore from the Archived tab anytime.')">{% csrf_token %}
-      <input type="hidden" name="next" value="/recipes/">
-      <button class="btn" type="submit" style="padding:4px 12px">archive</button>
+    <form method="post" action="{% url 'recipe_archive' recipe.pk %}" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="next" value="{% url list_url %}">
+      <button class="btn" type="button" style="padding:4px 12px"
+              data-confirm-delete data-confirm-variant="primary" data-confirm-label="Archive"
+              data-confirm-name="{{ recipe.code }}"
+              data-confirm-title="Archive recipe?"
+              data-confirm-msg="Archive {{ recipe.code }}? Hidden from the main views but kept in the database — restorable from the Archived tab anytime.">archive</button>
     </form>
   {% endif %}
 </p>
@@ -170,7 +177,8 @@ confirm flows are Phase 2b.
 <p class="muted" style="font-size:12px;margin:6px 0 0">Archived{% if recipe.archived_at %} on {{ recipe.archived_at|date:"d M Y, H:i" }}{% endif %} — hidden from main views, restorable any time.</p>
 {% endif %}
 <p style="margin:14px 0 0">
-  <a href="{% url 'recipe_delete' recipe.pk %}" class="muted" style="font-size:12px">Permanently delete this recipe (requires extra confirmation) →</a>
+  <a href="{% url delete_url recipe.pk %}" class="muted" style="font-size:12px">Permanently delete this recipe (requires extra confirmation) →</a>
 </p>
 </div>
+{% include "design_system/components/confirm_dialog.html" %}
 {% endblock %}

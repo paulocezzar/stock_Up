@@ -10,8 +10,11 @@ old-shell CSS tokens (var(--amber) etc.) are rehomed onto a `.rds` wrapper
 with BP light/dark values, and a small compat block styles the old component
 classes (.card/.btn/.tag/.muted/.num/.filter) the BP shell doesn't define.
 Tab + recipe links route through list_url/detail_url so the preview is
-self-contained. Bulk/archive/restore actions point at the real endpoints
-(2b territory) — they redirect to the old shell from the preview, fine here.
+self-contained. 2b wiring: the soft/reversible actions (per-row + bulk
+archive/restore) go through the shared BP confirm_dialog.html (included once
+below); the hard bulk-delete keeps its high-friction typed-code page. All
+bulk/archive/restore/delete targets point at the /recipes-ds-preview/ routes
+so the whole flow stays inside the preview.
 {% endcomment %}
 {% block title %}Recipes · StockUp{% endblock %}
 
@@ -91,9 +94,12 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
   .tree-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px}
 </style>
 
-<div class="mb-5">
-  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Recipes</h1>
-  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{% if view_mode == 'archived' %}{{ n_recipes }} archived{% else %}{{ n_recipes }} active in this department{% endif %} · by-product tree, full list, and archive</p>
+<div class="mb-5 flex items-start justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Recipes</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{% if view_mode == 'archived' %}{{ n_recipes }} archived{% else %}{{ n_recipes }} active in this department{% endif %} · by-product tree, full list, and archive</p>
+  </div>
+  <a href="{% url 'recipe_upload_ds_preview' %}" class="inline-flex h-9 shrink-0 items-center rounded-lg bg-amber-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700">Import</a>
 </div>
 
 <div class="rds">
@@ -110,17 +116,20 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
   The form action defaults to bulk-archive; the Delete button overrides it
   via the HTML5 formaction attribute.
   {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="tree-bulk-form" style="display:none">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_archive_ds_preview' %}" id="tree-bulk-form" style="display:none">{% csrf_token %}</form>
   <div class="tree-actions">
     <button type="button" class="btn ghost" id="tree-select-all" style="padding:4px 12px">Select all products</button>
     <button type="button" class="btn ghost" id="tree-clear" style="padding:4px 12px">Clear</button>
     <span class="muted" id="tree-counter">0 selected</span>
     <span style="flex:1"></span>
-    <button type="submit" form="tree-bulk-form" id="tree-archive-btn" disabled
-            formaction="{% url 'recipe_bulk_archive' %}"
+    <button type="button" id="tree-archive-btn" disabled
+            data-confirm-delete data-confirm-variant="primary" data-confirm-label="Archive"
+            data-confirm-form="tree-bulk-form" data-confirm-set="confirm=1"
+            data-confirm-title="Archive selected recipes?"
+            data-confirm-msg="Archive the selected recipe(s)? They'll be hidden from the main lists but kept and restorable from the Archived tab."
             class="btn" style="padding:4px 14px">Archive selected</button>
     <button type="submit" form="tree-bulk-form" id="tree-delete-btn" disabled
-            formaction="{% url 'recipe_bulk_delete' %}"
+            formaction="{% url 'recipe_bulk_delete_ds_preview' %}"
             class="btn danger" style="padding:4px 14px">Delete selected</button>
   </div>
   <div class="tree-warnings" id="tree-warnings" hidden></div>
@@ -314,8 +323,7 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
     <span class="count-out"></span>
   </div>
   {% comment %} Bulk-restore form lives OUTSIDE the table; checkboxes attach via form= {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_restore' %}" id="bulk-form" style="display:none"
-        onsubmit="return confirm('Restore the selected recipe(s) to active?')">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_restore_ds_preview' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
       <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all archived recipes"></th>
@@ -345,8 +353,12 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
         <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>
           <form method="post" action="{% url 'recipe_restore' r.pk %}" style="display:inline">{% csrf_token %}
-            <input type="hidden" name="next" value="/recipes/?view=archived">
-            <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">restore</button>
+            <input type="hidden" name="next" value="{% url list_url %}?view=archived">
+            <button class="btn ghost" type="button" style="padding:3px 10px;font-size:11px"
+                    data-confirm-delete data-confirm-variant="primary" data-confirm-label="Restore"
+                    data-confirm-name="{{ r.code }}"
+                    data-confirm-title="Restore recipe?"
+                    data-confirm-msg="Restore {{ r.code }} to active? It will reappear in the main lists.">restore</button>
           </form>
         </td>
       </tr>
@@ -355,8 +367,11 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
     </tbody>
   </table>
   <p style="margin:10px 0 0">
-    <button class="btn" type="submit" form="bulk-form" id="bulk-action-btn"
-            disabled style="padding:4px 12px">Restore selected</button>
+    <button class="btn" type="button" id="bulk-action-btn" disabled style="padding:4px 12px"
+            data-confirm-delete data-confirm-variant="primary" data-confirm-label="Restore"
+            data-confirm-form="bulk-form"
+            data-confirm-title="Restore selected recipes?"
+            data-confirm-msg="Restore the selected recipe(s) to active? They'll reappear in the main lists.">Restore selected</button>
     <span class="muted" style="font-size:12px;margin-left:8px" id="bulk-count">0 selected</span>
   </p>
   <p class="muted" style="margin:10px 0 0;font-size:12px">Archived recipes keep all their data; restoring is a one-click flip. The deploy-time re-import refreshes their basics but won't bring them back to active on its own.</p>
@@ -404,7 +419,7 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
   per-row Sold-toggle / archive forms. Checkboxes and the submit button
   attach via the HTML5 form="bulk-form" attribute.
   {% endcomment %}
-  <form method="post" action="{% url 'recipe_bulk_archive' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
+  <form method="post" action="{% url 'recipe_bulk_archive_ds_preview' %}" id="bulk-form" style="display:none">{% csrf_token %}</form>
   <table id="recipes-tbl">
     <thead><tr>
       <th style="width:24px"><input type="checkbox" id="bulk-all" aria-label="Select all recipes"></th>
@@ -445,10 +460,13 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
         <td class="num">{% if r.finished_weight_g %}{{ r.finished_weight_g|floatformat:0 }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{% if r.cook_loss_pct is not None %}{{ r.cook_loss_pct|floatformat:2 }}%{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>
-          <form method="post" action="{% url 'recipe_archive' r.pk %}" style="display:inline"
-                onsubmit="return confirm('Archive {{ r.code|escapejs }}? Hidden from main views; restorable from the Archived tab.')">{% csrf_token %}
-            <input type="hidden" name="next" value="/recipes/?view=flat">
-            <button class="btn ghost" type="submit" style="padding:3px 10px;font-size:11px">archive</button>
+          <form method="post" action="{% url 'recipe_archive' r.pk %}" style="display:inline">{% csrf_token %}
+            <input type="hidden" name="next" value="{% url list_url %}?view=flat">
+            <button class="btn ghost" type="button" style="padding:3px 10px;font-size:11px"
+                    data-confirm-delete data-confirm-variant="primary" data-confirm-label="Archive"
+                    data-confirm-name="{{ r.code }}"
+                    data-confirm-title="Archive recipe?"
+                    data-confirm-msg="Archive {{ r.code }}? Hidden from the main views; restorable from the Archived tab.">archive</button>
           </form>
         </td>
       </tr>
@@ -457,8 +475,11 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
     </tbody>
   </table>
   <p style="margin:10px 0 0">
-    <button class="btn" type="submit" form="bulk-form" id="bulk-action-btn"
-            disabled style="padding:4px 12px">Archive selected</button>
+    <button class="btn" type="button" id="bulk-action-btn" disabled style="padding:4px 12px"
+            data-confirm-delete data-confirm-variant="primary" data-confirm-label="Archive"
+            data-confirm-form="bulk-form" data-confirm-set="confirm=1"
+            data-confirm-title="Archive selected recipes?"
+            data-confirm-msg="Archive the selected recipe(s)? They'll be hidden from the main lists but kept and restorable from the Archived tab.">Archive selected</button>
     <span class="muted" style="font-size:12px;margin-left:8px" id="bulk-count">0 selected</span>
   </p>
   <p class="muted" style="margin:10px 0 0;font-size:12px">"Sold" defaults to true for recipes nothing else uses, false for components. Archiving hides a recipe from main views; restore from the Archived tab.</p>
@@ -497,4 +518,5 @@ self-contained. Bulk/archive/restore actions point at the real endpoints
   {% endif %}
 {% endif %}
 </div>
+{% include "design_system/components/confirm_dialog.html" %}
 {% endblock %}

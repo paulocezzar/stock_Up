@@ -1,0 +1,65 @@
+{% extends "design_system/base.html" %}
+{% comment %}
+Recipe edit (basic fields) on the Business Performance design system (2b).
+Same fields as recipe_edit.html — name, finished/deposit weight, cook loss,
+sold checkbox — and the same import-lock helper note. The form posts to the
+current URL (the preview route renders it, so it self-submits) and the cancel
+link routes through detail_url so the preview stays self-contained.
+{% endcomment %}
+{% block title %}Edit {{ recipe.code }} · Recipes · StockUp{% endblock %}
+
+{% block body %}
+{% include "stock/_recipe_bp_styles.html" %}
+
+<div class="mb-5">
+  <h1 class="font-display text-2xl font-semibold tracking-normal text-slate-950 dark:text-slate-100">Edit recipe</h1>
+  <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{{ recipe.code }} · {{ recipe.name }} — basic fields only</p>
+</div>
+
+<div class="rds">
+<form method="post">{% csrf_token %}
+<div class="card"><h3>Basic fields</h3>
+  <div class="row">
+    <div class="field" style="flex:1"><label>Name *</label>
+      <input type="text" name="name" value="{{ form.name }}" required
+             autofocus style="width:100%;max-width:480px">
+      {% if errors.name %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.name }}</p>{% endif %}
+    </div>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <div class="field"><label>Finished weight (g)</label>
+      <input type="text" name="finished_weight_g" value="{{ form.finished_weight_g }}"
+             inputmode="decimal" style="width:160px">
+      {% if errors.finished_weight_g %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.finished_weight_g }}</p>{% endif %}
+    </div>
+    <div class="field"><label>Deposit weight (g)</label>
+      <input type="text" name="deposit_weight_g" value="{{ form.deposit_weight_g }}"
+             inputmode="decimal" style="width:160px">
+      {% if errors.deposit_weight_g %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.deposit_weight_g }}</p>{% endif %}
+    </div>
+    <div class="field"><label>Cook loss %</label>
+      <input type="text" name="cook_loss_pct" value="{{ form.cook_loss_pct }}"
+             inputmode="decimal" style="width:120px">
+      {% if errors.cook_loss_pct %}<p class="muted" style="color:var(--red);font-size:12px;margin:4px 0 0">{{ errors.cook_loss_pct }}</p>{% endif %}
+    </div>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <div class="field">
+      <label style="display:inline-flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
+        <input type="checkbox" name="sold_as_product" {% if form.sold_as_product %}checked{% endif %}>
+        Sold as a standalone product
+      </label>
+    </div>
+  </div>
+</div>
+<p>
+  <button class="btn" type="submit">Save changes</button>
+  &nbsp;<a href="{% url detail_url recipe.pk %}" class="muted">cancel</a>
+</p>
+</form>
+
+<p class="muted" style="font-size:12px;margin:14px 0 0;max-width:640px">
+  Saving locks these fields against the next bulk re-import — your edits will not be overwritten when the workbook is re-imported on deploy. Recipe lines (ingredients and sub-recipes) still rebuild from the workbook on each import. Editing those will land in a later stage.
+</p>
+</div>
+{% endblock %}

@@ -2708,7 +2708,7 @@ class RecipesDsPreviewTests(TestCase):
         self.assertIn('id="tree-recipe-meta"', body)
         self.assertIn('class="tree-cb"', body)
         self.assertIn('id="tree-bulk-form"', body)
-        self.assertIn('formaction="/recipes/bulk-delete/"', body)
+        self.assertIn('formaction="/recipes-ds-preview/bulk-delete/"', body)
         # Tabs use class="on" active markup; recipe links self-link to preview.
         self.assertRegex(body, r'href="/recipes-ds-preview/"[^>]*class="on"')
         self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/"', body)
@@ -2743,6 +2743,182 @@ class RecipesDsPreviewTests(TestCase):
         self.assertIn(f'href="/recipes-ds-preview/{self.dough.pk}/"', body)
         # Structure tab active; flat tab links within the preview.
         self.assertRegex(body, r'\?view=flat"')
+
+
+class RecipesDs2bPreviewTests(TestCase):
+    """Recipes 2b — edit / upload / confirm flows rebuilt on the design system,
+    exercised via the /recipes-ds-preview/* routes. Verifies the BP templates
+    render, the soft (archive/restore) actions are wired to the shared confirm
+    dialog, the hard-delete pages keep their typed-code guard, and that every
+    flow actually commits against the preview routes (not just renders).
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(name="Bakery")
+        U = get_user_model()
+        self.user = U.objects.create_user("alice", password="pw")
+        self.dept.members.add(self.user)
+        self.client = Client()
+        assert self.client.login(username="alice", password="pw")
+        self.client.get(f"/switch/{self.dept.pk}/")
+        self.flour = Product.objects.create(
+            name="Flour", code="NPD-I1", department=self.dept, unit="g", minimum=0)
+        self.loaf = Recipe.objects.create(
+            code="NPD-R800", name="Sourdough Loaf", department=self.dept,
+            sold_as_product=True, finished_weight_g=Decimal("600"))
+        self.dough = Recipe.objects.create(
+            code="NPD-R100", name="Sourdough Dough", department=self.dept)
+        RecipeLine.objects.create(recipe=self.loaf, sub_recipe=self.dough,
+                                  weight_g=Decimal("700"))
+        RecipeLine.objects.create(recipe=self.dough, ingredient=self.flour,
+                                  weight_g=Decimal("500"))
+
+    # --- edit -------------------------------------------------------------
+    def test_edit_preview_renders_bp_form_with_fields_and_lock_note(self):
+        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/edit/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('name="name"', body)
+        self.assertIn('name="finished_weight_g"', body)
+        self.assertIn('name="deposit_weight_g"', body)
+        self.assertIn('name="cook_loss_pct"', body)
+        self.assertIn('name="sold_as_product"', body)
+        # The import-lock helper note is preserved.
+        self.assertIn("locks these fields against the next bulk re-import", body)
+        # Cancel returns to the detail preview.
+        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/"', body)
+
+    def test_edit_preview_saves_and_sets_manual_flags(self):
+        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/edit/", {
+            "name": "Renamed Loaf", "finished_weight_g": "650",
+            "deposit_weight_g": "", "cook_loss_pct": "12.5",
+            "sold_as_product": "on"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], f"/recipes-ds-preview/{self.loaf.pk}/")
+        self.loaf.refresh_from_db()
+        self.assertEqual(self.loaf.name, "Renamed Loaf")
+        self.assertEqual(self.loaf.finished_weight_g, Decimal("650"))
+        self.assertTrue(self.loaf.is_basic_manual)
+        self.assertTrue(self.loaf.is_sold_manual)
+
+    # --- upload (two-step, real parse→preview→commit via preview routes) ---
+    def test_upload_step1_renders_bp(self):
+        r = self.client.get("/recipes-ds-preview/upload/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('name="file"', body)
+        self.assertIn('enctype="multipart/form-data"', body)
+        self.assertIn('href="/recipes-ds-preview/"', body)  # cancel
+
+    def test_upload_chain_commits_via_preview_routes(self):
+        for code, name in (("NPD-I10758", "Bread Flour"), ("NPD-I10756", "Water")):
+            Product.objects.create(code=code, name=name, department=self.dept,
+                                   unit="g", minimum=0)
+        with open(SAMPLE_RECIPE_XLSX, "rb") as f:
+            upload = SimpleUploadedFile(
+                "recipe_sample.xlsx", f.read(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        r = self.client.post("/recipes-ds-preview/upload/", {"file": upload})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/upload/preview/")
+        # Nothing committed yet; sample-only recipe absent.
+        self.assertFalse(Recipe.objects.filter(code="NPD-R364").exists())
+        r = self.client.get("/recipes-ds-preview/upload/preview/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn("NPD-R800", body)
+        self.assertIn("Unknown ingredient", body)
+        # Commit — single-sheet sample lands on the main recipe detail preview.
+        r = self.client.post("/recipes-ds-preview/upload/preview/", {})
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(Recipe.objects.filter(code="NPD-R364").exists())
+        main = Recipe.objects.get(code="NPD-R800")
+        self.assertEqual(r.headers["Location"], f"/recipes-ds-preview/{main.pk}/")
+
+    # --- hard delete (single) keeps the typed-code guard -------------------
+    def test_delete_confirm_preview_renders_guard_and_commits(self):
+        r = self.client.get(f"/recipes-ds-preview/{self.loaf.pk}/delete/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('id="hard-delete-ack"', body)
+        self.assertIn('id="hard-delete-code"', body)
+        self.assertIn("disabled", body)  # button starts disabled
+        # Commit with the acknowledge + typed code.
+        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/delete/",
+                             {"acknowledge": "on", "confirm_code": "NPD-R800"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/")
+        self.assertFalse(Recipe.objects.filter(code="NPD-R800").exists())
+        self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R800").exists())
+
+    def test_delete_confirm_preview_blocks_without_typed_code(self):
+        r = self.client.post(f"/recipes-ds-preview/{self.loaf.pk}/delete/",
+                             {"acknowledge": "on", "confirm_code": "WRONG"})
+        self.assertEqual(r.status_code, 200)  # re-renders with error
+        self.assertTrue(Recipe.objects.filter(code="NPD-R800").exists())
+
+    # --- hard delete (bulk) keeps the typed-code page ----------------------
+    def test_bulk_delete_preview_typed_code_page_then_commit(self):
+        r = self.client.post("/recipes-ds-preview/bulk-delete/",
+                             {"recipe_ids": [self.dough.pk]})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<main class="ml-64 min-w-0">', body)
+        self.assertIn('id="bulk-hard-delete-ack"', body)
+        self.assertIn("Type", body)
+        self.assertIn('action="/recipes-ds-preview/bulk-delete/"', body)
+        # Loaf references dough → surfaced as an external parent.
+        self.assertIn("NPD-R800", body)
+        r = self.client.post("/recipes-ds-preview/bulk-delete/", {
+            "recipe_ids": [self.dough.pk], "confirm": "1",
+            "acknowledge": "on", "confirm_phrase": "DELETE"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.assertFalse(Recipe.objects.filter(code="NPD-R100").exists())
+        self.assertTrue(SuppressedRecipe.objects.filter(code="NPD-R100").exists())
+
+    # --- soft archive / restore (dialog, confirm=1 / single-step) ----------
+    def test_bulk_archive_preview_commits_with_confirm(self):
+        r = self.client.post("/recipes-ds-preview/bulk-archive/", {
+            "recipe_ids": [self.loaf.pk], "confirm": "1"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.loaf.refresh_from_db()
+        self.assertTrue(self.loaf.archived)
+
+    def test_bulk_restore_preview_commits(self):
+        self.loaf.archived = True
+        self.loaf.save(update_fields=["archived"])
+        r = self.client.post("/recipes-ds-preview/bulk-restore/",
+                             {"recipe_ids": [self.loaf.pk]})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers["Location"], "/recipes-ds-preview/?view=flat")
+        self.loaf.refresh_from_db()
+        self.assertFalse(self.loaf.archived)
+
+    # --- dialog wiring on list + detail ------------------------------------
+    def test_flat_list_wires_archive_to_dialog(self):
+        body = self.client.get("/recipes-ds-preview/?view=flat").content.decode()
+        self.assertIn('data-testid="confirm-dialog"', body)
+        self.assertIn('action="/recipes-ds-preview/bulk-archive/"', body)
+        # The per-row + bulk archive triggers use the dialog as a reversible
+        # (primary) action, not a delete.
+        self.assertIn("data-confirm-delete", body)
+        self.assertIn('data-confirm-variant="primary"', body)
+        self.assertIn('data-confirm-label="Archive"', body)
+
+    def test_detail_wires_archive_and_links_to_preview_edit_delete(self):
+        body = self.client.get(
+            f"/recipes-ds-preview/{self.loaf.pk}/").content.decode()
+        self.assertIn('data-testid="confirm-dialog"', body)
+        self.assertIn("data-confirm-delete", body)
+        self.assertIn('data-confirm-variant="primary"', body)
+        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/edit/"', body)
+        self.assertIn(f'href="/recipes-ds-preview/{self.loaf.pk}/delete/"', body)
 
 
 class RecipesSectionViewTests(TestCase):
