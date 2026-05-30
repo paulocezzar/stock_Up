@@ -617,6 +617,17 @@ class WaveARebuildTests(TestCase):
         self.assertIn("dropped bag", body)
         self.assertIn("−3", body)   # reducing reason renders with a leading minus
 
+    def test_adjustments_preview_post_round_trips_to_preview(self):
+        # Logging from the preview returns to the preview (so the new row
+        # shows there); the live page still redirects to itself.
+        r = self.client.post("/adjustments-preview/", {
+            "product": str(self.flour.pk), "quantity": "2", "reason": "waste"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], "/adjustments-preview/")
+        r2 = self.client.post("/adjustments/", {
+            "product": str(self.flour.pk), "quantity": "2", "reason": "waste"})
+        self.assertEqual(r2["Location"], "/adjustments/")
+
     def test_reorder_preview_preserves_editable_qty_and_csv_form(self):
         r = self.client.get("/reorder-preview/")
         self.assertEqual(r.status_code, 200)

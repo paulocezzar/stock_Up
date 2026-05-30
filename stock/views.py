@@ -1536,7 +1536,8 @@ def deliveries(request):
 
 
 @login_required
-def adjustments(request, template_name="stock/adjustments.html"):
+def adjustments(request, template_name="stock/adjustments.html",
+                redirect_route="adjustments"):
     dept = current_department(request)
     if dept is None:
         return render(request, "stock/no_department.html")
@@ -1550,7 +1551,7 @@ def adjustments(request, template_name="stock/adjustments.html"):
         valid_reasons = {k for k, _ in Adjustment.REASON_CHOICES}
         if not product or qty is None or qty <= 0 or reason not in valid_reasons:
             messages.error(request, "Pick an ingredient, a positive quantity, and a reason.")
-            return redirect("adjustments")
+            return redirect(redirect_route)
         try:
             d = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
         except ValueError:
@@ -1561,7 +1562,7 @@ def adjustments(request, template_name="stock/adjustments.html"):
         )
         label = dict(Adjustment.REASON_CHOICES)[reason]
         messages.success(request, f"Logged {label.lower()} of {qty} for {product.name}.")
-        return redirect("adjustments")
+        return redirect(redirect_route)
     log = list(dept.adjustments.select_related("product", "user")
                .order_by("-date", "-id")[:100])
     return render(request, template_name, {
@@ -1575,8 +1576,11 @@ def adjustments(request, template_name="stock/adjustments.html"):
 
 @login_required
 def adjustments_preview(request):
-    """TEMPORARY design-system preview of the Adjustments page. Remove on cutover."""
-    return adjustments(request, template_name="stock/adjustments_bp.html")
+    """TEMPORARY design-system preview of the Adjustments page. Logging an
+    adjustment round-trips back to the preview (not the live page) so the
+    form + log panel can be reviewed end-to-end. Remove on cutover."""
+    return adjustments(request, template_name="stock/adjustments_bp.html",
+                       redirect_route="adjustments_preview")
 
 
 @login_required
